@@ -9,6 +9,12 @@ iconography, images or other Adobe assets; open licences only; every asset attri
 
 | Asset | Author | Source | Licence |
 |---|---|---|---|
+| `apps/clipcut/icons/32x32.png` | ClipCut contributors | Original work: ClipCut app icon, drawn by `packaging/clipcut/icon.py` | MIT OR Apache-2.0 |
+| `apps/clipcut/icons/128x128.png` | ClipCut contributors | Original work: ClipCut app icon, drawn by `packaging/clipcut/icon.py` | MIT OR Apache-2.0 |
+| `apps/clipcut/icons/128x128@2x.png` | ClipCut contributors | Original work: ClipCut app icon, drawn by `packaging/clipcut/icon.py` | MIT OR Apache-2.0 |
+| `apps/clipcut/icons/icon.png` | ClipCut contributors | Original work: ClipCut app icon, drawn by `packaging/clipcut/icon.py` | MIT OR Apache-2.0 |
+| `apps/clipcut/icons/icon.ico` | ClipCut contributors | Original work: ClipCut app icon, drawn by `packaging/clipcut/icon.py` | MIT OR Apache-2.0 |
+| `apps/clipcut/ui/logo.png` | ClipCut contributors | Original work: ClipCut app icon (copy of `apps/clipcut/icons/128x128.png`) shown in the top bar | MIT OR Apache-2.0 |
 | `crates/ui-egui/src/i18n/it.tsv` | FilmCraft contributors | Original work: clean-room Italian interface translations | MIT OR Apache-2.0 |
 | `crates/ui-egui/src/i18n/id.tsv` | FilmCraft contributors | Original work: clean-room Indonesian interface translations | MIT OR Apache-2.0 |
 | `crates/ui-egui/src/i18n/ko.tsv` | FilmCraft contributors | Original work: clean-room Korean interface translations | MIT OR Apache-2.0 |

@@ -1,0 +1,7 @@
+asset:        32x32.png
+title:        ClipCut app icon (32 px)
+author:       ClipCut contributors (drawn in code by Claude, agent, for portdel18)
+source:       original work: packaging/clipcut/icon.py draws it (an amber C ring around a spliced play triangle)
+license:      MIT OR Apache-2.0
+added:        2026-10-17 by Claude (agent) for portdel18
+notes:        Regenerate with `python3 packaging/clipcut/icon.py apps/clipcut/icons` (needs Pillow).
