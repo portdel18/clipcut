@@ -6,3 +6,6 @@ plan/
 .DS_Store
 .claude/worktrees/
 __pycache__/
+
+# Tauri-generated schemas (rebuilt by tauri-build)
+/apps/clipcut/gen/

@@ -1,27 +1,53 @@
-# FilmCraft — instructions for agents
+# ClipCut — instructions for agents
 
-FilmCraft is a clean-room, open-source, pure-Rust non-linear video editor targeting Adobe Premiere Pro parity (and beyond). Native on macOS, Windows, Linux; web via WASM. Sibling of `../photocraft` (Photoshop), `../pdfcraft` (Acrobat) and `../vectorcraft` (Illustrator; formerly DrawCraft), with the same conventions.
+ClipCut is a Windows-first desktop video editor with a CapCut-style interface, built on a fork of
+FilmCraft (a clean-room, pure-Rust editing engine; upstream: https://github.com/storytold/filmcraft,
+remote `upstream`). Read `README.md` for what it is and the roadmap.
 
-## Start every session here
-`plan/` is maintainer-local (gitignored, not in the repo). Each step names the public equivalent to use if you don't have it.
-1. Read `plan/STATUS.md` (current milestone, next unchecked task, blockers). Public: [`ROADMAP.md`](ROADMAP.md), then [`docs/gaps.md`](docs/gaps.md) (ranked shortfalls) and [`docs/roadmap.md`](docs/roadmap.md) (current focus).
-2. Read the task in `plan/execution-plan.md` §3, the relevant section of `plan/architecture.md`, and the README/docs of the crate you touch. Public: [`docs/architecture.md`](docs/architecture.md), [`docs/contributing.md`](docs/contributing.md), [`docs/testing.md`](docs/testing.md). Visual/behaviour reference: `plan/premiere/` (local only, never committed).
-3. Follow the autonomous operation protocol (`plan/execution-plan.md` §7; public summary: [`docs/agents.md`](docs/agents.md) §5–7). Don't stop to ask unless it lists the decision as the user's.
+## Where things live
+- `crates/*` except `clipcut-*`: FilmCraft's engine. **Change it as little as possible** so upstream
+  improvements keep merging (`git fetch upstream && git merge upstream/main`). When the engine needs a
+  fix, make it small and self-contained, ideally something upstream would accept.
+- `crates/clipcut-core` (layer 5): the engine operations the app uses (open a clip, preview frames,
+  playback audio, export jobs), all through engine commands (`Session::execute`). No UI toolkit here.
+  Tested against clips ffmpeg generates (`cargo test -p clipcut-core`).
+- `apps/clipcut` (layer 6): the Tauri app. `src/main.rs` holds the commands the interface invokes,
+  `src/playback.rs` the audio output (the sound card is the playback clock), `ui/` the interface in
+  plain HTML/CSS/JS with **no build step** (`window.__TAURI__` globals). Engine work stays in Rust; the
+  interface only asks for it. `--self-test <in> <out> <report.json>` runs open/preview/sound/export
+  without a window (CI runs it on Windows).
+- Clip Studio (https://github.com/portdel18/clip-stu) joins in Phase 2 as the Graphics tab.
+- `.github/workflows/clipcut-windows.yml`: tests, the NSIS installer, the self-test, the artifact.
+
+## Running and looking at the app
+- Linux needs the Tauri system libraries (see README). Under a headless session:
+  `xvfb-run -s "-screen 0 1600x1000x24" target/debug/clipcut clip.mp4` and screenshot with
+  `import -window root shot.png`. **Look at the result** after interface changes.
+- The user tests on Windows with real footage; CI is the only Windows build here.
+- Interface copy: plain words from the user's side, errors that say what went wrong and how to fix it.
+  One dark theme from the tokens at the top of `ui/app.css`; amber (`--accent`) marks the active thing.
+- Branding: ClipCut's own name and icon (`packaging/clipcut/icon.py`). Never ArtCraft/FilmCraft
+  branding in the app, and never CapCut's (or anyone's) artwork: "CapCut-style" means layout and feel.
+
+## FilmCraft's own workflow (for engine work)
+`plan/` is maintainer-local in FilmCraft and absent here; use the public docs: [`ROADMAP.md`](ROADMAP.md),
+[`docs/gaps.md`](docs/gaps.md), [`docs/architecture.md`](docs/architecture.md),
+[`docs/contributing.md`](docs/contributing.md), [`docs/testing.md`](docs/testing.md).
 
 ## Non-negotiables
 **Read [`AGENTS.md`](AGENTS.md) first; its rules override everything here.**
 - **Never crash** ([`AGENTS.md`](AGENTS.md) §0, standard: [`craftrules/standards/never-crash.md`](https://github.com/storytold/craftrules/blob/main/standards/never-crash.md)). People depend on FilmCraft; a crash loses their work, so this outranks feature work. No `unwrap`/`expect`/`panic!`/`unreachable!`/`todo!`/`unimplemented!` or `unsafe` outside tests: return `Result<T, E>` and propagate with `?` (`ok_or`, `let … else`, `if let`). Treat every number from media, project files, presets or CLI/MCP/control params as hostile: `get()` instead of `[i]`, checked/saturating math, no division by possibly-zero values, capped allocations, bounded recursion. `lock().unwrap_or_else(PoisonError::into_inner)`; background jobs run under `catch_unwind`. The panic hook + UI `catch_unwind` (`crates/ui-egui/src/crash.rs`) are the last-resort guard, not a licence. Every crash fix gets a regression test that panicked before. In particular (§1): never use Adobe iconography, images or any other Adobe asset. Every asset must be openly licensed (OSS / public domain / Creative Commons, or original work by a contributor) and must have a `<file>.attribution` sidecar plus an entry in `ATTRIBUTION.md`. `cargo xtask assets` enforces this.
 - **Fonts** live in [storytold/craft-fonts](https://github.com/storytold/craft-fonts), never in this repo (no new font files here; [`AGENTS.md`](AGENTS.md) §1.9, standard: [`craftrules/standards/fonts.md`](https://github.com/storytold/craftrules/blob/main/standards/fonts.md)). Build with them: `git clone https://github.com/storytold/craft-fonts ../craft-fonts && CRAFT_FONTS_DIR="$PWD/../craft-fonts" cargo run -p filmcraft` (`crates/text/build.rs` embeds them as `filmcraft_text::fonts::CRAFT_FONTS`, used for Japanese in the UI and titles). Unset, `CRAFT_FONTS` is empty and everything must still build, test and run; never add craft-fonts to a `Cargo.toml`. Tests on its glyphs skip when it is empty, so run the gates with and without `CRAFT_FONTS_DIR` when you touch fonts.
 - **Clean-room.** Never read/disassemble anything inside Adobe app bundles (names/listings only). Never copy Adobe icons, presets, LUTs, fonts. Never copy GPL/LGPL/AGPL code (FFmpeg, x264, x265, MLT, Kdenlive, Shotcut, Olive, LAME…). ffmpeg/ffprobe run only as external test oracles / fixture generators — never linked or shipped.
-- **Pure Rust** in the product. OS media APIs only via Rust bindings in `crates/platform` (hardware decoding; the one crate allowed `unsafe`, see `AGENTS.md` §0.3 and `docs/adr/0001-platform-ffi.md`), optional, behind traits, with our decoders as the fallback.
+- **Pure Rust** in the engine (ClipCut's interface in `apps/clipcut/ui` is the one exception: HTML/JS shown by the system WebView through Tauri). OS media APIs only via Rust bindings in `crates/platform` (hardware decoding; the one crate allowed `unsafe`, see `AGENTS.md` §0.3 and `docs/adr/0001-platform-ffi.md`), optional, behind traits, with our decoders as the fallback.
 - **Layering** ([`docs/architecture.md`](docs/architecture.md) §1, enforced by `cargo xtask layers`): nothing below L5 depends on egui/eframe/winit/rfd/cpal. L0 codec/container crates depend only on `filmcraft-bitstream`.
 - **Exact time:** all time is `filmcraft_time::Tick` (254 016 000 000/s). Never use f64 seconds for edit math.
 - **Everything is a command** (`crates/engine`): id, label, menu path, shortcut, params, enabled(), run(). UI, CLI, control channel and MCP all dispatch by id.
 - **Everything is agent-drivable:** every interactive widget registers an automation id; UI state is serde so the control channel can read/set it.
-- **Quality gates** before every commit: `cargo fmt --check`, `cargo clippy --workspace --all-targets -- -D warnings`, `cargo test --workspace`, `cargo xtask layers`, `cargo xtask assets`, `cargo xtask wasm` (checks L0–L4 crates). `cargo xtask ci` runs them all.
+- **Quality gates** before every commit (ClipCut: at least fmt, clippy and tests on the crates you touched, `cargo xtask layers` and `cargo xtask assets`): `cargo fmt --check`, `cargo clippy --workspace --all-targets -- -D warnings`, `cargo test --workspace`, `cargo xtask layers`, `cargo xtask assets`, `cargo xtask wasm` (checks L0–L4 crates). `cargo xtask ci` runs them all.
 - **Commits:** one task id per commit (`M2.4: CABAC residual decoding`). Only green states. End messages with the attribution line required by the environment.
 
-## Running and looking at the app
+## Running FilmCraft's own app (engine work)
 - `cargo run -p filmcraft -- --control 9876` opens the desktop app with the JSON-lines control server (see `docs/control-protocol.md`).
 - For UI work, **look at the result**: drive via the control channel and take `ui.screenshot`, compare with `plan/premiere/screenshots/` (maintainer-local; see [`docs/agents.md`](docs/agents.md) §3).
 - Parallel agents: separate git worktrees and `CARGO_TARGET_DIR=target/agent-<name>`; keep every `Cargo.toml` valid at all times (the `crates/*` glob means one broken manifest breaks everyone).

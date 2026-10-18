@@ -22,8 +22,8 @@ Design principles:
 ## 1. Layers
 
 ```text
- L6  apps/filmcraft · apps/filmcraft-cli · apps/filmcraft-web
- L5  ui-egui · automation · platform
+ L6  apps/filmcraft · apps/filmcraft-cli · apps/filmcraft-web · apps/clipcut (ClipCut)
+ L5  ui-egui · automation · platform · clipcut-core (ClipCut)
  L4  engine
  L3  render · gpu · export · golden (test-only)
  L2  edit · codecs · interchange · captions · speech · tts · tts-text
@@ -82,6 +82,8 @@ and `filmcraft-cli`.
 | `filmcraft` | L6 | desktop binary: eframe/wgpu window, cpal audio output, file dialogs, native macOS menu, TCP control server |
 | `filmcraft-cli` | L6 | headless CLI: `exec`, `run`, `inspect`, `describe`, `commands`, `import`, `export`, `render`, `probe`, `mcp`; `--bridge` targets the running app |
 | `filmcraft-web` | L6 | the browser app (wasm32): eframe web runner on WebGPU/WebGL2, Blob-backed services, OPFS recovery, WebAudio, WebCodecs, `window.filmcraft` API ([web.md](web.md)) |
+| `clipcut-core` | L5 | ClipCut's engine façade: open a clip as a sequence, preview frames, playback audio feeds, export jobs, all through engine commands; no UI toolkit |
+| `clipcut` | L6 | ClipCut's desktop app (Tauri): Rust commands over `clipcut-core`, cpal playback clock, the HTML/JS interface in `apps/clipcut/ui` |
 
 ### What `cargo xtask layers` enforces
 

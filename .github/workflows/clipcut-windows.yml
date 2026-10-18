@@ -1,0 +1,69 @@
+# ClipCut for Windows: tests the engine façade, builds the app and its installer, runs the
+# packaged app's self-test (open, preview, sound, export) on Windows, and uploads the installer.
+name: ClipCut Windows
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: clipcut-windows-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    timeout-minutes: 150
+    env:
+      CARGO_TERM_COLOR: always
+      CARGO_INCREMENTAL: "0"
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Rust toolchain
+        run: |
+          rustup update stable --no-self-update
+          rustup default stable
+          rustc --version
+
+      - name: Cache cargo builds
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: clipcut-windows
+
+      - name: ffmpeg (test clips only; never shipped)
+        run: choco install ffmpeg --no-progress -y
+
+      - name: Test clipcut-core
+        run: cargo test --release -p clipcut-core
+
+      - name: Build ClipCut and its installer
+        working-directory: apps/clipcut
+        run: npx --yes @tauri-apps/cli@2 build --ci
+
+      - name: Self-test the packaged app
+        shell: pwsh
+        run: |
+          $clip = "$env:RUNNER_TEMP\selftest-in.mp4"
+          ffmpeg -v error -y -f lavfi -i "testsrc2=size=1280x720:rate=30:duration=5" -f lavfi -i "sine=frequency=440:duration=5:sample_rate=48000" -c:v libx264 -pix_fmt yuv420p -c:a aac -shortest $clip
+          # Cargo builds clipcut.exe; the Tauri CLI may name it after the product
+          $exe = @("target\release\ClipCut.exe", "target\release\clipcut.exe") | Where-Object { Test-Path $_ } | Select-Object -First 1
+          if (-not $exe) { throw "the built app was not found in target\release" }
+          $p = Start-Process -FilePath $exe -ArgumentList "--self-test", $clip, "$env:RUNNER_TEMP\selftest-out.mp4", "selftest-report.json" -Wait -PassThru -NoNewWindow
+          Get-Content selftest-report.json
+          if ($p.ExitCode -ne 0) { throw "self-test failed (exit $($p.ExitCode))" }
+
+      - name: Upload the installer
+        uses: actions/upload-artifact@v4
+        with:
+          name: ClipCut-windows-installer
+          path: |
+            target/release/bundle/nsis/*.exe
+            selftest-report.json
+          if-no-files-found: error
+          retention-days: 30

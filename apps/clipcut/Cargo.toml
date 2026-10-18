@@ -1,0 +1,31 @@
+[package]
+name = "clipcut"
+description = "ClipCut: a CapCut-style desktop video editor on the FilmCraft engine"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[lints]
+workspace = true
+
+[[bin]]
+name = "clipcut"
+path = "src/main.rs"
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+clipcut-core = { workspace = true }
+filmcraft-export = { workspace = true }
+filmcraft-gpu = { workspace = true }
+filmcraft-platform = { workspace = true }
+filmcraft-project = { workspace = true }
+filmcraft-render = { workspace = true }
+filmcraft-time = { workspace = true }
+tauri = { version = "2", features = [] }
+tauri-plugin-dialog = "2"
+cpal = "0.16"
+serde = { workspace = true }
+serde_json = { workspace = true }

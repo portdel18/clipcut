@@ -84,9 +84,11 @@ const LAYERS: &[(&str, u8)] = &[
     ("platform", 5),
     ("ui-egui", 5),
     ("automation", 5),
+    ("clipcut-core", 5),
     ("filmcraft", 6),
     ("cli", 6),
     ("web", 6),
+    ("clipcut", 6),
 ];
 
 /// L0 crates that are not codecs/containers (no `bitstream`-only restriction).
@@ -109,7 +111,7 @@ const SAME_LAYER: &[(&str, &str)] = &[
 ];
 
 /// Crates that must not appear below L5 (UI toolkits, windowing, OS audio/menus).
-const UI_ONLY: &[&str] = &["craft-ui", "egui", "eframe", "egui-wgpu", "winit", "rfd", "cpal", "muda"];
+const UI_ONLY: &[&str] = &["craft-ui", "egui", "eframe", "egui-wgpu", "winit", "rfd", "cpal", "muda", "tauri", "wry"];
 
 fn short(name: &str) -> &str {
     name.strip_prefix("filmcraft-").unwrap_or(name)

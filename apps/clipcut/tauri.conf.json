@@ -1,0 +1,41 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "ClipCut",
+  "mainBinaryName": "ClipCut",
+  "identifier": "io.github.portdel18.clipcut",
+  "build": {
+    "frontendDist": "ui"
+  },
+  "app": {
+    "withGlobalTauri": true,
+    "windows": [
+      {
+        "label": "main",
+        "title": "ClipCut",
+        "width": 1440,
+        "height": 900,
+        "minWidth": 1024,
+        "minHeight": 640,
+        "dragDropEnabled": true,
+        "backgroundColor": "#141316"
+      }
+    ],
+    "security": {
+      "csp": "default-src 'self' ipc: http://ipc.localhost; img-src 'self' blob: data:; style-src 'self' 'unsafe-inline'; script-src 'self'"
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": ["nsis"],
+    "publisher": "ClipCut contributors",
+    "copyright": "ClipCut contributors; built on FilmCraft by the ArtCraft Team and the FilmCraft contributors (MIT OR Apache-2.0)",
+    "shortDescription": "CapCut-style video editor",
+    "longDescription": "ClipCut is a desktop video editor with a CapCut-style interface, built on the FilmCraft engine.",
+    "icon": ["icons/32x32.png", "icons/128x128.png", "icons/128x128@2x.png", "icons/icon.png", "icons/icon.ico"],
+    "windows": {
+      "nsis": {
+        "installMode": "currentUser"
+      }
+    }
+  }
+}
