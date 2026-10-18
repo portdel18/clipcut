@@ -28,6 +28,8 @@ pub(crate) struct App {
     /// Files named on the command line, added by the interface once it has loaded (once: a
     /// reload of the page doesn't add them again).
     pub(crate) startup_files: Mutex<Vec<String>>,
+    /// Waveforms already worked out, by media item.
+    pub(crate) peaks: Arc<Mutex<std::collections::HashMap<u64, Arc<Vec<u8>>>>>,
 }
 
 pub(crate) fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
@@ -229,6 +231,7 @@ fn main() {
     let app = App {
         studio: Arc::new(Mutex::new(Studio::new())),
         player: Arc::new(Mutex::new(playback::Player::default())),
+        peaks: Arc::default(),
         startup_files: Mutex::new(args.into_iter().filter(|a| !a.starts_with("--")).collect()),
     };
     let built = tauri::Builder::default()
@@ -267,7 +270,17 @@ fn main() {
             editing::new_project,
             editing::pick_project,
             editing::open_project,
-            editing::restore
+            editing::restore,
+            editing::import_media,
+            editing::add_to_lane,
+            editing::add_text,
+            editing::move_clip,
+            editing::set_props,
+            editing::set_canvas,
+            editing::fit_clips,
+            editing::set_lane,
+            editing::fonts,
+            editing::peaks
         ])
         .run(tauri::generate_context!());
     if let Err(e) = built {
