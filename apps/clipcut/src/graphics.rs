@@ -135,3 +135,19 @@ pub fn graphic_abort(job: u64, app: tauri::State<'_, App>) {
 pub fn graphic_info(clip: u64, app: tauri::State<'_, App>) -> Result<serde_json::Value, String> {
     lock(&app.studio).graphic_of(clip).map_err(|e| e.to_string())
 }
+
+/// The video at `seconds` without the clips `hide`, at most `max_width` wide (8 bytes of size,
+/// then RGBA, as `frame`): what Graphics shows behind the graphic being made.
+#[tauri::command]
+pub async fn graphic_backdrop(seconds: f64, max_width: u32, hide: Vec<u64>, app: tauri::State<'_, App>) -> Result<tauri::ipc::Response, String> {
+    let studio = app.studio.clone();
+    blocking(move || {
+        let f = lock(&studio).frame_without(seconds, max_width.clamp(16, 1920), &hide).map_err(|e| e.to_string())?;
+        let mut out = Vec::with_capacity(8 + f.rgba.len());
+        out.extend_from_slice(&f.w.to_le_bytes());
+        out.extend_from_slice(&f.h.to_le_bytes());
+        out.extend_from_slice(&f.rgba);
+        Ok(tauri::ipc::Response::new(out))
+    })
+    .await
+}

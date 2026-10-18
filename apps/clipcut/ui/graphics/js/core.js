@@ -43,7 +43,8 @@ const clone = v => JSON.parse(JSON.stringify(v));
    An app that embeds Clip Studio (ClipCut, the video editor) sets window.__clipcutHost on this page or on
    the page holding it in a frame: { aspect, begin({name, width, height, fps}) → job, frame(job, i, bytes, ext),
    audio(job, wavBytes), finish(job, info), abort(job) }. Each output panel then gets "Add to video", which
-   renders through the same draw function and hands the frames to the app instead of downloading them. */
+   renders through the same draw function and hands the frames to the app instead of downloading them.
+   The app may also hand over its video's frame (CS.hosted.setBackdrop) to preview graphics over it. */
 const HOST = (() => {
   if (window.__clipcutHost) return window.__clipcutHost;
   try { return window.parent !== window ? window.parent.__clipcutHost || null : null; } catch (_) { return null; }
@@ -568,10 +569,27 @@ function restore(prefix, saved) {
   r.afterApply();
   return true;
 }
-/* What the host app calls: match its video's shape, open a graphic again to change it */
+/* What the host app calls: match its video's shape, open a graphic again to change it, show its video
+   behind the preview */
+const backdropFns = [];
 const hosted = {
   active: !!HOST,
   editing: null,
+  // the app's video at its playhead, an <img>: tools with a preview-only background (Lower Thirds) show
+  // the graphic over it; never part of a render
+  backdrop: null,
+  async setBackdrop(src) {
+    let img = null;
+    if (src && typeof src === 'object' && 'naturalWidth' in src) img = src;
+    else if (typeof src === 'string' && src) {
+      img = new Image();
+      try { img.src = src; await img.decode(); } catch (_) { img = null; }
+    }
+    hosted.backdrop = img;
+    for (const fn of backdropFns) { try { fn(img); } catch (_) { /* a tool's own problem */ } }
+    return !!img;
+  },
+  onBackdrop(fn) { backdropFns.push(fn); },
   setAspect(a) {
     for (const o of Object.values(outputs)) {
       if (!o.aspects.includes(a) || o.out.aspect === a) continue;

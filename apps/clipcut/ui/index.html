@@ -170,7 +170,7 @@
         <label class="ratio" title="The shape of the video">
           <select id="ratio" disabled>
             <option value="16:9">16:9 Wide</option>
-            <option value="9:16">9:16 TikTok, Reels, Shorts</option>
+            <option value="9:16">9:16 Tall</option>
             <option value="1:1">1:1 Square</option>
             <option value="4:5">4:5 Feed</option>
           </select>
@@ -234,6 +234,14 @@
 <div class="drop-veil" id="drop-veil"><p>Drop to add: videos to the main track, sound below it</p></div>
 <div class="toast" id="toast" role="status" hidden></div>
 
+<dialog class="dlg" id="remake-dlg" aria-labelledby="remake-title">
+  <h2 id="remake-title">Graphics in the old shape</h2>
+  <p class="dlg-text" id="remake-text"></p>
+  <div class="dlg-actions">
+    <button class="btn" id="remake-skip">Keep them as they are</button>
+    <button class="btn primary" id="remake-go">Make again</button>
+  </div>
+</dialog>
 <dialog class="dlg wide" id="export-pick" aria-labelledby="export-pick-title">
   <h2 id="export-pick-title">Export</h2>
   <div class="choices" id="export-choices" role="radiogroup" aria-label="Where the video goes"></div>

@@ -63,6 +63,10 @@ remote `upstream`). Read `README.md` for what it is and the roadmap.
   `apps/clipcut/src/ahead.rs` renders ahead on 2–3 workers and `frame` serves from it without the
   studio lock. Proxies are the engine's (`media.createProxies`); `Studio::poll` attaches finished
   ones, and the Media panel calls it when the job ends.
+- Graphics follow the video: opening Graphics calls `CS.hosted.setBackdrop` with the frame at the
+  playhead (`graphic_backdrop`, which leaves out the graphic being changed), and after a Ratio
+  change `offerRemake` re-renders graphics in the old shape through `CS.hosted.add` one by one
+  (`GR.batch` keeps `finish` from closing Graphics between them).
 - Disk is tight here: `rm -rf target/debug/incremental` when a build fails with "no space left".
 - Interface copy: plain words from the user's side, errors that say what went wrong and how to fix it.
   One dark theme from the tokens at the top of `ui/app.css`; amber (`--accent`) marks the active thing.

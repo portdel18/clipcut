@@ -11,7 +11,7 @@
 const {
   $, clamp, lerp, EASE, easeOutBack, fmtSec, slug, clone, store, toast, roundRect, loadImageFile,
   FRAMES, dims, resync, saveSoon, bindRange, bindColor, bindCheck, bindSeg, bindText, bindSelect,
-  buildOutputPanel, buildPresetPanel, makePlayer, fitViewer, drawGuides, runRender, renderBoth, saveStill,
+  buildOutputPanel, buildPresetPanel, makePlayer, fitViewer, drawGuides, runRender, renderBoth, saveStill, hosted,
 } = window.CS;
 
 const FONTS = {
@@ -322,14 +322,22 @@ bindRange('lt-hold', lt, 'hold', fmtSec, ltChanged);
 bindCheck('lt-outon', lt, 'outOn', ltChanged);
 bindRange('lt-outdur', lt, 'outDur', fmtSec, ltChanged);
 
+// a photo of your own wins over the app's video (inside ClipCut), which comes back when it is removed
+let ownPhoto = false;
+function showBackdrop() {
+  bgImg = hosted.backdrop;
+  $('#lt-photo-name').textContent = bgImg ? 'Your video at the playhead' : '';
+  $('#lt-photo-clear').hidden = true;
+}
 $('#lt-photo-pick').addEventListener('click', () => $('#lt-photo-file').click());
 $('#lt-photo-file').addEventListener('change', async e => {
   const f = e.target.files[0]; e.target.value = '';
   if (!f) return;
-  try { bgImg = await loadImageFile(f); $('#lt-photo-name').textContent = f.name; $('#lt-photo-clear').hidden = false; ltPaint(ltPlayer.t); }
+  try { bgImg = await loadImageFile(f); ownPhoto = true; $('#lt-photo-name').textContent = f.name; $('#lt-photo-clear').hidden = false; ltPaint(ltPlayer.t); }
   catch (err) { toast('That file couldn’t be opened as an image. Try a JPEG or PNG.'); }
 });
-$('#lt-photo-clear').addEventListener('click', () => { bgImg = null; $('#lt-photo-name').textContent = ''; $('#lt-photo-clear').hidden = true; ltPaint(ltPlayer.t); });
+$('#lt-photo-clear').addEventListener('click', () => { ownPhoto = false; showBackdrop(); ltPaint(ltPlayer.t); });
+hosted.onBackdrop(() => { if (!ownPhoto) { showBackdrop(); ltPaint(ltPlayer.t); } });
 
 const ltPlayer = makePlayer('lt', { total: () => (ltTL ? ltTL.total : 1), fps: () => lt.out.fps, render: ltPaint, track: $('#lt-track') });
 

@@ -357,3 +357,4 @@ h3.sub { margin: 12px 0 6px; font-size: 11px; font-weight: 600; color: var(--mut
 #guide { width: 116px; }
 #quality { width: 70px; }
 #ratio { width: 118px; }
+.dlg .dlg-text { margin: 0 0 16px; color: var(--muted); }

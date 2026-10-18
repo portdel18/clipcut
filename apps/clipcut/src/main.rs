@@ -342,6 +342,7 @@ fn main() {
             graphics::graphic_finish,
             graphics::graphic_abort,
             graphics::graphic_info,
+            graphics::graphic_backdrop,
             editing::transition_presets,
             editing::transition_previews,
             editing::set_transition,

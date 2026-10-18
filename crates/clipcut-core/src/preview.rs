@@ -83,6 +83,27 @@ impl Studio {
         Ok(FrameFeed { project: self.session.project.clone(), sequence, provider, scale, rate, frames })
     }
 
+    /// The frame at `seconds`, at most `max_width` wide, without the clips `hide` (a graphic being
+    /// changed, so it isn't under its new version): the picture a graphic is designed over.
+    pub fn frame_without(&self, seconds: f64, max_width: u32, hide: &[u64]) -> Result<Frame> {
+        let mut feed = self.frame_feed(max_width, "auto")?;
+        if !hide.is_empty() {
+            let mut p = (*feed.project).clone();
+            if let Some(q) = p.sequence_mut(feed.sequence) {
+                for t in q.video_tracks.iter_mut() {
+                    for i in t.items.iter_mut().filter(|i| hide.contains(&i.id.0)) {
+                        i.enabled = false;
+                    }
+                }
+            }
+            feed.project = Arc::new(p);
+        }
+        if !seconds.is_finite() {
+            return Err(Error::Invalid("the time must be a number".into()));
+        }
+        feed.render(feed.frame_at(seconds), false)
+    }
+
     /// The paused player's frame at `seconds`, for a player `max_width` wide at `quality`.
     pub fn preview_frame(&self, seconds: f64, max_width: u32, quality: &str) -> Result<Frame> {
         if !seconds.is_finite() {
