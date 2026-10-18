@@ -29,7 +29,7 @@
         <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 18V6l10-2v12"/><circle cx="6.5" cy="18" r="2.5"/><circle cx="16.5" cy="16" r="2.5"/></svg><span>Audio</span></button>
       <button class="rail-tab" role="tab" id="tab-text" aria-selected="false">
         <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 6h14M12 6v13M8 19h8"/></svg><span>Text</span></button>
-      <button class="rail-tab" role="tab" aria-selected="false" disabled title="Coming next: automatic captions with styles">
+      <button class="rail-tab" role="tab" id="tab-captions" aria-selected="false">
         <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="6" width="18" height="12" rx="2"/><path d="M7 14h4M13 14h4M7 11h10"/></svg><span>Captions</span></button>
       <button class="rail-tab" role="tab" aria-selected="false" disabled title="Coming in Phase 2: Clip Studio's lower thirds, maps and more">
         <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="14" width="13" height="5" rx="1"/><path d="M3 10h18M3 6h9"/></svg><span>Graphics</span></button>
@@ -53,6 +53,44 @@
       </button>
       <div class="media-list sounds" id="audio-list"></div>
       <p class="hint">Sound sits on its own lane and stays where you put it when the main track changes. Select it to set its volume and fades.</p>
+    </section>
+    <section class="panel" id="panel-captions" role="tabpanel" aria-labelledby="tab-captions" hidden>
+      <h2>Captions</h2>
+      <div class="cap-make">
+        <label class="prop wide"><span>Language</span>
+          <select id="cap-lang">
+            <option value="auto">Find it for me</option>
+            <option value="en">English</option><option value="es">Spanish</option><option value="fr">French</option>
+            <option value="de">German</option><option value="pt">Portuguese</option><option value="it">Italian</option>
+            <option value="nl">Dutch</option><option value="pl">Polish</option><option value="ru">Russian</option>
+            <option value="uk">Ukrainian</option><option value="tr">Turkish</option><option value="ar">Arabic</option>
+            <option value="hi">Hindi</option><option value="ja">Japanese</option><option value="ko">Korean</option>
+            <option value="zh">Chinese</option><option value="vi">Vietnamese</option><option value="id">Indonesian</option>
+          </select>
+        </label>
+        <label class="prop wide"><span>Accuracy</span><select id="cap-model"></select></label>
+        <button class="btn primary wide" id="cap-go">Auto captions</button>
+        <div class="cap-progress" id="cap-progress" hidden>
+          <div class="bar"><div id="cap-bar"></div></div>
+          <p class="meta" id="cap-status">Starting…</p>
+          <button class="btn" id="cap-cancel">Cancel</button>
+        </div>
+        <p class="hint" id="cap-note">The speech model downloads once and runs on this computer: nothing is uploaded.</p>
+      </div>
+      <div class="cap-tools" id="cap-tools" hidden>
+        <h3>Look</h3>
+        <div class="text-styles" id="cap-styles"></div>
+        <label class="check"><input type="checkbox" id="cap-on"> Show captions (they're burnt into exports)</label>
+        <h3>Clean up the speech</h3>
+        <div class="seg">
+          <button id="cap-fillers" title="Cut um, uh and the like out of the main track">Remove filler words</button>
+          <button id="cap-pauses" title="Shorten every pause longer than half a second">Shorten pauses</button>
+        </div>
+        <h3>Transcript</h3>
+        <p class="hint">Click a word to go to it. Drag across words (or Shift+click) and press Delete to cut them out of the video.</p>
+        <div class="transcript" id="transcript" tabindex="0"></div>
+        <button class="btn" id="cap-srt">Save subtitles (.srt)</button>
+      </div>
     </section>
     <section class="panel" id="panel-text" role="tabpanel" aria-labelledby="tab-text" hidden>
       <h2>Text</h2>

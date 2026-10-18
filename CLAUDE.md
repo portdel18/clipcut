@@ -31,6 +31,12 @@ remote `upstream`). Read `README.md` for what it is and the roadmap.
 - The timeline UI redraws from the `TimelineView` every edit returns; edits run one at a time
   (`serial` in `app.js`). Each `Studio` edit is one undo step (`group` in `clipcut-core`'s
   `timeline.rs`): keep it that way for new edits.
+- Captions (`clipcut-core/src/captions.rs`) follow the main track's speech: every caption's cue id
+  holds its media anchor (`cc:<item>:<from>:<to>`), and main-track edits go through `group_follow`,
+  which re-places them afterwards. A new edit that moves main-track clips must use `group_follow`.
+  Whisper models can't be downloaded from this sandbox (Hugging Face is blocked): test with
+  `Studio::hear` / `CLIPCUT_TEST_TRANSCRIPT`; the Windows CI step runs the real model on real speech.
+- Disk is tight here: `rm -rf target/debug/incremental` when a build fails with "no space left".
 - Interface copy: plain words from the user's side, errors that say what went wrong and how to fix it.
   One dark theme from the tokens at the top of `ui/app.css`; amber (`--accent`) marks the active thing.
 - Branding: ClipCut's own name and icon (`packaging/clipcut/icon.py`). Never ArtCraft/FilmCraft

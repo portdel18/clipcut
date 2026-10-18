@@ -2,12 +2,14 @@
 //! below, which drive the FilmCraft engine through `clipcut-core`.
 //!
 //! `ClipCut <file>` starts a new project with that clip; otherwise the last project reopens. `ClipCut --self-test <in> <out> <report.json>`
-//! opens, previews, mixes and exports without a window and writes what happened to the report:
+//! opens, previews, mixes and exports without a window and writes what happened to the report
+//! (`--caption-test` does the same for auto-captions with a real speech model):
 //! the Windows build runs it in CI, so the packaged engine is tested on Windows itself.
 
 // No console window behind the app in release builds on Windows
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod captioning;
 mod editing;
 mod playback;
 
@@ -228,8 +230,20 @@ fn main() {
         let get = |i: usize| args.get(i).map(String::as_str).unwrap_or("");
         std::process::exit(self_test(get(1), get(2), get(3)));
     }
+    if args.first().map(String::as_str) == Some("--caption-test") {
+        let get = |i: usize| args.get(i).map(String::as_str).unwrap_or("");
+        std::process::exit(captioning::caption_test(get(1), get(2), get(3), get(4), get(5)));
+    }
+    let mut studio = Studio::new();
+    // For checking the Captions tab without a speech model (tests, CI, agents): every clip is heard
+    // saying this transcript (JSON, as a project file stores one).
+    if let Some(j) = std::env::var_os("CLIPCUT_TEST_TRANSCRIPT").and_then(|p| std::fs::read_to_string(p).ok())
+        && let Err(e) = studio.hear(&j)
+    {
+        eprintln!("CLIPCUT_TEST_TRANSCRIPT: {e}");
+    }
     let app = App {
-        studio: Arc::new(Mutex::new(Studio::new())),
+        studio: Arc::new(Mutex::new(studio)),
         player: Arc::new(Mutex::new(playback::Player::default())),
         peaks: Arc::default(),
         startup_files: Mutex::new(args.into_iter().filter(|a| !a.starts_with("--")).collect()),
@@ -280,7 +294,22 @@ fn main() {
             editing::fit_clips,
             editing::set_lane,
             editing::fonts,
-            editing::peaks
+            editing::peaks,
+            captioning::speech_models,
+            captioning::cancel_captions,
+            captioning::auto_captions,
+            captioning::words,
+            captioning::cut_words,
+            captioning::remove_fillers,
+            captioning::remove_pauses,
+            captioning::set_caption_text,
+            captioning::delete_captions,
+            captioning::retime_caption,
+            captioning::set_caption_style,
+            captioning::set_captions_on,
+            captioning::caption_presets,
+            captioning::pick_captions_path,
+            captioning::export_captions
         ])
         .run(tauri::generate_context!());
     if let Err(e) = built {

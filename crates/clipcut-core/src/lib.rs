@@ -10,6 +10,7 @@
 
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
 
+mod captions;
 mod lanes;
 mod props;
 mod timeline;
@@ -23,6 +24,7 @@ use filmcraft_time::Tick;
 use serde::Serialize;
 use serde_json::{Value, json};
 
+pub use captions::{CaptionStyleView, CaptionView, CaptionsView, ModelView, TranscribeJob, WordView, caption_presets, download_model, speech_models};
 pub use props::{ClipProps, PEAKS_PER_SECOND, Peaks, TextProps};
 pub use timeline::{ClipView, Keep, LaneView, MediaView, ProjectView, TimelineView};
 
@@ -238,7 +240,8 @@ impl Studio {
     pub fn export(&mut self, path: &str) -> Result<u64> {
         self.info()?;
         let format = format_for(path).ok_or_else(|| Error::Invalid(format!("{path}: save as .mp4, .mov or .wav")))?;
-        let r = self.session.execute("file.exportMedia", json!({"path": path, "format": format})).map_err(engine)?;
+        // captions that show in the player are burnt into the picture too
+        let r = self.session.execute("file.exportMedia", json!({"path": path, "format": format, "burnCaptions": self.burn_captions()})).map_err(engine)?;
         r.get("job").and_then(Value::as_u64).ok_or_else(|| Error::Engine("the export did not start".into()))
     }
 
