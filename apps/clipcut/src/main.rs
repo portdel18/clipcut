@@ -1,65 +1,42 @@
 //! ClipCut desktop app: a Tauri window whose interface (`ui/`, HTML and JS) calls the commands
 //! below, which drive the FilmCraft engine through `clipcut-core`.
 //!
-//! `ClipCut <file>` opens a clip at start-up. `ClipCut --self-test <in> <out> <report.json>`
+//! `ClipCut <file>` starts a new project with that clip; otherwise the last project reopens. `ClipCut --self-test <in> <out> <report.json>`
 //! opens, previews, mixes and exports without a window and writes what happened to the report:
 //! the Windows build runs it in CI, so the packaged engine is tested on Windows itself.
 
 // No console window behind the app in release builds on Windows
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod editing;
 mod playback;
 
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
-use clipcut_core::{JobStatus, SequenceInfo, Studio};
+use clipcut_core::{JobStatus, Studio};
 use tauri::ipc::Response;
 use tauri_plugin_dialog::DialogExt;
 
 /// Video, audio and still formats the engine imports (the picker's filter; anything else can still
 /// be dropped on the window and gets a clear error if the engine can't read it).
-const OPEN_EXTENSIONS: &[&str] =
+pub(crate) const OPEN_EXTENSIONS: &[&str] =
     &["mp4", "mov", "m4v", "mkv", "webm", "avi", "mxf", "mts", "m2ts", "ts", "mpg", "mpeg", "wav", "mp3", "m4a", "aac", "flac", "png", "jpg", "jpeg"];
 
-struct App {
-    studio: Arc<Mutex<Studio>>,
-    player: Arc<Mutex<playback::Player>>,
-    /// A file named on the command line, opened by the interface once it has loaded.
-    startup_file: Option<String>,
+pub(crate) struct App {
+    pub(crate) studio: Arc<Mutex<Studio>>,
+    pub(crate) player: Arc<Mutex<playback::Player>>,
+    /// Files named on the command line, added by the interface once it has loaded (once: a
+    /// reload of the page doesn't add them again).
+    pub(crate) startup_files: Mutex<Vec<String>>,
 }
 
-fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
+pub(crate) fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
     m.lock().unwrap_or_else(PoisonError::into_inner)
 }
 
 /// Runs `f` off the main thread (rendering and decoding must not freeze the window).
-async fn blocking<T: Send + 'static>(f: impl FnOnce() -> Result<T, String> + Send + 'static) -> Result<T, String> {
+pub(crate) async fn blocking<T: Send + 'static>(f: impl FnOnce() -> Result<T, String> + Send + 'static) -> Result<T, String> {
     tauri::async_runtime::spawn_blocking(f).await.map_err(|e| format!("the task stopped unexpectedly: {e}"))?
-}
-
-#[tauri::command]
-fn startup_file(app: tauri::State<'_, App>) -> Option<String> {
-    app.startup_file.clone()
-}
-
-#[tauri::command]
-async fn pick_clip(handle: tauri::AppHandle) -> Result<Option<String>, String> {
-    blocking(move || {
-        let f = handle.dialog().file().set_title("Open a video").add_filter("Media", OPEN_EXTENSIONS).blocking_pick_file();
-        Ok(f.and_then(|p| p.into_path().ok()).map(|p| p.to_string_lossy().into_owned()))
-    })
-    .await
-}
-
-#[tauri::command]
-async fn open_clip(path: String, app: tauri::State<'_, App>) -> Result<SequenceInfo, String> {
-    let (studio, player) = (app.studio.clone(), app.player.clone());
-    blocking(move || {
-        lock(&player).stop();
-        lock(&player).set_position(0.0);
-        lock(&studio).open_clip(&path).map_err(|e| e.to_string())
-    })
-    .await
 }
 
 /// The frame at `seconds`, at most `max_width` wide, as 8 bytes of header (width, height: u32
@@ -69,6 +46,22 @@ async fn frame(seconds: f64, max_width: u32, app: tauri::State<'_, App>) -> Resu
     let studio = app.studio.clone();
     blocking(move || {
         let f = lock(&studio).frame(seconds, max_width.clamp(16, 7680)).map_err(|e| e.to_string())?;
+        let mut out = Vec::with_capacity(8 + f.rgba.len());
+        out.extend_from_slice(&f.w.to_le_bytes());
+        out.extend_from_slice(&f.h.to_le_bytes());
+        out.extend_from_slice(&f.rgba);
+        Ok(Response::new(out))
+    })
+    .await
+}
+
+/// Media item `item`'s picture at `seconds` into the media (thumbnails and filmstrips), in the same
+/// layout as [`frame`]. The session stays free while it renders.
+#[tauri::command]
+async fn thumb(item: u64, seconds: f64, max_width: u32, app: tauri::State<'_, App>) -> Result<Response, String> {
+    let th = lock(&app.studio).thumbs();
+    blocking(move || {
+        let f = th.frame(item, seconds, max_width.clamp(16, 1920)).map_err(|e| e.to_string())?;
         let mut out = Vec::with_capacity(8 + f.rgba.len());
         out.extend_from_slice(&f.w.to_le_bytes());
         out.extend_from_slice(&f.h.to_le_bytes());
@@ -236,16 +229,19 @@ fn main() {
     let app = App {
         studio: Arc::new(Mutex::new(Studio::new())),
         player: Arc::new(Mutex::new(playback::Player::default())),
-        startup_file: args.into_iter().find(|a| !a.starts_with("--")),
+        startup_files: Mutex::new(args.into_iter().filter(|a| !a.starts_with("--")).collect()),
     };
     let built = tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .manage(app)
+        .on_window_event(|window, event| {
+            if let tauri::WindowEvent::CloseRequested { .. } = event {
+                editing::save_on_close(tauri::Manager::app_handle(window));
+            }
+        })
         .invoke_handler(tauri::generate_handler![
-            startup_file,
-            pick_clip,
-            open_clip,
             frame,
+            thumb,
             play,
             pause,
             playback,
@@ -254,7 +250,24 @@ fn main() {
             export,
             export_status,
             cancel_export,
-            reveal
+            reveal,
+            editing::timeline,
+            editing::pick_clips,
+            editing::add_clips,
+            editing::append_media,
+            editing::insert_media,
+            editing::split,
+            editing::split_keep,
+            editing::delete_clips,
+            editing::trim,
+            editing::reorder,
+            editing::undo,
+            editing::redo,
+            editing::save_project,
+            editing::new_project,
+            editing::pick_project,
+            editing::open_project,
+            editing::restore
         ])
         .run(tauri::generate_context!());
     if let Err(e) = built {

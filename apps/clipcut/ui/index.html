@@ -10,9 +10,14 @@
 <div class="app">
   <header class="top">
     <div class="brand"><img src="logo.png" alt="" width="22" height="22"><span>ClipCut</span></div>
-    <div class="title" id="clip-title">No clip open</div>
+    <div class="project">
+      <span class="title" id="project-name">Untitled</span>
+      <span class="save-state" id="save-state" aria-live="polite"></span>
+    </div>
     <div class="top-actions">
-      <button class="btn primary" id="export-btn" disabled>Export</button>
+      <button class="btn" id="new-btn" title="Start a new project (Ctrl+N)">New</button>
+      <button class="btn" id="open-btn" title="Open a saved project (Ctrl+O)">Open</button>
+      <button class="btn primary" id="export-btn" disabled title="Export (Ctrl+E)">Export</button>
     </div>
   </header>
 
@@ -34,10 +39,10 @@
       <button class="import" id="import-btn">
         <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>
         <strong>Import</strong>
-        <span>or drop a video anywhere on the window</span>
+        <span>or drop videos anywhere on the window</span>
       </button>
       <div class="media-list" id="media-list"></div>
-      <p class="hint">This first version opens one clip at a time. Splitting, trimming and more tracks arrive in Phase 1.</p>
+      <p class="hint">Drag a card onto the timeline to place it, or press + to add it at the end. Sound-only files, text and more tracks arrive in the next update.</p>
     </section>
   </aside>
 
@@ -67,22 +72,34 @@
 
   <section class="timeline" aria-label="Timeline">
     <div class="tl-tools">
-      <button class="tool" disabled title="Split (Phase 1)" aria-label="Split"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v18M7 8l5-5 5 5"/></svg></button>
-      <button class="tool" disabled title="Delete (Phase 1)" aria-label="Delete"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 7h14M10 7V5h4v2M7 7l1 12h8l1-12"/></svg></button>
+      <button class="tool" id="undo-btn" disabled title="Undo (Ctrl+Z)" aria-label="Undo"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 14L4 9l5-5"/><path d="M4 9h10a6 6 0 0 1 0 12h-3"/></svg></button>
+      <button class="tool" id="redo-btn" disabled title="Redo (Ctrl+Shift+Z)" aria-label="Redo"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 14l5-5-5-5"/><path d="M20 9H10a6 6 0 0 0 0 12h3"/></svg></button>
+      <span class="sep" aria-hidden="true"></span>
+      <button class="tool" id="split-btn" disabled title="Split at the playhead (S)" aria-label="Split"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v18"/><path d="M8 7H4v10h4M16 7h4v10h-4"/></svg></button>
+      <button class="tool" id="delleft-btn" disabled title="Delete to the left of the playhead (Q)" aria-label="Delete left"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M16 4v16"/><path d="M4 8h8v8H4z" stroke-dasharray="2 2"/><path d="M6 10l4 4M10 10l-4 4"/></svg></button>
+      <button class="tool" id="delright-btn" disabled title="Delete to the right of the playhead (W)" aria-label="Delete right"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 4v16"/><path d="M12 8h8v8h-8z" stroke-dasharray="2 2"/><path d="M14 10l4 4M18 10l-4 4"/></svg></button>
+      <button class="tool" id="delete-btn" disabled title="Delete the selected clips; the gap closes (Delete)" aria-label="Delete"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 7h14M10 7V5h4v2M7 7l1 12h8l1-12"/></svg></button>
       <span class="spacer"></span>
-      <label class="zoom"><span>Zoom</span><input type="range" id="zoom" min="0" max="100" value="0"></label>
+      <button class="tool" id="snap-btn" aria-pressed="true" title="Snapping (N); hold Shift while dragging to skip it" aria-label="Snapping"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 4v8a6 6 0 0 0 12 0V4"/><path d="M6 8h4M14 8h4"/></svg></button>
+      <span class="sep" aria-hidden="true"></span>
+      <button class="tool" id="zoomout-btn" title="Zoom out (Ctrl+wheel)" aria-label="Zoom out"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6"/><path d="M8 11h6M20 20l-4.5-4.5"/></svg></button>
+      <input type="range" id="zoom" min="0" max="100" value="0" aria-label="Timeline zoom">
+      <button class="tool" id="zoomin-btn" title="Zoom in (Ctrl+wheel)" aria-label="Zoom in"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6"/><path d="M8 11h6M11 8v6M20 20l-4.5-4.5"/></svg></button>
+      <button class="tool" id="fit-btn" title="Fit the whole timeline" aria-label="Fit"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/></svg></button>
     </div>
     <div class="tl-scroll" id="tl-scroll">
       <div class="tl-content" id="tl-content">
         <div class="ruler" id="ruler"></div>
         <div class="track main-track" id="track"><div class="track-empty">Drop a video here</div></div>
+        <div class="snap-line" id="snap-line" hidden></div>
+        <div class="insert-mark" id="insert-mark" hidden></div>
         <div class="playhead" id="playhead"><span></span></div>
       </div>
     </div>
   </section>
 </div>
 
-<div class="drop-veil" id="drop-veil"><p>Drop to open</p></div>
+<div class="drop-veil" id="drop-veil"><p>Drop to add to the timeline</p></div>
 <div class="toast" id="toast" role="status" hidden></div>
 
 <dialog class="dlg" id="export-dlg" aria-labelledby="export-title">
