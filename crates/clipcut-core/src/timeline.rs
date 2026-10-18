@@ -77,6 +77,8 @@ pub struct MediaView {
     pub kind: &'static str,
     pub width: u32,
     pub height: u32,
+    /// A proxy (a small copy for smooth playback) is attached.
+    pub proxy: bool,
 }
 
 /// Everything the timeline and Media panel draw, after any change.
@@ -98,6 +100,8 @@ pub struct TimelineView {
     /// The transitions on the main track's cuts.
     pub transitions: Vec<crate::transitions::TransitionView>,
     pub media: Vec<MediaView>,
+    /// The player shows proxies where clips have them.
+    pub proxies: bool,
     pub can_undo: bool,
     pub can_redo: bool,
     /// What Undo / Redo would do, for their tooltips ("Undo Split").
@@ -206,7 +210,16 @@ impl Studio {
                 let (w, h) = m.info.video.as_ref().map(|v| (v.width, v.height)).unwrap_or((0, 0));
                 Some((
                     it.created,
-                    MediaView { item: it.id.0, name: it.name.clone(), path: path.clone(), duration: secs(m.duration()), kind, width: w, height: h },
+                    MediaView {
+                        item: it.id.0,
+                        name: it.name.clone(),
+                        path: path.clone(),
+                        duration: secs(m.duration()),
+                        kind,
+                        width: w,
+                        height: h,
+                        proxy: m.proxy.is_some(),
+                    },
                 ))
             })
             .collect();
@@ -223,6 +236,7 @@ impl Studio {
             transitions: self.transitions_view(),
             mix: self.mix_view(),
             media: media.into_iter().map(|(_, m)| m).collect(),
+            proxies: s.prefs.media.enable_proxies,
             can_undo: s.history.can_undo(),
             can_redo: s.history.can_redo(),
             undo_label: s.history.undo.last().map(|h| h.0.clone()),

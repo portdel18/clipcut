@@ -208,16 +208,19 @@ function clearPreview() {
 }
 /** Shows a program frame (`{t}`) or a media frame (`{item, t}`, while trimming). Requests never
     pile up: while one renders, only the latest wish is kept. */
+/** The player's width in device pixels, and the quality chosen for it. */
+const previewWidth = () => Math.min(3840, Math.ceil(parseFloat($('#preview').style.width || '640') * (window.devicePixelRatio || 1)));
+const quality = () => $('#quality').value;
 async function show(req) {
   if (!has()) return;
   if (S.frameBusy) { S.want = req; return; }
   S.frameBusy = true;
   try {
     const c = $('#preview');
-    const maxWidth = Math.min(1920, Math.ceil(parseFloat(c.style.width || '640') * (window.devicePixelRatio || 1)));
+    const maxWidth = previewWidth();
     const buf = req.item != null
       ? await invoke('thumb', { item: req.item, seconds: Math.max(0, req.t), maxWidth })
-      : await invoke('frame', { seconds: req.t, maxWidth });
+      : await invoke('frame', { seconds: req.t, maxWidth, quality: quality() });
     const img = toImage(buf);
     if (c.width !== img.width || c.height !== img.height) { c.width = img.width; c.height = img.height; }
     c.getContext('2d').putImageData(img, 0, 0);
@@ -464,7 +467,8 @@ let mediaSig = '';
 const mediaThumbs = new Map();   // item → canvas
 function renderMedia() {
   const media = S.tl.media;
-  const sig = JSON.stringify(media.map(m => [m.item, m.name, m.duration]));
+  renderProxies();
+  const sig = JSON.stringify(media.map(m => [m.item, m.name, m.duration, m.proxy]));
   if (sig === mediaSig) return;
   mediaSig = sig;
   const list = $('#media-list'), sounds = $('#audio-list');
@@ -480,6 +484,7 @@ function renderMedia() {
       + `<button class="add">${ICON.plus}</button>`
       + '<div class="meta"><span></span><span class="dur"></span></div>';
     card.querySelector('.meta span').textContent = m.name;
+    if (m.proxy) { const b = document.createElement('span'); b.className = 'proxy-tag'; b.textContent = 'Proxy'; b.title = 'Has a small copy for smooth playback'; card.appendChild(b); }
     card.querySelector('.dur').textContent = fmtLen(m.duration);
     const add = card.querySelector('.add');
     add.title = video ? 'Add to the end of the main track' : 'Add below the main track, at the playhead';
@@ -491,6 +496,52 @@ function renderMedia() {
   }
   if (!sounds.children.length) sounds.innerHTML = '<p class="hint">No sound imported yet.</p>';
 }
+/* Proxies: small copies of the videos for smooth playback (exports use the originals) */
+const PX = { job: null };
+function renderProxies() {
+  const videos = S.tl.media.filter(m => m.kind === 'video');
+  $('#proxies').hidden = !videos.length;
+  if (!videos.length) return;
+  const have = videos.filter(m => m.proxy).length;
+  $('#proxy-use').checked = S.tl.proxies;
+  $('#proxy-use').disabled = !have;
+  $('#proxy-make').disabled = PX.job != null || have === videos.length;
+  if (PX.job == null) {
+    $('#proxy-note').textContent = have === videos.length ? 'Every video has a proxy.'
+      : have ? `${have} of ${videos.length} videos have a proxy.`
+      : 'Big or 4K videos play more smoothly from proxies: small copies made in the background.';
+  }
+}
+async function makeProxies() {
+  if (PX.job != null) return;
+  const missing = S.tl.media.filter(m => m.kind === 'video' && !m.proxy).map(m => m.item);
+  try { PX.job = await invoke('make_proxies', { items: missing }); } catch (e) { toast(e, true); return; }
+  $('#proxy-bar').hidden = false;
+  renderProxies();
+  for (;;) {
+    await sleep(400);
+    let st = null;
+    try { st = await invoke('export_status', { job: PX.job }); } catch (_) { /* keep waiting */ }
+    if (!st) break;
+    $('#proxy-bar').firstChild.style.width = (st.progress * 100).toFixed(1) + '%';
+    $('#proxy-note').textContent = st.finished ? '' : `Making proxies… ${Math.floor(st.progress * 100)}%${st.status ? ' · ' + st.status : ''}`;
+    if (st.finished) {
+      if (st.error) toast(/cancel/i.test(st.error) ? 'The proxies were cancelled.' : `The proxies could not be made: ${st.error}`, true);
+      break;
+    }
+  }
+  PX.job = null;
+  $('#proxy-bar').hidden = true;
+  const tl = await invoke('poll_jobs').catch(() => null);
+  if (tl) {
+    // made proxies are used straight away
+    apply(tl);
+    if (!S.tl.proxies) await edit('set_proxies', { on: true });
+    toast('Proxies made: the videos now play from them. Exports still use the originals.');
+  }
+  renderProxies();
+}
+
 function addSoundAtPlayhead(item) {
   if (!has()) { toast('Add a video first: music and voiceovers go under it.'); return; }
   addToLane(item, S.t);
@@ -2903,7 +2954,7 @@ async function play() {
   if (!has()) return;
   if (S.t >= dur() - frameStep()) S.t = 0;
   try {
-    await invoke('play', { from: S.t });
+    await invoke('play', { from: S.t, maxWidth: previewWidth(), quality: quality() });
   } catch (e) { toast(e, true); return; }
   S.playing = true;
   setPlayIcon();
@@ -3062,6 +3113,15 @@ click('#tab-transitions', () => showTab('transitions'));
 click('#tab-graphics', () => openGraphics());
 click('#tab-filters', () => showTab('filters'));
 click('#tab-mixer', () => showTab('mixer'));
+click('#proxy-make', makeProxies);
+$('#proxy-use').addEventListener('change', e => edit('set_proxies', { on: e.target.checked }));
+// the player's quality is the viewer's own choice
+try { const q = localStorage.getItem('clipcut.quality'); if (q && [...$('#quality').options].some(o => o.value === q)) $('#quality').value = q; } catch (_) {}
+$('#quality').addEventListener('change', () => {
+  try { localStorage.setItem('clipcut.quality', quality()); } catch (_) {}
+  $('#quality').blur();
+  if (S.playing) { pause().then(play); } else if (has()) showFrame(S.t);
+});
 click('#scopes-btn', () => setScopes(!SC.on));
 click('#scopes-close', () => setScopes(false));
 $('#scope-kind').addEventListener('change', () => { setScopes(true); $('#scope-kind').blur(); });

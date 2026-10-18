@@ -48,6 +48,14 @@
         <span>or drop videos anywhere on the window</span>
       </button>
       <div class="media-list" id="media-list"></div>
+      <div class="proxies" id="proxies" hidden>
+        <div class="proxy-row">
+          <button class="btn" id="proxy-make" title="Make small copies of the videos for smooth playback. Exports always use the originals.">Make proxies</button>
+          <label class="check" title="Play from the small copies where clips have them (exports always use the originals)"><input type="checkbox" id="proxy-use"> Use for playback</label>
+        </div>
+        <div class="bar" id="proxy-bar" hidden><div></div></div>
+        <p class="hint" id="proxy-note"></p>
+      </div>
       <p class="hint">Drag a card onto the main track to put it between clips, or above it to lay it over them as an overlay. Press + to add it at the end.</p>
     </section>
     <section class="panel" id="panel-audio" role="tabpanel" aria-labelledby="tab-audio" hidden>
@@ -151,7 +159,15 @@
             <option value="shorts">YouTube Shorts</option>
           </select>
         </label>
-        <label class="ratio" title="The shape of the video">Ratio
+        <label class="ratio" title="How sharp the player is. Lower plays more smoothly on a slow computer; exports are always full quality.">
+          <select id="quality" aria-label="Player quality">
+            <option value="auto">Auto</option>
+            <option value="full">Full</option>
+            <option value="half">½</option>
+            <option value="quarter">¼</option>
+          </select>
+        </label>
+        <label class="ratio" title="The shape of the video">
           <select id="ratio" disabled>
             <option value="16:9">16:9 Wide</option>
             <option value="9:16">9:16 TikTok, Reels, Shorts</option>

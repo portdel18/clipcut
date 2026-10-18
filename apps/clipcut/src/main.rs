@@ -9,6 +9,7 @@
 // No console window behind the app in release builds on Windows
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod ahead;
 mod captioning;
 mod editing;
 mod graphics;
@@ -49,10 +50,17 @@ pub(crate) async fn blocking<T: Send + 'static>(f: impl FnOnce() -> Result<T, St
 /// The frame at `seconds`, at most `max_width` wide, as 8 bytes of header (width, height: u32
 /// little-endian) followed by RGBA pixels.
 #[tauri::command]
-async fn frame(seconds: f64, max_width: u32, app: tauri::State<'_, App>) -> Result<Response, String> {
-    let studio = app.studio.clone();
+async fn frame(seconds: f64, max_width: u32, quality: Option<String>, app: tauri::State<'_, App>) -> Result<Response, String> {
+    let (studio, player) = (app.studio.clone(), app.player.clone());
+    let quality = quality.unwrap_or_else(|| "auto".into());
+    let max_width = max_width.clamp(16, 7680);
     blocking(move || {
-        let f = lock(&studio).frame(seconds, max_width.clamp(16, 7680)).map_err(|e| e.to_string())?;
+        // while playing, the frame rendered ahead (the project stays free for everything else)
+        let ahead = lock(&player).ahead().filter(|a| a.max_width == max_width && a.quality == quality);
+        let f = match ahead.and_then(|a| a.frame(seconds)) {
+            Some(f) => f,
+            None => std::sync::Arc::new(lock(&studio).preview_frame(seconds, max_width, &quality).map_err(|e| e.to_string())?),
+        };
         let mut out = Vec::with_capacity(8 + f.rgba.len());
         out.extend_from_slice(&f.w.to_le_bytes());
         out.extend_from_slice(&f.h.to_le_bytes());
@@ -79,12 +87,18 @@ async fn thumb(item: u64, seconds: f64, max_width: u32, app: tauri::State<'_, Ap
 }
 
 #[tauri::command]
-fn play(from: f64, app: tauri::State<'_, App>) -> Result<(), String> {
-    let (feed, end) = {
+fn play(from: f64, max_width: Option<u32>, quality: Option<String>, app: tauri::State<'_, App>) -> Result<(), String> {
+    let quality = quality.unwrap_or_else(|| "auto".into());
+    let max_width = max_width.unwrap_or(960).clamp(16, 7680);
+    let (feed, end, frames) = {
         let s = lock(&app.studio);
-        (s.audio_feed().map_err(|e| e.to_string())?, s.info().map_err(|e| e.to_string())?.duration_seconds)
+        (s.audio_feed().map_err(|e| e.to_string())?, s.info().map_err(|e| e.to_string())?.duration_seconds, s.frame_feed(max_width, &quality).ok())
     };
-    lock(&app.player).play(feed, from, end);
+    // decoding is one frame at a time, so a few workers are enough: while one decodes, the others
+    // finish the frames before (2 or 3, leaving a core for the sound and the window)
+    let cores = std::thread::available_parallelism().map(usize::from).unwrap_or(2);
+    let ahead = frames.map(|f| ahead::Ahead::start(f, from, cores.saturating_sub(1).clamp(2, 3), max_width, &quality));
+    lock(&app.player).play(feed, from, end, ahead);
     Ok(())
 }
 
@@ -316,6 +330,9 @@ fn main() {
             editing::set_title,
             editing::save_title,
             editing::remove_title,
+            editing::make_proxies,
+            editing::poll_jobs,
+            editing::set_proxies,
             editing::props_at,
             editing::toggle_keyframe,
             editing::set_easing,

@@ -716,3 +716,25 @@ pub async fn remove_title(id: String, app: tauri::State<'_, App>) -> Result<(), 
     let studio = app.studio.clone();
     blocking(move || lock(&studio).remove_title(&id).map_err(|e| e.to_string())).await
 }
+
+/* ---------- proxies (small copies for smooth playback) ---------- */
+
+/// Starts making proxies of `items` (every video when empty); returns the job to follow with
+/// `export_status`.
+#[tauri::command]
+pub async fn make_proxies(items: Vec<u64>, app: tauri::State<'_, App>) -> Result<u64, String> {
+    let studio = app.studio.clone();
+    blocking(move || lock(&studio).make_proxies(&items).map_err(|e| e.to_string())).await
+}
+
+/// Attaches proxies that finished: the timeline when something changed.
+#[tauri::command]
+pub fn poll_jobs(app: tauri::State<'_, App>) -> Option<TimelineView> {
+    let mut s = lock(&app.studio);
+    s.poll().then(|| s.timeline())
+}
+
+#[tauri::command]
+pub async fn set_proxies(on: bool, app: tauri::State<'_, App>) -> Result<TimelineView, String> {
+    edit(&app, move |s| s.set_proxies(on)).await
+}
