@@ -70,6 +70,13 @@ fn the_feed_renders_a_snapshot_on_other_threads() {
     });
     assert!(frames.iter().all(|f| (f.w, f.h) == (320, 180) && mean(f)[0] > 40.0), "the snapshot is before the opacity change");
     assert!(mean(&s.frame_feed(300, "auto").unwrap().render(30, false).unwrap())[0] < 2.0, "a new feed sees it");
+    // a picture to design a graphic over leaves out the clips asked
+    let id = s.timeline().clips.iter().find(|c| c.track == "V1").unwrap().id;
+    s.undo().unwrap();
+    let all = mean(&s.frame_without(1.0, 320, &[]).unwrap());
+    let none = mean(&s.frame_without(1.0, 320, &[id]).unwrap());
+    assert!(all[0] > 40.0 && none[0] < 2.0, "{all:?} {none:?}");
+    assert!(s.timeline().clips.iter().any(|c| c.id == id), "the project itself is unchanged");
     // past the end is the last frame, not a failure
     assert!(feed.render(10_000, false).is_ok() && feed.render(-5, false).is_ok());
 }

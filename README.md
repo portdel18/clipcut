@@ -72,7 +72,10 @@ Studio's own drawing, in the video's shape, and lands on a lane at the playhead,
 (a lower third keeps its transparent background, over the video). Its frames, sound and settings go
 in a `Graphics` folder beside the project. Select a graphic and press **Edit in Graphics** to open it
 again with its settings; **Update in video** puts the new version in its place, at the same time
-and size. Photos, videos and sound a graphic used aren't kept: add them again when you change it.
+and size. Photos, videos and sound a graphic used aren't kept: add them again when you change it. A lower third is designed over your
+video: Graphics shows the frame at the playhead behind it (without the graphic being changed),
+never in what it renders. When **Ratio** changes the video's shape, ClipCut offers to make the
+graphics in the old shape again in the new one, each in its place.
 Maps need the internet for their tiles and searches; scanned-PDF text recognition (Scroll Zoom)
 isn't available inside ClipCut.
 
@@ -179,7 +182,7 @@ ProRes `.mov` for the master, a `.wav` for the sound) with progress and Cancel.
 | **2. Clip Studio inside** (this) | A Graphics tab with Clip Studio's tools (lower thirds, map zoom, numbers, timelines, underline); graphics become clips you can reopen and edit; TikTok, Reels and Shorts overlays in the preview |
 | **3. Pro panels** (done: 3a keyframes, 3b colour and scopes, 3c the mixer and precise trimming) | Keyframes, colour, the audio mixer, scopes and precise trimming, from the engine |
 | **4. CapCut extras** (done: 4a text animations and ducking, 4b beats and quick exports, 4c titles) | Caption styles, text animations, templates, beat markers, music ducking, quick social exports |
-| **5. Polish** (5a smooth playback and proxies: this) | Live graphics, proxies, speed work, signed installers and updates |
+| **5. Polish** (5a smooth playback and proxies; 5b graphics that follow the video: this) | Live graphics, proxies, speed work, signed installers and updates |
 
 ## How it is built
 

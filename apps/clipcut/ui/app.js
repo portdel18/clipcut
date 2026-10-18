@@ -431,8 +431,9 @@ async function setRatio(name) {
   const short = Math.min(S.tl.width, S.tl.height);
   const even = v => Math.max(16, Math.round(v / 2) * 2);
   const [w, h] = a >= b ? [even(short * a / b), even(short)] : [even(short), even(short * b / a)];
-  await edit('set_canvas', { width: w, height: h });
+  const tl = await edit('set_canvas', { width: w, height: h });
   $('#ratio').blur();
+  if (tl) offerRemake();
 }
 
 /* ---------- library: media, audio and text ---------- */
@@ -807,7 +808,7 @@ function markWord() {
 
 /* ---------- Graphics: Clip Studio over the editor; its graphics come in as clips ---------- */
 const TOOL_NAMES = { ul: 'Underline', mp: 'Map', sp: 'Split screen', sz: 'Scroll zoom', tl: 'Timeline', nm: 'Numbers', au: 'Audiogram', lt: 'Lower third' };
-const GR = { loaded: null };
+const GR = { loaded: null, batch: false };
 const graphicsWin = () => $('#graphics-frame').contentWindow;
 /* What Clip Studio calls (see "Inside ClipCut" in graphics/js/core.js): it renders with its own draw
    functions and hands each frame here; the frames go to a folder beside the project, then the timeline. */
@@ -820,6 +821,7 @@ window.__clipcutHost = {
     const replace = typeof info.edit === 'number' && clipById(info.edit) ? info.edit : null;
     const r = await run('graphic_finish', { job, info, seconds: S.t, replace });
     if (!r) throw new Error('The graphic could not be added to the video.');
+    if (GR.batch) { apply(r.timeline); return; }
     S.sel = new Set(r.clips.filter(id => r.timeline.clips.some(c => c.id === id && c.track[0] === 'V')));
     apply(r.timeline);
     closeGraphics();
@@ -852,10 +854,73 @@ async function openGraphics(edit = null) {
   else cs.hosted.open(null);
   // the video's shape, even for a graphic made when it had another
   cs.hosted.setAspect(window.__clipcutHost.aspect);
+  showBackdrop(cs, edit);
   $('#graphics-note').innerHTML = made
     ? `Changing <b>${TOOL_NAMES[made.tool] || 'a graphic'}</b>. <b>Update in video</b> puts the new version in its place. Photos, videos and sound it used must be added again.`
     : 'Made with Clip Studio. <b>Add to video</b> puts the graphic on a lane at the playhead.';
   $('#graphics-frame').focus();
+}
+/** Graphics shows the video under what is being made: the frame at the playhead (or, for a graphic
+ *  being changed, inside it), without that graphic. */
+async function showBackdrop(cs, edit) {
+  if (!cs.hosted.setBackdrop || !has()) return;
+  const c = edit != null ? clipById(edit) : null;
+  const t = c && (S.t < c.start || S.t >= c.end) ? c.start + Math.min(1, (c.end - c.start) / 2) : S.t;
+  try {
+    const img = toImage(await invoke('graphic_backdrop', { seconds: t, maxWidth: 960, hide: c ? [c.id] : [] }));
+    const cv = toCanvas(img);
+    await cs.hosted.setBackdrop(cv.toDataURL('image/jpeg', 0.9));
+  } catch (_) { /* designing without it */ }
+}
+/* After the video changes shape: its graphics, made for the old one, made again for the new one */
+const shapeOf = (w, h) => ratioName(w, h);
+function graphicsInOtherShape() {
+  const want = shapeOf(S.tl.width, S.tl.height);
+  return S.tl.clips.filter(c => c.graphic && c.track[0] === 'V').filter(c => {
+    const m = mediaOf(c.item);
+    return m && m.width && m.height && shapeOf(m.width, m.height) !== want;
+  });
+}
+async function offerRemake() {
+  const list = graphicsInOtherShape();
+  if (!list.length) return;
+  const shape = shapeOf(S.tl.width, S.tl.height);
+  const n = list.length;
+  $('#remake-text').textContent = `${n === 1 ? 'A graphic was' : `${n} graphics were`} made for another shape. Make ${n === 1 ? 'it' : 'them'} again for ${shape}, in the same places? Graphics renders ${n === 1 ? 'it' : 'each one'} again; photos and videos ${n === 1 ? 'it' : 'they'} used must be added again.`;
+  $('#remake-go').textContent = `Make for ${shape}`;
+  $('#remake-skip').textContent = n === 1 ? 'Keep it as it is' : 'Keep them as they are';
+  const go = await new Promise(done => {
+    $('#remake-go').onclick = () => { $('#remake-dlg').close(); done(true); };
+    $('#remake-skip').onclick = () => { $('#remake-dlg').close(); done(false); };
+    $('#remake-dlg').oncancel = () => done(false);
+    $('#remake-dlg').showModal();
+  });
+  if (go) await remakeGraphics(list.map(c => c.id));
+}
+async function remakeGraphics(ids) {
+  if (S.playing) await pause();
+  $('#graphics-view').hidden = false;
+  try { await loadGraphics(); } catch (e) { $('#graphics-view').hidden = true; toast(e, true); return; }
+  const cs = graphicsWin().CS;
+  GR.batch = true;
+  let done = 0;
+  try {
+    for (const [k, id] of ids.entries()) {
+      let made;
+      try { made = await invoke('graphic_info', { clip: id }); } catch (_) { continue; }
+      if (!made || !made.tool || !clipById(id)) continue;
+      $('#graphics-note').innerHTML = `Making graphics for ${shapeOf(S.tl.width, S.tl.height)}: <b>${k + 1} of ${ids.length}</b> (${TOOL_NAMES[made.tool] || 'graphic'}).`;
+      cs.hosted.open(made.tool, made.state, id);
+      cs.hosted.setAspect(window.__clipcutHost.aspect);
+      const status = await cs.hosted.add(made.tool);
+      if (status === 'done') done += 1;
+      else if (status !== 'busy') break;
+    }
+  } finally {
+    GR.batch = false;
+    closeGraphics();
+  }
+  toast(done === ids.length ? `${done === 1 ? 'The graphic was' : `All ${done} graphics were`} made for the new shape.` : `${done} of ${ids.length} graphics were made for the new shape. Open the others with Edit in Graphics.`, done < ids.length);
 }
 function closeGraphics() {
   $('#graphics-view').hidden = true;
@@ -3260,4 +3325,4 @@ invoke('restore').then(r => {
 });
 
 // For tests and debugging in the web inspector
-window.__clipcut = { S, apply, openGraphics, closeGraphics, selectCut, pickTransition, mainCuts, transitionEverywhere, seek, play, pause, split, splitKeep, deleteSelection, undo, redo, select, setPx, fitZoom, saveNow, addPaths, mainClips, addToLane, addText, queueProps, showTab, queueMixer, takeLevels, slipSel, nudgeSel, rollCut, setDucking, previewAnimation, pickExport, addTitle, saveAsTitle, renderTitles };
+window.__clipcut = { S, apply, openGraphics, closeGraphics, selectCut, pickTransition, mainCuts, transitionEverywhere, seek, play, pause, split, splitKeep, deleteSelection, undo, redo, select, setPx, fitZoom, saveNow, addPaths, mainClips, addToLane, addText, queueProps, showTab, queueMixer, takeLevels, slipSel, nudgeSel, rollCut, setDucking, previewAnimation, pickExport, addTitle, saveAsTitle, renderTitles, remakeGraphics, offerRemake };
