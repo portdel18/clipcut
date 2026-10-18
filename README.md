@@ -129,6 +129,13 @@ it plays; a fader drag is one undo step.
 selected cut has **Move cut**, a roll: one clip grows as the other shrinks, so the video keeps its
 length, linked sound, captions and transitions following.
 
+**Smooth playback.** The player renders at the canvas size or a whole fraction of it (½, ¼),
+whichever fills it, and renders ahead while the video plays. The quality menu under the player
+(Auto, Full, ½, ¼) trades sharpness for smoothness on a slow computer. For big or 4K footage,
+**Make proxies** in the Media panel makes small ProRes copies in the background (in the project's
+folder) and plays from them; **Use for playback** turns them on or off. Exports always use the
+originals.
+
 **Platform overlays.** The player's **Overlay** menu shows what TikTok, Instagram Reels or YouTube
 Shorts cover on a 9:16 video (the same drawing as Clip Studio's), or the safe zones on any shape.
 It is only in the player, never in an export.
@@ -171,18 +178,20 @@ ProRes `.mov` for the master, a `.wav` for the sound) with progress and Cancel.
 | **1. Editor v1** (done: 1a cutting, 1b lanes and properties, 1c captions, 1d transitions) | Split, trim, ripple delete, a magnetic main track plus overlay, text and audio lanes, speed, transitions, vertical and horizontal canvases, undo, autosave. First workflows: cutting down interviews and captioned explainers (auto-captions with styles, transcript cutting) |
 | **2. Clip Studio inside** (this) | A Graphics tab with Clip Studio's tools (lower thirds, map zoom, numbers, timelines, underline); graphics become clips you can reopen and edit; TikTok, Reels and Shorts overlays in the preview |
 | **3. Pro panels** (done: 3a keyframes, 3b colour and scopes, 3c the mixer and precise trimming) | Keyframes, colour, the audio mixer, scopes and precise trimming, from the engine |
-| **4. CapCut extras** (done: 4a text animations and ducking, 4b beats and quick exports; 4c titles: this) | Caption styles, text animations, templates, beat markers, music ducking, quick social exports |
-| **5. Polish** | Live graphics, proxies, speed work, signed installers and updates |
+| **4. CapCut extras** (done: 4a text animations and ducking, 4b beats and quick exports, 4c titles) | Caption styles, text animations, templates, beat markers, music ducking, quick social exports |
+| **5. Polish** (5a smooth playback and proxies: this) | Live graphics, proxies, speed work, signed installers and updates |
 
 ## How it is built
 
 | Layer | Where | What |
 |---|---|---|
 | Engine | `crates/*` (from FilmCraft) | Decoding, the timeline model, rendering, effects, audio mixing, export |
-| Façade | `crates/clipcut-core` | The engine operations the app calls: the magnetic main track and the lanes around it (`timeline.rs`, `lanes.rs`), clip properties, canvas and waveforms (`props.rs`), captions and transcript cutting (`captions.rs`), transitions (`transitions.rs`), graphics from the Graphics tab (`graphics.rs`), keyframes (`keyframes.rs`), colour and scopes (`colour.rs`, `scopes.rs`), the mixer and precise trimming (`mixer.rs`, `trimming.rs`), text animations (`animations.rs`), ducking (`ducking.rs`), beats (`beats.rs`), quick exports (`exporting.rs`) and titles (`titles.rs`), each edit one undo step; projects, preview frames and thumbnails, playback audio, export jobs |
+| Façade | `crates/clipcut-core` | The engine operations the app calls: the magnetic main track and the lanes around it (`timeline.rs`, `lanes.rs`), clip properties, canvas and waveforms (`props.rs`), captions and transcript cutting (`captions.rs`), transitions (`transitions.rs`), graphics from the Graphics tab (`graphics.rs`), keyframes (`keyframes.rs`), colour and scopes (`colour.rs`, `scopes.rs`), the mixer and precise trimming (`mixer.rs`, `trimming.rs`), text animations (`animations.rs`), ducking (`ducking.rs`), beats (`beats.rs`), quick exports (`exporting.rs`) and titles (`titles.rs`), the player's frames and proxies (`preview.rs`), each edit one undo step; projects, preview frames and thumbnails, playback audio, export jobs |
 | App | `apps/clipcut` | A [Tauri](https://tauri.app) window: Rust commands in `src/`, the interface in `ui/` (HTML, CSS and JavaScript, no build step) |
 
-The sound card is the playback clock; the interface shows the frame the engine renders at that time.
+The sound card is the playback clock; the interface shows the frame for that time. While the
+video plays, worker threads render the next frames from a snapshot of the sequence (so they never
+wait for the project), and a frame that is late is skipped rather than slowing the picture down.
 
 ## Building
 

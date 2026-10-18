@@ -96,7 +96,6 @@ h2 { margin: 0 0 10px; font-size: 12px; font-weight: 700; letter-spacing: .08em;
 .play:disabled { opacity: .4; cursor: default; }
 .play svg { fill: currentColor; stroke: none; }
 .t-right { position: absolute; right: 12px; display: flex; align-items: center; gap: 12px; }
-#guide { width: 128px; }
 .note { color: var(--faint); font-size: 12px; }
 .ratio { display: flex; align-items: center; gap: 6px; color: var(--muted); font-size: 12px; }
 select, .props input[type="number"], .props textarea { font: inherit; color: var(--text); background: var(--well); border: 1px solid var(--line); border-radius: 6px; }
@@ -346,3 +345,15 @@ h3.sub { margin: 12px 0 6px; font-size: 11px; font-weight: 600; color: var(--mut
 .title-tile:hover .remove { opacity: 1; }
 .title-controls { display: grid; gap: 8px; }
 .title-controls textarea { width: 100%; resize: vertical; min-height: 28px; }
+
+/* proxies in the Media panel */
+.proxies { display: grid; gap: 6px; margin: 4px 0 10px; }
+.proxy-row { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.proxies .bar { height: 4px; border-radius: 2px; background: var(--well); overflow: hidden; }
+.proxies .bar > div { height: 100%; width: 0; background: var(--accent); }
+.proxies .hint { margin: 0; }
+.media-card .proxy-tag { position: absolute; left: 6px; top: 6px; padding: 1px 6px; border-radius: 4px; background: rgba(0, 0, 0, .65); color: var(--accent); font-size: 10px; font-weight: 700; pointer-events: none; }
+/* the transport's menus stay clear of the play button */
+#guide { width: 116px; }
+#quality { width: 70px; }
+#ratio { width: 118px; }

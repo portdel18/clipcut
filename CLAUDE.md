@@ -58,6 +58,11 @@ remote `upstream`). Read `README.md` for what it is and the roadmap.
   template link (`ClipView.title`) and is edited through its controls, never the text keys
   (its first layer may be a shape). The user's own titles live in "Graphics Templates" beside the
   engine's preferences file, so `restore` calls `Studio::set_data_dir` with the app data folder.
+- The player's frames come from `FrameFeed` (`clipcut-core/src/preview.rs`: a project snapshot
+  that renders on any thread at a scale snapped to 1, ½, ¼, ⅛ by `preview_scale`). While playing,
+  `apps/clipcut/src/ahead.rs` renders ahead on 2–3 workers and `frame` serves from it without the
+  studio lock. Proxies are the engine's (`media.createProxies`); `Studio::poll` attaches finished
+  ones, and the Media panel calls it when the job ends.
 - Disk is tight here: `rm -rf target/debug/incremental` when a build fails with "no space left".
 - Interface copy: plain words from the user's side, errors that say what went wrong and how to fix it.
   One dark theme from the tokens at the top of `ui/app.css`; amber (`--accent`) marks the active thing.

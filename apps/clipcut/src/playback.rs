@@ -70,12 +70,16 @@ pub struct State {
 pub struct Player {
     run: Option<Running>,
     last: f64,
+    /// The picture rendered ahead while playing.
+    ahead: Option<Arc<crate::ahead::Ahead>>,
 }
 
 impl Player {
-    /// Starts playing `feed` from `from` seconds; stops by itself at `end`.
-    pub fn play(&mut self, feed: AudioFeed, from: f64, end: f64) {
+    /// Starts playing `feed` from `from` seconds, with the picture rendered ahead by `ahead`;
+    /// stops by itself at `end`.
+    pub fn play(&mut self, feed: AudioFeed, from: f64, end: f64, ahead: Option<Arc<crate::ahead::Ahead>>) {
         self.stop();
+        self.ahead = ahead;
         let from = if from.is_finite() { from.clamp(0.0, end.max(0.0)) } else { 0.0 };
         let clock = Arc::new(Clock { played: AtomicU64::new(0), rate: AtomicU32::new(0), silent: AtomicBool::new(false), started: Instant::now() });
         let stop = Arc::new(AtomicBool::new(false));
@@ -118,8 +122,16 @@ impl Player {
         self.run.as_ref().map(|r| r.meters.take()).unwrap_or_default()
     }
 
+    /// The picture rendered ahead, while playing.
+    pub fn ahead(&self) -> Option<Arc<crate::ahead::Ahead>> {
+        self.run.as_ref().and(self.ahead.clone())
+    }
+
     /// Stops playing and keeps the position.
     pub fn stop(&mut self) {
+        if let Some(a) = self.ahead.take() {
+            a.stop();
+        }
         if let Some(r) = self.run.take() {
             self.last = r.position();
             r.stop.store(true, Ordering::Release);
