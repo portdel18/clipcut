@@ -37,5 +37,13 @@
         "installMode": "currentUser"
       }
     }
+  },
+  "plugins": {
+    "updater": {
+      "endpoints": ["https://github.com/portdel18/clipcut/releases/latest/download/latest.json"],
+      "pubkey": "",
+      "requireSignedVersion": true,
+      "windows": { "installMode": "passive" }
+    }
   }
 }

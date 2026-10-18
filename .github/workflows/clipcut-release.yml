@@ -1,0 +1,193 @@
+# Publishes a ClipCut release on GitHub: builds the Windows installer for a version, self-tests
+# it, signs it, and puts it on the Releases page with the update manifest (latest.json) that
+# copies of ClipCut check. Start it by pushing a tag (v0.2.0) or from the Actions tab with a
+# version. Signing switches on with the repository's secrets and variables; see
+# packaging/clipcut/RELEASING.md.
+name: ClipCut release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version to release, for example 0.2.0 (the tag v0.2.0 is made on this commit)"
+        required: true
+
+permissions:
+  contents: write
+
+concurrency:
+  group: clipcut-release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: windows-latest
+    timeout-minutes: 120
+    env:
+      CARGO_TERM_COLOR: always
+      CARGO_INCREMENTAL: "0"
+      GH_TOKEN: ${{ github.token }}
+      # the update key the app checks updates against (public; built into the app)
+      CLIPCUT_UPDATER_PUBKEY: ${{ vars.CLIPCUT_UPDATER_PUBKEY }}
+      HAS_UPDATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY != '' }}
+      HAS_CERTIFICATE: ${{ secrets.WINDOWS_CERTIFICATE != '' }}
+      WINDOWS_SIGN_COMMAND: ${{ vars.WINDOWS_SIGN_COMMAND }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Version
+        shell: pwsh
+        env:
+          INPUT_VERSION: ${{ inputs.version }}
+        run: |
+          $v = if ($env:GITHUB_EVENT_NAME -eq 'push') { $env:GITHUB_REF_NAME } else { $env:INPUT_VERSION }
+          $v = $v.Trim().TrimStart('v')
+          if ($v -notmatch '^\d+\.\d+\.\d+(-[0-9A-Za-z.]+)?$') {
+            throw "'$v' isn't a version ClipCut can use. Use three numbers like 0.2.0 (or 0.2.0-beta.1 for a test release)."
+          }
+          gh release view "v$v" --json tagName 2>$null | Out-Null
+          if ($LASTEXITCODE -eq 0) { throw "There is already a release v$v. Pick the next version, or delete that release first." }
+          # gh failing there is the good case; the step ends with the last exit code
+          $global:LASTEXITCODE = 0
+          "VERSION=$v" >> $env:GITHUB_ENV
+          "PRERELEASE=$($v.Contains('-'))" >> $env:GITHUB_ENV
+          Write-Output "Releasing ClipCut $v"
+
+      - name: Check the signing setup
+        shell: pwsh
+        run: |
+          $pub = [bool]$env:CLIPCUT_UPDATER_PUBKEY
+          $priv = $env:HAS_UPDATE_KEY -eq 'true'
+          if ($pub -and -not $priv) { throw "The CLIPCUT_UPDATER_PUBKEY variable is set but the TAURI_SIGNING_PRIVATE_KEY secret isn't, so updates couldn't be signed. Add the secret, or remove the variable to release without updates." }
+          if ($priv -and -not $pub) { throw "The TAURI_SIGNING_PRIVATE_KEY secret is set but the CLIPCUT_UPDATER_PUBKEY variable isn't, so the app couldn't check updates. Add the public key as a variable." }
+          if (-not $pub) { Write-Output "::warning::No update key: this release can't update itself, and people download new versions from the Releases page." }
+          if ($env:HAS_CERTIFICATE -ne 'true' -and -not $env:WINDOWS_SIGN_COMMAND) {
+            Write-Output "::warning::No code-signing certificate: Windows SmartScreen warns about the installer ('Windows protected your PC', then More info, Run anyway)."
+          }
+
+      - name: Rust toolchain
+        run: |
+          rustup update stable --no-self-update
+          rustup default stable
+          rustc --version
+
+      - name: Cache cargo builds
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: clipcut-windows
+          save-if: false
+
+      - name: ffmpeg (self-test clip only; never shipped)
+        shell: pwsh
+        run: |
+          choco install ffmpeg --no-progress -y
+          if (-not (Get-Command ffmpeg -ErrorAction SilentlyContinue)) {
+            Write-Output "Chocolatey didn't install ffmpeg; using a static build instead"
+            $zip = "$env:RUNNER_TEMP\ffmpeg.zip"
+            Invoke-WebRequest -Uri "https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-win64-gpl.zip" -OutFile $zip
+            Expand-Archive $zip -DestinationPath "$env:RUNNER_TEMP\ffmpeg"
+            $bin = (Get-ChildItem "$env:RUNNER_TEMP\ffmpeg" -Recurse -Filter ffmpeg.exe | Select-Object -First 1).DirectoryName
+            Add-Content $env:GITHUB_PATH $bin
+          }
+
+      - name: Code-signing certificate
+        if: env.HAS_CERTIFICATE == 'true'
+        shell: pwsh
+        env:
+          WINDOWS_CERTIFICATE: ${{ secrets.WINDOWS_CERTIFICATE }}
+          WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
+        run: |
+          $pfx = "$env:RUNNER_TEMP\certificate.pfx"
+          [IO.File]::WriteAllBytes($pfx, [Convert]::FromBase64String($env:WINDOWS_CERTIFICATE))
+          $pw = ConvertTo-SecureString $env:WINDOWS_CERTIFICATE_PASSWORD -AsPlainText -Force
+          $cert = Import-PfxCertificate -FilePath $pfx -CertStoreLocation Cert:\CurrentUser\My -Password $pw
+          Remove-Item $pfx
+          if (-not $cert) { throw "The WINDOWS_CERTIFICATE secret couldn't be imported. Check that it is the .pfx file in base64 and that WINDOWS_CERTIFICATE_PASSWORD is its password." }
+          "CERT_THUMBPRINT=$($cert.Thumbprint)" >> $env:GITHUB_ENV
+
+      - name: Build ClipCut and its installer
+        shell: pwsh
+        working-directory: apps/clipcut
+        run: |
+          $config = @{ version = $env:VERSION }
+          if ($env:CERT_THUMBPRINT) {
+            $config.bundle = @{ windows = @{ certificateThumbprint = $env:CERT_THUMBPRINT; digestAlgorithm = 'sha256'; timestampUrl = 'http://timestamp.digicert.com' } }
+          } elseif ($env:WINDOWS_SIGN_COMMAND) {
+            $config.bundle = @{ windows = @{ signCommand = $env:WINDOWS_SIGN_COMMAND } }
+          }
+          $config | ConvertTo-Json -Depth 5 | Set-Content "$env:RUNNER_TEMP\release.json"
+          Get-Content "$env:RUNNER_TEMP\release.json"
+          npx --yes @tauri-apps/cli@2 build --ci --config "$env:RUNNER_TEMP\release.json"
+          if ($LASTEXITCODE -ne 0) { throw "the build failed" }
+          $inst = Get-ChildItem ..\..\target\release\bundle\nsis\*-setup.exe | Select-Object -First 1
+          if (-not $inst) { throw "the installer was not found in target\release\bundle\nsis" }
+          "INSTALLER=$($inst.FullName)" >> $env:GITHUB_ENV
+          $exe = @("..\..\target\release\ClipCut.exe", "..\..\target\release\clipcut.exe") | Where-Object { Test-Path $_ } | Select-Object -First 1
+          "APP_EXE=$((Resolve-Path $exe).Path)" >> $env:GITHUB_ENV
+
+      - name: Check the code signature
+        if: env.HAS_CERTIFICATE == 'true' || env.WINDOWS_SIGN_COMMAND != ''
+        shell: pwsh
+        run: |
+          foreach ($f in @($env:APP_EXE, $env:INSTALLER)) {
+            $s = Get-AuthenticodeSignature $f
+            Write-Output "$f : $($s.Status) $($s.SignerCertificate.Subject)"
+            if ($s.Status -ne 'Valid') { throw "$f isn't signed properly ($($s.Status)): $($s.StatusMessage)" }
+          }
+
+      - name: Self-test the packaged app
+        shell: pwsh
+        run: |
+          $clip = "$env:RUNNER_TEMP\selftest-in.mp4"
+          ffmpeg -v error -y -f lavfi -i "testsrc2=size=1280x720:rate=30:duration=5" -f lavfi -i "sine=frequency=440:duration=5:sample_rate=48000" -c:v libx264 -pix_fmt yuv420p -c:a aac -shortest $clip
+          $p = Start-Process -FilePath $env:APP_EXE -ArgumentList "--self-test", "`"$clip`"", "`"$env:RUNNER_TEMP\selftest-out.mp4`"", "selftest-report.json" -Wait -PassThru -NoNewWindow
+          Get-Content selftest-report.json
+          if ($p.ExitCode -ne 0) { throw "self-test failed (exit $($p.ExitCode))" }
+
+      - name: Sign the update
+        if: env.HAS_UPDATE_KEY == 'true'
+        shell: pwsh
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: |
+          npx --yes @tauri-apps/cli@2 signer sign --app-version $env:VERSION $env:INSTALLER
+          if ($LASTEXITCODE -ne 0) { throw "Signing the update failed. Check the TAURI_SIGNING_PRIVATE_KEY secret and its password (TAURI_SIGNING_PRIVATE_KEY_PASSWORD)." }
+          # the app checks the signature with the key built into it, as it will when updating
+          $p = Start-Process -FilePath $env:APP_EXE -ArgumentList "--verify-update", "`"$env:INSTALLER`"", "`"$env:INSTALLER.sig`"", $env:VERSION -Wait -PassThru -NoNewWindow
+          if ($p.ExitCode -ne 0) { throw "The update signature doesn't check out with the app's key: the CLIPCUT_UPDATER_PUBKEY variable must be the public key of the TAURI_SIGNING_PRIVATE_KEY secret." }
+
+      - name: Publish the release
+        shell: pwsh
+        run: |
+          $tag = "v$env:VERSION"
+          $files = @($env:INSTALLER)
+          if ($env:HAS_UPDATE_KEY -eq 'true') { $files += "$env:INSTALLER.sig" }
+          $pre = if ($env:PRERELEASE -eq 'True') { @('--prerelease') } else { @() }
+          # a draft until the update manifest is there, so no copy of ClipCut sees a release
+          # without one
+          gh release create $tag @files --draft --title "ClipCut $env:VERSION" --generate-notes --target $env:GITHUB_SHA @pre
+          if ($LASTEXITCODE -ne 0) { throw "the release couldn't be created" }
+          if ($env:HAS_UPDATE_KEY -eq 'true') {
+            $name = Split-Path $env:INSTALLER -Leaf
+            $entry = @{
+              signature = (Get-Content "$env:INSTALLER.sig" -Raw).Trim()
+              url = "https://github.com/$env:GITHUB_REPOSITORY/releases/download/$tag/$name"
+            }
+            $notes = gh release view $tag --json body -q .body
+            $manifest = [ordered]@{
+              version = $env:VERSION
+              notes = ($notes -join "`n")
+              pub_date = (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ")
+              platforms = @{ 'windows-x86_64' = $entry; 'windows-x86_64-nsis' = $entry }
+            }
+            $manifest | ConvertTo-Json -Depth 5 | Set-Content -Encoding utf8NoBOM latest.json
+            Get-Content latest.json
+            gh release upload $tag latest.json
+            if ($LASTEXITCODE -ne 0) { throw "the update manifest couldn't be uploaded" }
+          }
+          gh release edit $tag --draft=false
+          if ($LASTEXITCODE -ne 0) { throw "the release couldn't be published" }
+          Write-Output "Published https://github.com/$env:GITHUB_REPOSITORY/releases/tag/$tag"

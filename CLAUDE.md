@@ -24,6 +24,11 @@ remote `upstream`). Read `README.md` for what it is and the roadmap.
   `js/core.js`, "Inside ClipCut"); frames go to `src/graphics.rs` as raw request bodies, and
   `clipcut-core/src/graphics.rs` imports them as an image sequence.
 - `.github/workflows/clipcut-windows.yml`: tests, the NSIS installer, the self-test, the artifact.
+  `.github/workflows/clipcut-release.yml` publishes a release (tag `v*` or a version typed in
+  Actions): code signing and update signing switch on with the repository's secrets and variables
+  (`packaging/clipcut/RELEASING.md`). The updater (`src/updates.rs`) is registered only when
+  `CLIPCUT_UPDATER_PUBKEY` was set at build time; without it, `app.updater()` would panic, so check
+  `updates::key()` first. Its manifest is `latest.json` on the latest release.
 
 ## Running and looking at the app
 - Linux needs the Tauri system libraries (see README). Under a headless session:

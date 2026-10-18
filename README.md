@@ -15,13 +15,19 @@ frame timing, colour, audio mixing and export), and will bring in
 
 ## Install on Windows
 
-1. Open the latest run of the **ClipCut Windows** workflow under the repository's **Actions** tab (or
-   a pull request's checks) and download **ClipCut-windows-installer**.
-2. Unzip it and run `ClipCut_<version>_x64-setup.exe`. It installs for your user account only, adds
-   ClipCut to the Start menu, and fetches Microsoft's WebView2 if Windows doesn't already have it
-   (Windows 11 does).
-3. Until the app is code-signed, Windows shows **"Windows protected your PC"** the first time: choose
-   **More info → Run anyway**.
+1. Download `ClipCut_<version>_x64-setup.exe` from the latest release on the repository's
+   **Releases** page. (Builds of work in progress are under the **Actions** tab: open a run of the
+   **ClipCut Windows** workflow, or a pull request's checks, and download
+   **ClipCut-windows-installer**.)
+2. Run it. It installs for your user account only, adds ClipCut to the Start menu, and fetches
+   Microsoft's WebView2 if Windows doesn't already have it (Windows 11 does).
+3. If the installer isn't code-signed, Windows shows **"Windows protected your PC"** the first time:
+   choose **More info → Run anyway**.
+
+**Updates.** A release made with an update key checks for a newer version when ClipCut starts and
+shows **Update to x.y.z** in the top bar: it saves the project, installs the new version and opens
+it again. **About ClipCut** (the name at the top left) shows the version and checks by hand. How
+releases, update keys and code signing are set up: [RELEASING.md](packaging/clipcut/RELEASING.md).
 
 Your footage stays on your computer: ClipCut reads it from disk and writes exports where you choose.
 
@@ -182,7 +188,7 @@ ProRes `.mov` for the master, a `.wav` for the sound) with progress and Cancel.
 | **2. Clip Studio inside** (this) | A Graphics tab with Clip Studio's tools (lower thirds, map zoom, numbers, timelines, underline); graphics become clips you can reopen and edit; TikTok, Reels and Shorts overlays in the preview |
 | **3. Pro panels** (done: 3a keyframes, 3b colour and scopes, 3c the mixer and precise trimming) | Keyframes, colour, the audio mixer, scopes and precise trimming, from the engine |
 | **4. CapCut extras** (done: 4a text animations and ducking, 4b beats and quick exports, 4c titles) | Caption styles, text animations, templates, beat markers, music ducking, quick social exports |
-| **5. Polish** (5a smooth playback and proxies; 5b graphics that follow the video: this) | Live graphics, proxies, speed work, signed installers and updates |
+| **5. Polish** (5a smooth playback and proxies; 5b graphics that follow the video; 5c releases and updates: this) | Live graphics, proxies, speed work, signed installers and updates |
 
 ## How it is built
 
@@ -209,11 +215,13 @@ cargo run -p clipcut -- a.mp4 b.mp4                # the app, starting a project
 cargo run -p clipcut -- --self-test in.mp4 out.mp4 report.json   # open, preview, sound, export; no window
 cargo run -p clipcut -- --caption-test speech.mp4 models/ whisper-tiny report.json out.srt   # real-speech captions
 CLIPCUT_TEST_TRANSCRIPT=words.json cargo run -p clipcut -- clip.mp4   # the Captions tab without a model
+cargo run -p clipcut -- --verify-update setup.exe setup.exe.sig 0.2.0   # a release's update signature (needs CLIPCUT_UPDATER_PUBKEY at build time)
 cd apps/clipcut && npx @tauri-apps/cli@2 build     # the installer (target/release/bundle/)
 ```
 
 CI (`.github/workflows/clipcut-windows.yml`) runs the tests, builds the installer and runs the
-self-test on Windows for every pull request.
+self-test on Windows for every pull request. Releases come from `.github/workflows/clipcut-release.yml`
+(see [RELEASING.md](packaging/clipcut/RELEASING.md)).
 
 ## Credits and licence
 

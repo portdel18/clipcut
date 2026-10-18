@@ -3,7 +3,8 @@
 //!
 //! `ClipCut <file>` starts a new project with that clip; otherwise the last project reopens. `ClipCut --self-test <in> <out> <report.json>`
 //! opens, previews, mixes and exports without a window and writes what happened to the report
-//! (`--caption-test` does the same for auto-captions with a real speech model):
+//! (`--caption-test` does the same for auto-captions with a real speech model, and
+//! `--verify-update` checks a release's update signature against the app's key):
 //! the Windows build runs it in CI, so the packaged engine is tested on Windows itself.
 
 // No console window behind the app in release builds on Windows
@@ -14,6 +15,7 @@ mod captioning;
 mod editing;
 mod graphics;
 mod playback;
+mod updates;
 
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
@@ -266,6 +268,10 @@ fn main() {
         let get = |i: usize| args.get(i).map(String::as_str).unwrap_or("");
         std::process::exit(captioning::caption_test(get(1), get(2), get(3), get(4), get(5)));
     }
+    if args.first().map(String::as_str) == Some("--verify-update") {
+        let get = |i: usize| args.get(i).map(String::as_str).unwrap_or("");
+        std::process::exit(updates::verify_update(get(1), get(2), get(3)));
+    }
     let mut studio = Studio::new();
     // For checking the Captions tab without a speech model (tests, CI, agents): every clip is heard
     // saying this transcript (JSON, as a project file stores one).
@@ -281,8 +287,11 @@ fn main() {
         graphics: graphics::Jobs::default(),
         startup_files: Mutex::new(args.into_iter().filter(|a| !a.starts_with("--")).collect()),
     };
-    let built = tauri::Builder::default()
-        .plugin(tauri_plugin_dialog::init())
+    let mut builder = tauri::Builder::default().plugin(tauri_plugin_dialog::init());
+    if let Some(updater) = updates::plugin() {
+        builder = builder.plugin(updater);
+    }
+    let built = builder
         .manage(app)
         .on_window_event(|window, event| {
             if let tauri::WindowEvent::CloseRequested { .. } = event {
@@ -303,6 +312,9 @@ fn main() {
             export_as,
             cancel_export,
             reveal,
+            updates::check_update,
+            updates::install_update,
+            updates::open_releases,
             editing::timeline,
             editing::set_colour,
             editing::set_look,

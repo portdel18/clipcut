@@ -37,7 +37,10 @@ svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width:
 
 /* Top bar */
 .top { grid-area: top; display: flex; align-items: center; gap: 16px; padding: 0 12px; background: var(--panel); border-bottom: 1px solid var(--line); }
-.brand { display: flex; align-items: center; gap: 8px; font-weight: 700; letter-spacing: .02em; font-size: 14px; }
+.brand { display: flex; align-items: center; gap: 8px; font-weight: 700; letter-spacing: .02em; font-size: 14px; padding: 4px 6px; margin-left: -6px; border: 0; border-radius: 6px; background: none; cursor: pointer; }
+.brand:hover { background: var(--panel-2); }
+.btn.update { border-color: var(--accent); color: var(--accent); }
+.dlg .notes { max-height: 180px; overflow: auto; margin: 0 0 16px; padding: 10px 12px; border-radius: 6px; background: var(--panel-2); color: var(--muted); font: 12px/1.5 var(--ui); white-space: pre-wrap; }
 .brand img { border-radius: 5px; }
 .project { flex: 1; min-width: 0; display: flex; justify-content: center; align-items: baseline; gap: 10px; }
 .title { min-width: 0; color: var(--text); font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -303,6 +306,7 @@ select:disabled { opacity: .5; }
 .dlg .meta.err { color: var(--err); font-family: var(--ui); }
 .dlg .meta.ok { color: var(--ok); font-family: var(--ui); }
 .dlg-actions { display: flex; justify-content: flex-end; gap: 8px; }
+.dlg-actions .btn { white-space: nowrap; }
 
 /* the mixer */
 .mixer { display: grid; gap: 10px; margin-bottom: 12px; }
