@@ -15,10 +15,12 @@ mod colour;
 mod graphics;
 mod keyframes;
 mod lanes;
+mod mixer;
 mod props;
 mod scopes;
 mod timeline;
 mod transitions;
+mod trimming;
 
 use std::sync::Arc;
 
@@ -33,6 +35,7 @@ pub use captions::{CaptionStyleView, CaptionView, CaptionsView, ModelView, Trans
 pub use colour::{ADJUST, ColourView, looks};
 pub use graphics::{GRAPHIC_FILE, GRAPHIC_SOUND, read_graphic};
 pub use keyframes::{ANIMATABLE, KeyTrack};
+pub use mixer::{Level, Meters, MixView};
 pub use props::{ClipProps, PEAKS_PER_SECOND, Peaks, TextProps};
 pub use scopes::SCOPES;
 pub use timeline::{ClipView, Keep, LaneView, MediaView, ProjectView, TimelineView};
@@ -96,12 +99,20 @@ pub struct AudioFeed {
     project: Arc<Project>,
     sequence: ItemId,
     provider: PoolProvider,
+    /// Where the mixer leaves each strip's level as it plays (see [`AudioFeed::meters`]).
+    live: Arc<filmcraft_render::mixer::LiveMix>,
     pub sample_rate: u32,
     /// Total samples in the sequence (per channel).
     pub length: i64,
 }
 
 impl AudioFeed {
+    /// The levels the mixer leaves as this feed plays, readable from another thread.
+    pub fn meters(&self) -> crate::mixer::Meters {
+        let lanes = self.project.sequence(self.sequence).map(crate::mixer::strip_lanes).unwrap_or_default();
+        crate::mixer::Meters { live: self.live.clone(), lanes }
+    }
+
     /// `frames` stereo samples starting at sample `start` (sequence rate), interleaved L R L R.
     /// Past the end, or before the start, is silence.
     pub fn mix(&self, start: i64, frames: usize) -> Vec<f32> {
@@ -114,7 +125,8 @@ impl AudioFeed {
         if n == 0 {
             return out;
         }
-        let buf = filmcraft_render::audio::mix_sequence(&self.project, seq, from, n, &self.provider);
+        let mixed = filmcraft_render::mixer::mix_graph(&self.project, seq, from, n, &self.provider, Some(&self.live));
+        let buf = filmcraft_render::audio::to_layout(mixed, filmcraft_audio_dsp::channels::Layout::Stereo, filmcraft_audio_dsp::channels::Mixdown::FrontRear);
         let (Some(l), Some(r)) = (buf.channels.first(), buf.channels.get(1).or(buf.channels.first())) else { return out };
         for i in 0..n {
             let o = (skip + i) * 2;
@@ -239,7 +251,7 @@ impl Studio {
         let sample_rate = q.settings.sample_rate.max(1);
         let length = q.duration().to_units_floor(sample_rate as i64);
         let provider = self.session.media.full_res_provider(self.session.project.clone(), self.session.services.clone());
-        Ok(AudioFeed { project: self.session.project.clone(), sequence: id, provider, sample_rate, length })
+        Ok(AudioFeed { project: self.session.project.clone(), sequence: id, provider, live: Arc::default(), sample_rate, length })
     }
 
     /// A frame renderer for media thumbnails over the project as it is now.

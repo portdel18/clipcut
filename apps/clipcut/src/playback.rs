@@ -13,7 +13,7 @@ use std::sync::{Arc, Mutex, PoisonError};
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
-use clipcut_core::AudioFeed;
+use clipcut_core::{AudioFeed, Level, Meters};
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 
 /// How far ahead the mixer runs, in seconds.
@@ -37,6 +37,9 @@ struct Running {
     clock: Arc<Clock>,
     stop: Arc<AtomicBool>,
     threads: Vec<JoinHandle<()>>,
+    /// The feed the mixer thread plays; swapped by [`Player::update`].
+    feed: Arc<Mutex<Arc<AudioFeed>>>,
+    meters: Meters,
 }
 
 impl Running {
@@ -77,6 +80,8 @@ impl Player {
         let clock = Arc::new(Clock { played: AtomicU64::new(0), rate: AtomicU32::new(0), silent: AtomicBool::new(false), started: Instant::now() });
         let stop = Arc::new(AtomicBool::new(false));
         let queue: Arc<Mutex<VecDeque<f32>>> = Arc::new(Mutex::new(VecDeque::new()));
+        let meters = feed.meters();
+        let feed = Arc::new(Mutex::new(Arc::new(feed)));
         let mut threads = Vec::new();
         {
             let (clock, stop, queue) = (clock.clone(), stop.clone(), queue.clone());
@@ -87,12 +92,30 @@ impl Player {
             }));
         }
         {
-            let (clock, stop, queue) = (clock.clone(), stop.clone(), queue.clone());
+            let (feed, clock, stop, queue) = (feed.clone(), clock.clone(), stop.clone(), queue.clone());
             threads.push(std::thread::spawn(move || {
                 let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| mix(&feed, from, &clock, &stop, &queue)));
             }));
         }
-        self.run = Some(Running { from, end, clock, stop, threads });
+        self.run = Some(Running { from, end, clock, stop, threads, feed, meters });
+    }
+
+    /// Goes on playing with `feed` (the sequence after a mixer change) from where it is: the
+    /// change is heard once the sound already mixed ahead has played.
+    pub fn update(&mut self, feed: AudioFeed) {
+        if let Some(r) = &mut self.run {
+            r.meters = feed.meters();
+            *r.feed.lock().unwrap_or_else(PoisonError::into_inner) = Arc::new(feed);
+        }
+    }
+
+    pub fn playing(&self) -> bool {
+        self.run.is_some()
+    }
+
+    /// Each sound lane's and the Mix's peak level since the last reading (nothing when stopped).
+    pub fn meters(&self) -> Vec<Level> {
+        self.run.as_ref().map(|r| r.meters.take()).unwrap_or_default()
     }
 
     /// Stops playing and keeps the position.
@@ -213,11 +236,14 @@ where
 }
 
 /// Keeps the queue about [`AHEAD`] seconds full, resampling the sequence mix to the device rate.
-fn mix(feed: &AudioFeed, from: f64, clock: &Arc<Clock>, stop: &Arc<AtomicBool>, queue: &Arc<Mutex<VecDeque<f32>>>) {
+fn mix(slot: &Mutex<Arc<AudioFeed>>, from: f64, clock: &Arc<Clock>, stop: &Arc<AtomicBool>, queue: &Arc<Mutex<VecDeque<f32>>>) {
     // Wait for the device rate (or for the news that there is no device)
     let rate = loop {
-        if stop.load(Ordering::Acquire) || clock.silent.load(Ordering::Acquire) {
+        if stop.load(Ordering::Acquire) {
             return;
+        }
+        if clock.silent.load(Ordering::Acquire) {
+            return mix_silent(slot, from, clock, stop);
         }
         let r = clock.rate.load(Ordering::Acquire);
         if r > 0 {
@@ -225,7 +251,7 @@ fn mix(feed: &AudioFeed, from: f64, clock: &Arc<Clock>, stop: &Arc<AtomicBool>, 
         }
         std::thread::sleep(Duration::from_millis(2));
     };
-    let src_rate = feed.sample_rate.max(1);
+    let src_rate = slot.lock().unwrap_or_else(PoisonError::into_inner).sample_rate.max(1);
     let step = f64::from(src_rate) / f64::from(rate);
     let target = ((AHEAD * f64::from(rate)) as usize).max(CHUNK) * 2;
     let mut pos = from * f64::from(src_rate);
@@ -239,6 +265,7 @@ fn mix(feed: &AudioFeed, from: f64, clock: &Arc<Clock>, stop: &Arc<AtomicBool>, 
         // Source samples covering CHUNK device frames, plus one for interpolation
         let first = pos.floor() as i64;
         let need = (CHUNK as f64 * step).ceil() as usize + 2;
+        let feed = slot.lock().unwrap_or_else(PoisonError::into_inner).clone();
         let src = feed.mix(first, need);
         out.clear();
         for i in 0..CHUNK {
@@ -253,5 +280,22 @@ fn mix(feed: &AudioFeed, from: f64, clock: &Arc<Clock>, stop: &Arc<AtomicBool>, 
         }
         pos += CHUNK as f64 * step;
         queue.lock().unwrap_or_else(PoisonError::into_inner).extend(out.iter().copied());
+    }
+}
+
+/// Without a device: mixes along with the wall clock and drops the sound, so the meters still move.
+fn mix_silent(slot: &Mutex<Arc<AudioFeed>>, from: f64, clock: &Arc<Clock>, stop: &Arc<AtomicBool>) {
+    let rate = f64::from(slot.lock().unwrap_or_else(PoisonError::into_inner).sample_rate.max(1));
+    let mut pos = (from * rate) as i64;
+    while !stop.load(Ordering::Acquire) {
+        let now = ((from + clock.started.elapsed().as_secs_f64()) * rate) as i64;
+        if pos >= now {
+            std::thread::sleep(Duration::from_millis(10));
+            continue;
+        }
+        let n = usize::try_from(now - pos).unwrap_or(0).min(CHUNK * 4);
+        let feed = slot.lock().unwrap_or_else(PoisonError::into_inner).clone();
+        let _ = feed.mix(pos, n);
+        pos = pos.saturating_add(n as i64);
     }
 }

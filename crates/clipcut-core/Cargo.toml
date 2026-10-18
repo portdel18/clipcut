@@ -16,6 +16,7 @@ filmcraft-media = { workspace = true }
 filmcraft-project = { workspace = true }
 filmcraft-render = { workspace = true }
 filmcraft-scopes = { workspace = true }
+filmcraft-audio-dsp = { workspace = true }
 filmcraft-color = { workspace = true }
 # speech-to-text for captions: Whisper on the CPU (pure Rust) and its model download
 filmcraft-speech = { workspace = true, features = ["whisper", "download"] }

@@ -550,3 +550,47 @@ pub async fn scope(seconds: f64, kind: String, app: tauri::State<'_, App>) -> Re
     })
     .await
 }
+
+/// Sets a sound lane's (or the Mix's) volume, pan, mute or solo. Playback goes on, with the new mix.
+#[tauri::command]
+pub async fn set_mixer(lane: String, values: serde_json::Value, merge: Option<String>, app: tauri::State<'_, App>) -> Result<TimelineView, String> {
+    let (studio, player) = (app.studio.clone(), app.player.clone());
+    blocking(move || {
+        let mut s = lock(&studio);
+        s.set_mixer(&lane, &values, merge.as_deref()).map_err(|e| e.to_string())?;
+        let mut p = lock(&player);
+        if p.playing()
+            && let Ok(feed) = s.audio_feed()
+        {
+            p.update(feed);
+        }
+        Ok(s.timeline())
+    })
+    .await
+}
+
+/// Each sound lane's and the Mix's peak level since the last call, while playing.
+#[tauri::command]
+pub fn meters(app: tauri::State<'_, App>) -> Vec<clipcut_core::Level> {
+    lock(&app.player).meters()
+}
+
+#[tauri::command]
+pub async fn trim_to(clip: u64, edge_in: bool, seconds: f64, app: tauri::State<'_, App>) -> Result<TimelineView, String> {
+    edit(&app, move |s| s.trim_to(clip, edge_in, seconds).map(|_| ())).await
+}
+
+#[tauri::command]
+pub async fn nudge(clips: Vec<u64>, frames: i64, app: tauri::State<'_, App>) -> Result<TimelineView, String> {
+    edit(&app, move |s| s.nudge(&clips, frames)).await
+}
+
+#[tauri::command]
+pub async fn slip(clip: u64, frames: i64, app: tauri::State<'_, App>) -> Result<TimelineView, String> {
+    edit(&app, move |s| s.slip(clip, frames).map(|_| ())).await
+}
+
+#[tauri::command]
+pub async fn roll(from: u64, frames: i64, app: tauri::State<'_, App>) -> Result<TimelineView, String> {
+    edit(&app, move |s| s.roll(from, frames)).await
+}
