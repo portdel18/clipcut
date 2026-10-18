@@ -6,10 +6,11 @@ pure-Rust editing engine (its own H.264, HEVC, ProRes, DNxHR, VP9, AV1, AAC and 
 frame timing, colour, audio mixing and export), and will bring in
 [Clip Studio](https://github.com/portdel18/clip-stu)'s news graphics.
 
-> **Status: Phase 1c, captions.** A magnetic main track you split, trim, reorder and
-> ripple-delete; lanes for overlays, text, music and voiceover; a Properties panel; vertical and
-> square canvases; and auto-captions from the speech (on this computer) that follow every cut, with
-> transcript cutting, filler-word and pause removal, and subtitle files. See [the roadmap](#roadmap).
+> **Status: Phase 1 done (1d, transitions).** A magnetic main track you split, trim, reorder and
+> ripple-delete; transitions on its cuts; lanes for overlays, text, music and voiceover; a
+> Properties panel; vertical and square canvases; and auto-captions from the speech (on this
+> computer) that follow every cut, with transcript cutting, filler-word and pause removal, and
+> subtitle files. Clip Studio's graphics come next (Phase 2). See [the roadmap](#roadmap).
 
 ## Install on Windows
 
@@ -61,6 +62,15 @@ Shorts, 1:1 or 4:5; clips are refitted to the new shape.
 | `↑` `↓` | The previous or next cut; `Home` / `End`: the start or the end |
 | `Ctrl`+wheel, `Ctrl+=` / `Ctrl+-`, `Ctrl+0` | Zoom the timeline at the pointer, in and out, fit it all |
 
+**Transitions.** Hover a cut on the main track and click its square, then pick one of sixteen in
+the **Transitions** tab (Mix, through black or white, Flash, Blur, Zoom, Push, Slide, Whip, Wipe,
+Circle, Glitch, Light leak, 3D spin; each tile plays a preview when you point at it). It plays over
+the cut, half in each clip, so the video keeps its length; where a clip has no footage past its
+edge, its first or last frame holds. Set its length in Properties, **Apply to every cut**, or press
+`Delete` for a plain cut again. When both clips have sound to spare past the cut, the sound
+crossfades too. Transitions stay on their cuts as you trim, split, reorder and change speed, and
+go when their two clips no longer meet.
+
 **Captions.** The **Captions** tab's **Auto captions** listens to the main track's speech and lays
 it out as short captions on a lane at the top. The speech model (Whisper, from OpenAI, run by the
 engine in pure Rust) downloads once, 150 MB to 970 MB by the accuracy you pick, into ClipCut's
@@ -87,7 +97,7 @@ Cancel.
 | Phase | What it adds |
 |---|---|
 | **0. Prove it** (done) | Open, play with sound, scrub, export; the Windows installer from CI |
-| **1. Editor v1** (1a cutting, 1b lanes and properties: done; 1c captions: this; transitions next) | Split, trim, ripple delete, a magnetic main track plus overlay, text and audio lanes, speed, transitions, vertical and horizontal canvases, undo, autosave. First workflows: cutting down interviews and captioned explainers (auto-captions with styles, transcript cutting) |
+| **1. Editor v1** (done: 1a cutting, 1b lanes and properties, 1c captions, 1d transitions) | Split, trim, ripple delete, a magnetic main track plus overlay, text and audio lanes, speed, transitions, vertical and horizontal canvases, undo, autosave. First workflows: cutting down interviews and captioned explainers (auto-captions with styles, transcript cutting) |
 | **2. Clip Studio inside** | A Graphics tab with Clip Studio's tools (lower thirds, map zoom, numbers, timelines, underline); graphics become clips you can reopen and edit; TikTok, Reels and Shorts overlays in the preview |
 | **3. Pro panels** | Keyframes, colour, the audio mixer, scopes and precise trimming, from the engine |
 | **4. CapCut extras** | Caption styles, text animations, templates, beat markers, music ducking, quick social exports |
@@ -98,7 +108,7 @@ Cancel.
 | Layer | Where | What |
 |---|---|---|
 | Engine | `crates/*` (from FilmCraft) | Decoding, the timeline model, rendering, effects, audio mixing, export |
-| Façade | `crates/clipcut-core` | The engine operations the app calls: the magnetic main track and the lanes around it (`timeline.rs`, `lanes.rs`), clip properties, canvas and waveforms (`props.rs`), captions and transcript cutting (`captions.rs`), each edit one undo step; projects, preview frames and thumbnails, playback audio, export jobs |
+| Façade | `crates/clipcut-core` | The engine operations the app calls: the magnetic main track and the lanes around it (`timeline.rs`, `lanes.rs`), clip properties, canvas and waveforms (`props.rs`), captions and transcript cutting (`captions.rs`), transitions (`transitions.rs`), each edit one undo step; projects, preview frames and thumbnails, playback audio, export jobs |
 | App | `apps/clipcut` | A [Tauri](https://tauri.app) window: Rust commands in `src/`, the interface in `ui/` (HTML, CSS and JavaScript, no build step) |
 
 The sound card is the playback clock; the interface shows the frame the engine renders at that time.

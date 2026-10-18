@@ -28,6 +28,7 @@ const S = {
   playing: false,
   px: 60,                // timeline zoom, px per second
   sel: new Set(),        // selected clip ids (main track and lanes; never the main track's sound)
+  cut: null,             // or the selected cut on the main track: the clip before it
   snap: true,
   frameBusy: false,      // a preview frame request is in flight
   want: null,            // the latest preview asked for while busy
@@ -90,6 +91,7 @@ const ICON = {
   muted: svg('<path d="M4 9h4l5-4v14l-5-4H4z"/><path d="M17 9l5 5M22 9l-5 5"/>'),
   music: svg('<path d="M9 18V6l10-2v12"/><circle cx="6.5" cy="18" r="2.5"/><circle cx="16.5" cy="16" r="2.5"/>'),
   plus: svg('<path d="M12 5v14M5 12h14"/>'),
+  transition: svg('<path d="M3 6l9 6-9 6zM21 6l-9 6 9 6z"/>'),
 };
 const has = () => !!(S.tl && S.tl.hasSequence);
 const dur = () => has() ? S.tl.duration : 0;
@@ -164,6 +166,7 @@ function apply(tl, { fit = false } = {}) {
   S.tl = tl;
   const ids = new Set(laneThings().map(c => c.id));
   for (const id of [...S.sel]) if (!ids.has(id)) S.sel.delete(id);
+  if (S.cut != null && !mainCuts().some(c => c.from === S.cut)) S.cut = null;
   S.geom.clear();
   S.t = clampT(S.t);
   if (fit || (!had && has())) fitZoom(false);
@@ -182,6 +185,7 @@ function apply(tl, { fit = false } = {}) {
   if (has()) showFrame(S.t); else clearPreview();
   if (tl.project.dirty && has()) saveSoon();
   renderCaptionsPanel();
+  renderTransitionsPanel();
 }
 
 /* ---------- preview ---------- */
@@ -303,7 +307,7 @@ function stagePointerDown(e) {
   let c = stageClip();
   const hit = clipAtPoint(px, py);
   if (hit && (!c || hit.id !== c.id)) { select([hit.id]); c = hit; }
-  if (!c) { if (S.sel.size) select([]); return; }
+  if (!c) { if (S.sel.size || S.cut != null) select([]); return; }
   e.preventDefault();
   const x0 = c.props.x, y0 = c.props.y, cx = e.clientX, cy = e.clientY;
   const key = nextKey('move');
@@ -532,11 +536,12 @@ async function addText(s) {
   if (r) { const ta = $('#props textarea'); if (ta) { ta.focus(); ta.select(); } }
 }
 function showTab(id) {
-  for (const t of ['media', 'audio', 'text', 'captions']) {
+  for (const t of ['media', 'audio', 'text', 'transitions', 'captions']) {
     $(`#tab-${t}`).setAttribute('aria-selected', String(t === id));
     $(`#panel-${t}`).hidden = t !== id;
   }
   if (id === 'captions') openCaptionsPanel();
+  if (id === 'transitions') openTransitionsPanel();
 }
 
 /* ---------- captions: auto captions, their look, cleaning up the speech, the transcript ---------- */
@@ -737,6 +742,151 @@ function markWord() {
   }
 }
 
+/* ---------- transitions: one per cut on the main track ---------- */
+const TR = { presets: null, frames: null, w: 0, h: 0, n: 0, len: 0.5 };
+try { const v = +localStorage.getItem('clipcut.trlen'); if (v > 0) TR.len = v; } catch (_) {}
+const transitionAt = from => (S.tl && from != null ? S.tl.transitions.find(t => t.from === from) : null) || null;
+/** The main track's cuts, left to right: {from, to, at}. */
+function mainCuts() {
+  const m = mainClips(), out = [];
+  for (let k = 0; k + 1 < m.length; k++) if (Math.abs(m[k].end - m[k + 1].start) < 1e-6) out.push({ from: m[k].id, to: m[k + 1].id, at: m[k + 1].start });
+  return out;
+}
+function selectCut(from) {
+  S.sel.clear();
+  S.cut = from;
+  renderSelection();
+}
+/** The cut a tile goes on: the selected one, else the one nearest the playhead. */
+function targetCut() {
+  const cs = mainCuts();
+  if (S.cut != null && cs.some(c => c.from === S.cut)) return S.cut;
+  if (!cs.length) return null;
+  return cs.reduce((a, b) => Math.abs(b.at - S.t) < Math.abs(a.at - S.t) ? b : a).from;
+}
+async function openTransitionsPanel() {
+  if (!TR.presets) {
+    try { TR.presets = await invoke('transition_presets'); } catch (e) { toast(e, true); return; }
+    const grid = $('#tr-grid');
+    for (const p of TR.presets) {
+      const b = document.createElement('button');
+      b.className = 'tr-tile';
+      b.dataset.id = p.id;
+      b.title = `Put ${p.name} on the cut`;
+      b.innerHTML = '<canvas width="160" height="90"></canvas><span></span>';
+      b.querySelector('span').textContent = p.name;
+      b.addEventListener('click', () => pickTransition(p.id));
+      b.addEventListener('pointerenter', () => animateTile(b, true));
+      b.addEventListener('pointerleave', () => animateTile(b, false));
+      grid.appendChild(b);
+    }
+    try {
+      const buf = await invoke('transition_previews', { w: 160, h: 90, frames: 16 });
+      const dv = new DataView(buf);
+      [TR.w, TR.h, TR.n] = [dv.getUint32(0, true), dv.getUint32(4, true), dv.getUint32(8, true)];
+      TR.frames = buf;
+      for (const b of grid.children) paintTile(b, restFrame());
+    } catch (e) { /* the tiles stay plain */ }
+  }
+  renderTransitionsPanel();
+}
+/** The frame a tile shows at rest: a third of the way, where every transition shows itself. */
+const restFrame = () => Math.round((TR.n - 1) * 0.3);
+function paintTile(b, k) {
+  if (!TR.frames) return;
+  const i = TR.presets.findIndex(p => p.id === b.dataset.id), size = TR.w * TR.h * 4;
+  const c = b.querySelector('canvas');
+  if (c.width !== TR.w || c.height !== TR.h) { c.width = TR.w; c.height = TR.h; }
+  c.getContext('2d').putImageData(new ImageData(new Uint8ClampedArray(TR.frames, 12 + (i * TR.n + k) * size, size), TR.w, TR.h), 0, 0);
+}
+/** Plays a tile's preview while the pointer is on it: through, then a short hold at each end. */
+function animateTile(b, on) {
+  cancelAnimationFrame(b.raf || 0);
+  if (!TR.frames) return;
+  if (!on) { paintTile(b, restFrame()); return; }
+  const t0 = performance.now();
+  const step = now => {
+    const cyc = ((now - t0) / 1500) % 1;
+    paintTile(b, Math.round(clamp((cyc - 0.15) / 0.6, 0, 1) * (TR.n - 1)));
+    b.raf = requestAnimationFrame(step);
+  };
+  b.raf = requestAnimationFrame(step);
+}
+function renderTransitionsPanel() {
+  if (!S.tl || !TR.presets) return;
+  const from = targetCut(), t = transitionAt(from);
+  for (const b of $('#tr-grid').children) b.setAttribute('aria-pressed', String(!!t && t.preset === b.dataset.id));
+  const cs = mainCuts();
+  $('#tr-target').textContent = !cs.length ? 'Transitions go between clips: add a second clip to the main track.'
+    : S.cut == null ? 'Click the square between two clips on the main track, or pick one here for the cut nearest the playhead.'
+    : t ? `This cut has ${t.name}: pick another to change it.` : 'Pick a transition for the selected cut.';
+  $('#tr-all').disabled = !cs.length;
+}
+async function pickTransition(id) {
+  const from = targetCut();
+  if (from == null) { toast('Add a second clip to the main track first: transitions go between clips.'); return; }
+  const tl = await edit('set_transition', () => ({ from, preset: id, seconds: transitionAt(from) ? null : TR.len }));
+  if (!tl) return;
+  S.cut = from;
+  renderSelection();
+  // show it half way through
+  const t = transitionAt(from);
+  if (t) { seek(t.at); scrollToTime(t.at); }
+}
+async function transitionEverywhere() {
+  const t = transitionAt(targetCut());
+  const preset = t && t.preset !== 'other' ? t.preset : 'mix';
+  const tl = await edit('transition_everywhere', { preset, seconds: t ? t.end - t.start : TR.len });
+  if (tl) toast(`${tl.transitions.length} cut${tl.transitions.length === 1 ? '' : 's'} now have ${(TR.presets || []).find(p => p.id === preset)?.name || 'a transition'}`);
+}
+/* A dragged length slider sends its latest value; each drag is one undo step */
+let trLenWant = null, trLenBusy = false;
+async function queueTransitionLength(from, seconds, merge) {
+  trLenWant = { from, seconds, merge };
+  if (trLenBusy) return;
+  trLenBusy = true;
+  try {
+    while (trLenWant) {
+      const w = trLenWant;
+      trLenWant = null;
+      await edit('set_transition_length', w);
+    }
+  } finally {
+    trLenBusy = false;
+  }
+}
+/** The selected cut's transition: its length, and what to do with it. */
+function transitionControls(box, t) {
+  if (!t) {
+    box.innerHTML = '<p class="hint">A plain cut. Pick a transition for it in the Transitions tab.</p>';
+    box.appendChild(buttons([['Transitions tab', 'Show the transitions', () => showTab('transitions')]]));
+    return;
+  }
+  const row = document.createElement('label');
+  row.className = 'prop';
+  row.innerHTML = `<span>Length</span><input type="range" min="0.1" max="${Math.max(0.1, t.max).toFixed(2)}" step="0.05"><input type="number" step="0.1" title="seconds">`;
+  const [range, num] = row.querySelectorAll('input');
+  range.id = 'prop-transition-length';
+  let k = nextKey('trlen');
+  const send = (v, merge) => {
+    num.value = (+v).toFixed(2);
+    TR.len = +v;
+    try { localStorage.setItem('clipcut.trlen', String(TR.len)); } catch (_) {}
+    queueTransitionLength(t.from, +v, merge);
+  };
+  range.addEventListener('input', () => send(range.value, k));
+  range.addEventListener('change', () => { k = nextKey('trlen'); range.blur(); });
+  num.addEventListener('change', () => { if (+num.value > 0) { range.value = num.value; send(num.value, null); } });
+  const read = () => { const x = transitionAt(t.from); return x ? x.end - x.start : 0; };
+  controls.push({ el: range, read }, { el: num, read, write: (el, v) => { el.value = v.toFixed(2); } });
+  box.appendChild(row);
+  box.appendChild(buttons([
+    ['Remove', 'Back to a plain cut (Delete)', () => edit('remove_transitions', { from: [t.from] })],
+    ['Apply to every cut', `Put ${t.name} on every cut`, transitionEverywhere],
+    ['Change', 'Pick another in the Transitions tab', () => showTab('transitions')],
+  ]));
+}
+
 /* ---------- timeline layout: lanes above and below the main track ---------- */
 const minPx = () => {
   const d = dur(), w = scroller().clientWidth - 2 * PAD - 40;
@@ -824,6 +974,31 @@ function renderTrack() {
     row.appendChild(el);
     S.els.set(c.id, el);
   }
+  // each cut: a square to give it a transition, and the span of the one it has
+  const track = $('#track');
+  for (const c of mainCuts()) {
+    const t = transitionAt(c.from);
+    if (t) {
+      const sp = document.createElement('div');
+      sp.className = 'tr-span';
+      sp.dataset.from = c.from;
+      track.appendChild(sp);
+    }
+    const b = document.createElement('button');
+    b.className = 'cut' + (t ? ' has' : '');
+    b.dataset.from = c.from;
+    b.innerHTML = t ? ICON.transition : ICON.plus;
+    b.title = t ? `${t.name}, ${fmtLen(t.end - t.start)}: click to change it` : 'Add a transition here';
+    b.setAttribute('aria-label', b.title);
+    b.addEventListener('pointerdown', e => {
+      if (e.button !== 0) return;
+      e.stopPropagation();
+      e.preventDefault();
+      selectCut(c.from);
+      showTab('transitions');
+    });
+    track.appendChild(b);
+  }
   $('#insert-mark').style.top = (26 + mainRow().top) + 'px';
   $('#insert-mark').style.height = ROW.main + 'px';
 }
@@ -901,6 +1076,16 @@ function layoutClips() {
     el.style.width = w + 'px';
     el.style.transform = g.dy ? `translateY(${g.dy}px)` : '';
     el.classList.toggle('narrow', w < 48);
+  }
+  const track = $('#track');
+  if (!track) return;
+  // a drag moves the clips: the cuts come back when it lands
+  track.classList.toggle('dragging-now', S.geom.size > 0);
+  for (const el of track.querySelectorAll('.cut, .tr-span')) {
+    const from = +el.dataset.from, t = transitionAt(from), cut = mainCuts().find(c => c.from === from);
+    if (!cut) continue;
+    if (el.classList.contains('cut')) el.style.left = (cut.at * S.px) + 'px';
+    else if (t) { el.style.left = (t.start * S.px) + 'px'; el.style.width = Math.max(2, (t.end - t.start) * S.px) + 'px'; }
   }
 }
 let drawQueued = 0;
@@ -1114,7 +1299,7 @@ function renderTools() {
   if (!S.tl) return;
   const cut = has() && cutTargets().length > 0;
   for (const id of ['#split-btn', '#delleft-btn', '#delright-btn']) $(id).disabled = !cut;
-  $('#delete-btn').disabled = S.sel.size === 0;
+  $('#delete-btn').disabled = S.sel.size === 0 && !transitionAt(S.cut);
   $('#undo-btn').disabled = !S.tl.canUndo;
   $('#redo-btn').disabled = !S.tl.canRedo;
   $('#undo-btn').title = S.tl.undoLabel ? `Undo ${S.tl.undoLabel} (Ctrl+Z)` : 'Undo (Ctrl+Z)';
@@ -1136,10 +1321,13 @@ function scrollToTime(t) {
 /* ---------- selection, properties and details ---------- */
 function select(ids) {
   S.sel = new Set(ids);
+  S.cut = null;
   renderSelection();
 }
 function renderSelection() {
   for (const [id, el] of S.els) el.classList.toggle('sel', S.sel.has(id));
+  for (const el of document.querySelectorAll('#track .cut, #track .tr-span')) el.classList.toggle('sel', +el.dataset.from === S.cut);
+  renderTransitionsPanel();
   renderTools();
   renderProps();
   renderDetails();
@@ -1174,6 +1362,17 @@ let propsSig = '';
 const controls = [];   // {el, read: clip → value, write?(el, v)}
 function renderProps() {
   const box = $('#props'), sel = selectedClips();
+  if (S.cut != null) {
+    const t = transitionAt(S.cut), sig = `cut:${S.cut}:${t ? t.id + ':' + t.max : ''}`;
+    $('#props-title').textContent = t ? 'Transition' : 'Cut';
+    if (sig === propsSig) { syncTransition(); return; }
+    propsSig = sig;
+    box.innerHTML = '';
+    controls.length = 0;
+    transitionControls(box, t);
+    syncTransition();
+    return;
+  }
   const one = sel.length === 1 ? sel[0] : null;
   const sig = one ? `${one.id}:${one.kind}:${isCap(one) || isMain(one)}:${!isCap(one) && hasSound(one)}` : `n${sel.length}`;
   $('#props-title').textContent = one ? ({ text: 'Text', audio: 'Sound', image: 'Picture', caption: 'Caption' }[one.kind] || (isMain(one) ? 'Clip' : 'Overlay')) : sel.length ? `${sel.length} clips` : 'Project';
@@ -1250,6 +1449,13 @@ function captionControls(box, c) {
     ['Delete', 'Delete this caption', () => edit('delete_captions', { ids: [c.id] })],
     ['Captions tab', 'Change how all the captions look', () => showTab('captions')],
   ]));
+}
+function syncTransition() {
+  for (const k of controls) {
+    if (k.el === document.activeElement) continue;
+    const v = k.read();
+    if (k.write) k.write(k.el, v); else k.el.value = v;
+  }
 }
 function syncProps(one) {
   if (!one) return;
@@ -1390,8 +1596,13 @@ function colorRow(label, ids, toggle, key, read) {
 function renderDetails() {
   let rows;
   const sel = selectedClips();
+  const cut = S.cut != null && mainCuts().find(c => c.from === S.cut);
   if (!has()) rows = [['Project', projectName()], ['Clips', 'None yet']];
-  else if (sel.length === 1 && isCap(sel[0])) {
+  else if (cut) {
+    const t = transitionAt(cut.from), name = id => { const c = clipById(id); return c ? c.name : ''; };
+    rows = [['Transition', t ? t.name : 'None'], ['Cut at', fmtFrames(cut.at)], ['From', name(cut.from)], ['Into', name(cut.to)]];
+    if (t) rows.push(['Plays', `${tcShort(t.start)} – ${tcShort(t.end)}`], ['Length', fmtLen(t.end - t.start)]);
+  } else if (sel.length === 1 && isCap(sel[0])) {
     const c = sel[0];
     rows = [['Caption', `${tcShort(c.start)} – ${tcShort(c.end)}`], ['Length', fmtLen(c.end - c.start)], ['Speaker', c.speaker || '—']];
   } else if (sel.length === 1) {
@@ -1444,6 +1655,7 @@ async function splitKeep(keep) {
   apply(r.timeline);
 }
 async function deleteSelection() {
+  if (transitionAt(S.cut)) { await edit('remove_transitions', { from: [S.cut] }); return; }
   if (!S.sel.size) { toast('Select a clip to delete'); return; }
   const caps = new Set(capClips().map(c => c.id));
   const c = [...S.sel].filter(id => caps.has(id)), v = [...S.sel].filter(id => !caps.has(id));
@@ -1545,7 +1757,7 @@ function snapTargets(except) {
 /* Scrubbing: the ruler, or the timeline outside the clips */
 function scrubFrom(e, deselect) {
   if (!has() || e.button !== 0) return;
-  if (deselect && S.sel.size) select([]);
+  if (deselect && (S.sel.size || S.cut != null)) select([]);
   const at = ev => seek(snapTo(timeAt(ev.clientX), ev, cuts()));
   at(e);
   follow(e, at, () => {});
@@ -1965,6 +2177,8 @@ click('#tab-media', () => showTab('media'));
 click('#tab-audio', () => showTab('audio'));
 click('#tab-text', () => showTab('text'));
 click('#tab-captions', () => showTab('captions'));
+click('#tab-transitions', () => showTab('transitions'));
+click('#tr-all', transitionEverywhere);
 click('#cap-go', autoCaptions);
 click('#cap-cancel', () => invoke('cancel_captions'));
 click('#cap-fillers', removeFillers);
@@ -2084,4 +2298,4 @@ invoke('restore').then(r => {
 });
 
 // For tests and debugging in the web inspector
-window.__clipcut = { S, apply, seek, play, pause, split, splitKeep, deleteSelection, undo, redo, select, setPx, fitZoom, saveNow, addPaths, mainClips, addToLane, addText, queueProps, showTab };
+window.__clipcut = { S, apply, selectCut, pickTransition, mainCuts, transitionEverywhere, seek, play, pause, split, splitKeep, deleteSelection, undo, redo, select, setPx, fitZoom, saveNow, addPaths, mainClips, addToLane, addText, queueProps, showTab };

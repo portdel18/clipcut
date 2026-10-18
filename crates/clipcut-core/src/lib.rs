@@ -14,6 +14,7 @@ mod captions;
 mod lanes;
 mod props;
 mod timeline;
+mod transitions;
 
 use std::sync::Arc;
 
@@ -27,6 +28,7 @@ use serde_json::{Value, json};
 pub use captions::{CaptionStyleView, CaptionView, CaptionsView, ModelView, TranscribeJob, WordView, caption_presets, download_model, speech_models};
 pub use props::{ClipProps, PEAKS_PER_SECOND, Peaks, TextProps};
 pub use timeline::{ClipView, Keep, LaneView, MediaView, ProjectView, TimelineView};
+pub use transitions::{DEFAULT_SECONDS as TRANSITION_SECONDS, TRANSITIONS, TransitionPresetView, TransitionView, transition_presets, transition_previews};
 
 /// What went wrong, in words the app can show as they are.
 #[derive(Debug, thiserror::Error)]

@@ -414,3 +414,50 @@ mod tests {
         let _ = std::fs::remove_dir_all(&root);
     }
 }
+
+/* ---------- transitions ---------- */
+
+#[tauri::command]
+pub fn transition_presets() -> Vec<clipcut_core::TransitionPresetView> {
+    clipcut_core::transition_presets()
+}
+
+/// Every transition's preview, `frames` pictures each, as one buffer: `w`, `h`, `frames` (u32 LE)
+/// then the RGBA pictures, transition by transition in [`transition_presets`]' order.
+#[tauri::command]
+pub async fn transition_previews(w: u32, h: u32, frames: u32) -> Result<tauri::ipc::Response, String> {
+    blocking(move || {
+        let f = clipcut_core::transition_previews(w, h, frames).map_err(|e| e.to_string())?;
+        let first = f.first().ok_or("no transitions")?;
+        let mut out = Vec::with_capacity(12 + f.iter().map(|x| x.rgba.len()).sum::<usize>());
+        let n = u32::try_from(f.len() / clipcut_core::TRANSITIONS.len().max(1)).unwrap_or(0);
+        for v in [first.w, first.h, n] {
+            out.extend_from_slice(&v.to_le_bytes());
+        }
+        for x in &f {
+            out.extend_from_slice(&x.rgba);
+        }
+        Ok(tauri::ipc::Response::new(out))
+    })
+    .await
+}
+
+#[tauri::command]
+pub async fn set_transition(from: u64, preset: String, seconds: Option<f64>, app: tauri::State<'_, App>) -> Result<TimelineView, String> {
+    edit(&app, move |s| s.set_transition(from, &preset, seconds)).await
+}
+
+#[tauri::command]
+pub async fn set_transition_length(from: u64, seconds: f64, merge: Option<String>, app: tauri::State<'_, App>) -> Result<TimelineView, String> {
+    edit(&app, move |s| s.set_transition_length(from, seconds, merge.as_deref())).await
+}
+
+#[tauri::command]
+pub async fn remove_transitions(from: Vec<u64>, app: tauri::State<'_, App>) -> Result<TimelineView, String> {
+    edit(&app, move |s| s.remove_transitions(&from)).await
+}
+
+#[tauri::command]
+pub async fn transition_everywhere(preset: String, seconds: f64, app: tauri::State<'_, App>) -> Result<TimelineView, String> {
+    edit(&app, move |s| s.transition_everywhere(&preset, seconds).map(|_| ())).await
+}
