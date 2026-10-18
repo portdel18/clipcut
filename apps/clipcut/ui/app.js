@@ -244,6 +244,11 @@ function stageClip() {
 function boxOf(c) {
   const p = liveClip(c).props, k = (p.scale || 100) / 100;
   let w, h, cy = p.y;
+  if (c.kind === 'text' && p.text && p.text.bounds) {
+    // the layers' real extent, placed by the clip's position and scale
+    const [x0, y0, x1, y1] = p.text.bounds;
+    return { x: p.x + k * ((x0 + x1) / 2 - S.tl.width / 2), y: p.y + k * ((y0 + y1) / 2 - S.tl.height / 2), w: k * (x1 - x0) + 16, h: k * (y1 - y0) + 12, r: (p.rotation || 0) * Math.PI / 180 };
+  }
   if (c.kind === 'text' && p.text) {
     const lines = (p.text.text || ' ').split('\n');
     const longest = Math.max(1, ...lines.map(l => l.length));
@@ -548,6 +553,7 @@ function showTab(id) {
   if (id === 'transitions') openTransitionsPanel();
   if (id === 'filters') renderFiltersPanel();
   if (id === 'mixer') { MX.sig = ''; renderMixer(); }
+  if (id === 'text') renderTitles();
 }
 
 /* ---------- captions: auto captions, their look, cleaning up the speech, the transcript ---------- */
@@ -1865,6 +1871,152 @@ async function flushProps() {
   }
 }
 
+/* ---------- titles: the engine's templates and the user's own, in the Text tab ---------- */
+const TI = { list: null, thumbs: new Map(), controls: null, clip: null, sig: '' };
+async function renderTitles(reload = false) {
+  const box = $('#titles');
+  if (reload || !TI.list) {
+    try { TI.list = await invoke('titles'); } catch (e) { box.innerHTML = '<p class="hint">The titles could not be loaded.</p>'; return; }
+  }
+  box.innerHTML = '';
+  const cats = [...new Set(TI.list.map(t => t.category))];
+  for (const cat of cats) {
+    const h = document.createElement('h3');
+    h.className = 'sub';
+    h.textContent = cat;
+    box.appendChild(h);
+    const grid = document.createElement('div');
+    grid.className = 'title-grid';
+    for (const t of TI.list.filter(x => x.category === cat)) {
+      const b = document.createElement('button');
+      b.className = 'title-tile';
+      b.id = `title-${t.id.replace(/[^a-z0-9-]/gi, '-')}`;
+      b.title = `${t.description || t.name} Click to add it at the playhead.`;
+      b.innerHTML = '<span class="pic"></span><span class="name"></span>';
+      b.querySelector('.name').textContent = t.name;
+      b.addEventListener('click', () => addTitle(t));
+      if (t.mine) {
+        const x = document.createElement('span');
+        x.className = 'remove';
+        x.textContent = '×';
+        x.title = `Remove ${t.name} from your titles`;
+        x.addEventListener('click', async e => {
+          e.stopPropagation();
+          try { await invoke('remove_title', { id: t.id }); } catch (err) { toast(err, true); return; }
+          TI.thumbs.delete(t.id);
+          renderTitles(true);
+        });
+        b.appendChild(x);
+      }
+      grid.appendChild(b);
+      paintTitle(t, b.querySelector('.pic'));
+    }
+    box.appendChild(grid);
+  }
+}
+async function paintTitle(t, el) {
+  let src = TI.thumbs.get(t.id);
+  if (!src) {
+    try { src = 'data:image/png;base64,' + await invoke('title_thumbnail', { id: t.id, width: 240 }); } catch (_) { return; }
+    TI.thumbs.set(t.id, src);
+  }
+  const img = new Image();
+  img.onload = () => {
+    // the drawn part of the frame, with a margin, so a lower third isn't a speck in a corner
+    const w = img.naturalWidth, h = img.naturalHeight, c = document.createElement('canvas');
+    c.width = w; c.height = h;
+    const g = c.getContext('2d');
+    g.drawImage(img, 0, 0);
+    const px = g.getImageData(0, 0, w, h).data;
+    let x0 = w, y0 = h, x1 = -1, y1 = -1;
+    for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) if (px[(y * w + x) * 4 + 3] > 8) { x0 = Math.min(x0, x); x1 = Math.max(x1, x); y0 = Math.min(y0, y); y1 = Math.max(y1, y); }
+    if (x1 < 0) { el.appendChild(img); return; }
+    const m = Math.max(4, (x1 - x0) * 0.06), bw = Math.min(w, x1 - x0 + 2 * m), bh = Math.min(h, y1 - y0 + 2 * m);
+    // keep the tile's 16:9
+    const cw = Math.max(bw, bh * 16 / 9), ch = cw * 9 / 16;
+    const cx = clamp((x0 + x1) / 2 - cw / 2, 0, Math.max(0, w - cw)), cy = clamp((y0 + y1) / 2 - ch / 2, 0, Math.max(0, h - ch));
+    const out = document.createElement('canvas');
+    out.width = 240; out.height = 135;
+    out.getContext('2d').drawImage(c, cx, cy, Math.min(cw, w), Math.min(ch, h), 0, 0, 240, 135);
+    el.appendChild(out);
+  };
+  img.src = src;
+}
+async function addTitle(t) {
+  if (!has()) { toast('Add a video first: titles go over it.'); return; }
+  await make('add_title', () => ({ id: t.id, seconds: S.t }));
+}
+/** A title's own controls (its words, colours, what shows), in Properties. */
+async function titleControls(s, c) {
+  const box = document.createElement('div');
+  box.className = 'title-controls';
+  s.appendChild(box);
+  let list;
+  try { list = await invoke('title_controls', { clip: c.id }); } catch (e) { box.innerHTML = '<p class="hint">This title has nothing to change.</p>'; return; }
+  if (!list.length) { box.innerHTML = '<p class="hint">This title has nothing to change.</p>'; return; }
+  const send = (id, value, merge = null) => edit('set_title', { clip: c.id, values: { [id]: value }, merge });
+  for (const k of list) {
+    const row = document.createElement('label');
+    row.className = 'prop wide';
+    row.innerHTML = '<span></span>';
+    row.firstChild.textContent = k.name;
+    let el;
+    if (k.kind === 'text') {
+      el = document.createElement('textarea');
+      el.rows = 1;
+      el.value = k.value || '';
+      el.addEventListener('keydown', e => e.stopPropagation());
+      el.addEventListener('change', () => send(k.id, el.value));
+    } else if (k.kind === 'color') {
+      el = document.createElement('input');
+      el.type = 'color';
+      el.value = k.value || '#ffffff';
+      let key = nextKey('tcol');
+      el.addEventListener('input', () => send(k.id, el.value, key));
+      el.addEventListener('change', () => { key = nextKey('tcol'); });
+    } else if (k.kind === 'checkbox') {
+      row.className = 'check';
+      row.innerHTML = '<input type="checkbox"> <span></span>';
+      row.lastChild.textContent = k.name;
+      el = row.firstChild;
+      el.checked = !!k.value;
+      el.addEventListener('change', () => send(k.id, el.checked));
+    } else if (k.kind === 'slider') {
+      el = document.createElement('input');
+      el.type = 'range';
+      el.min = k.min ?? 0;
+      el.max = k.max ?? 100;
+      el.step = 'any';
+      el.value = k.value ?? 0;
+      let key = nextKey('tsl');
+      el.addEventListener('input', () => send(k.id, +el.value, key));
+      el.addEventListener('change', () => { key = nextKey('tsl'); });
+    } else if (k.kind === 'font') {
+      el = document.createElement('select');
+      const fill = fonts => {
+        const cur = (k.value && k.value.family) || '';
+        el.innerHTML = '';
+        for (const f of new Set([cur, ...fonts].filter(Boolean))) { const o = document.createElement('option'); o.textContent = f; el.appendChild(o); }
+        el.value = cur;
+      };
+      fill(fontList || ['Inter', 'Noto Serif', 'JetBrains Mono']);
+      if (!fontList) invoke('fonts').then(l => { fontList = l; fill(l); }).catch(() => {});
+      el.addEventListener('change', () => send(k.id, { family: el.value }));
+    } else continue;
+    el.id = `prop-title-${k.id}`;
+    if (row.className !== 'check') row.appendChild(el);
+    box.appendChild(row);
+  }
+}
+/** Saves a text clip as one of the user's titles, named by its first line. */
+async function saveAsTitle(c) {
+  const name = ((c.props.text && c.props.text.text) || 'My title').split('\n')[0].trim().slice(0, 40) || 'My title';
+  try { await invoke('save_title', { clip: c.id, name }); } catch (e) { toast(e, true); return; }
+  TI.thumbs.clear();
+  toast(`Saved as a title: “${name}”. It is in the Text tab, under My Titles.`);
+  if (!$('#panel-text').hidden) renderTitles(true); else TI.list = null;
+}
+
 /* ---------- text animations (in and out) and music that ducks under speech ---------- */
 const AN = { list: null, timer: 0 };
 invoke('text_animations').then(l => { AN.list = l; propsSig = ''; if (has()) renderProps(); }).catch(() => {});
@@ -2048,7 +2200,7 @@ function renderProps() {
   }
   const one = sel.length === 1 ? sel[0] : null;
   const sig = one ? `${one.id}:${one.kind}:${isCap(one) || isMain(one)}:${!isCap(one) && hasSound(one)}:${keyTimes(one).length > 0}:${pictureClip(one)}` : `n${sel.length}`;
-  $('#props-title').textContent = one ? (one.graphic ? 'Graphic' : { text: 'Text', audio: 'Sound', image: 'Picture', caption: 'Caption' }[one.kind] || (isMain(one) ? 'Clip' : 'Overlay')) : sel.length ? `${sel.length} clips` : 'Project';
+  $('#props-title').textContent = one ? (one.graphic ? 'Graphic' : one.title ? 'Title' : { text: 'Text', audio: 'Sound', image: 'Picture', caption: 'Caption' }[one.kind] || (isMain(one) ? 'Clip' : 'Overlay')) : sel.length ? `${sel.length} clips` : 'Project';
   if (sig === propsSig) { syncProps(one); return; }
   propsSig = sig;
   box.innerHTML = '';
@@ -2067,8 +2219,13 @@ function renderProps() {
     const s = section('Graphic');
     s.appendChild(buttons([[`Edit in Graphics`, `Open this ${(TOOL_NAMES[one.graphic] || 'graphic').toLowerCase()} in Graphics to change it`, () => openGraphics(one.id)]]));
   }
-  if (one.kind === 'text') textControls(section('Text'), ids);
-  if (one.kind === 'text') animationControls(section('Animation'), ids);
+  if (one.title) titleControls(section('Title'), one);
+  if (one.kind === 'text' && !one.title) {
+    const t = section('Text');
+    textControls(t, ids);
+    t.appendChild(buttons([['Save as title', 'Keep this text, its look and its animations as a title to use again (Text tab, My Titles)', () => saveAsTitle(clipById(one.id))]]));
+    animationControls(section('Animation'), ids);
+  }
   if (visual(one)) {
     const s = section('Picture');
     s.appendChild(slider('Scale', ids, 'scale', { min: 5, max: 400, step: 1, unit: '%', read: c => c.props.scale, kf: 'scale' }));
@@ -3043,4 +3200,4 @@ invoke('restore').then(r => {
 });
 
 // For tests and debugging in the web inspector
-window.__clipcut = { S, apply, openGraphics, closeGraphics, selectCut, pickTransition, mainCuts, transitionEverywhere, seek, play, pause, split, splitKeep, deleteSelection, undo, redo, select, setPx, fitZoom, saveNow, addPaths, mainClips, addToLane, addText, queueProps, showTab, queueMixer, takeLevels, slipSel, nudgeSel, rollCut, setDucking, previewAnimation, pickExport };
+window.__clipcut = { S, apply, openGraphics, closeGraphics, selectCut, pickTransition, mainCuts, transitionEverywhere, seek, play, pause, split, splitKeep, deleteSelection, undo, redo, select, setPx, fitZoom, saveNow, addPaths, mainClips, addToLane, addText, queueProps, showTab, queueMixer, takeLevels, slipSel, nudgeSel, rollCut, setDucking, previewAnimation, pickExport, addTitle, saveAsTitle, renderTitles };

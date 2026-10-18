@@ -54,6 +54,10 @@ remote `upstream`). Read `README.md` for what it is and the roadmap.
 - Beats are clip markers named "Beat" (media time, so they move and trim with the clip), found by
   `filmcraft_audio_dsp::remix::analyze`. Export goes through `export_as` with a choice from
   `export_choices`; `export(path)` stays for the self-test.
+- Titles are the engine's graphics templates (`graphics.template.*`); a clip made from one has a
+  template link (`ClipView.title`) and is edited through its controls, never the text keys
+  (its first layer may be a shape). The user's own titles live in "Graphics Templates" beside the
+  engine's preferences file, so `restore` calls `Studio::set_data_dir` with the app data folder.
 - Disk is tight here: `rm -rf target/debug/incremental` when a build fails with "no space left".
 - Interface copy: plain words from the user's side, errors that say what went wrong and how to fix it.
   One dark theme from the tokens at the top of `ui/app.css`; amber (`--accent`) marks the active thing.

@@ -60,6 +60,9 @@ pub struct TextProps {
     pub background_color: String,
     /// How it comes in and goes out.
     pub animations: crate::animations::TextAnimations,
+    /// Where its layers are drawn, `[x0, y0, x1, y1]` in canvas pixels before the clip's own
+    /// position and scale (the frame's centre is where the clip's position puts it).
+    pub bounds: Option<[f64; 4]>,
 }
 
 fn float(e: Option<&EffectInstance>, id: &str) -> Option<f64> {
@@ -163,9 +166,34 @@ pub(crate) fn clip_props_at(s: &filmcraft_engine::Session, q: &Sequence, track: 
             background: boolean(l, "background"),
             background_color: color(l, "background_color"),
             animations: crate::animations::animations_of(i).unwrap_or_default(),
+            bounds: graphic_bounds(s, i, at),
         });
     }
     (kind, p)
+}
+
+/// The union of a graphic clip's shown layers at media time `at` (after the way in, when it
+/// animates in), in its canvas's pixels.
+fn graphic_bounds(s: &filmcraft_engine::Session, i: &TrackItem, at: Tick) -> Option<[f64; 4]> {
+    let Some(ItemKind::Graphic { width, height, .. }) = s.project.item(i.item).map(|x| &x.kind) else { return None };
+    // a text that comes in from nothing is measured where it settles
+    let at = match i.graphic.as_deref() {
+        Some(m) if m.has_responsive_time() && m.intro > Tick::ZERO && at < i.source_in + m.intro => i.source_in + m.intro,
+        _ => at,
+    };
+    let specs = filmcraft_render::graphic_clip::item_layer_specs(i, at, (*width, *height));
+    let mut b: Option<[f64; 4]> = None;
+    for (_, sp) in specs.iter().filter(|(_, sp)| sp.enabled && sp.transform.opacity > 0.0) {
+        let l = filmcraft_render::graphic_clip::layer_bounds(sp);
+        if !l.iter().all(|v| v.is_finite()) || l[2] <= l[0] || l[3] <= l[1] {
+            continue;
+        }
+        b = Some(match b {
+            Some(a) => [a[0].min(l[0]), a[1].min(l[1]), a[2].max(l[2]), a[3].max(l[3])],
+            None => l,
+        });
+    }
+    b
 }
 
 /// A finite number from `v[key]`, or an error naming the setting.
