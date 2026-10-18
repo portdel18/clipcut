@@ -162,3 +162,60 @@ fn trims_to_the_playhead_nudges_slips_and_rolls() {
     assert!(s.nudge(&[ids[0]], 1).is_err());
     assert!(s.nudge(&[lane], -100).is_err(), "not before the start");
 }
+
+/// A 3-second clip that talks (a tone) only from 1 to 2 s.
+fn talking() -> Option<PathBuf> {
+    let ff = ffmpeg_or_skip("clipcut-core mixer")?;
+    let out = fixtures_dir("clipcut-core").join("mx-talk.mp4");
+    generate(&out, |tmp| {
+        Command::new(&ff)
+            .args(["-v", "error", "-y", "-f", "lavfi", "-i", "testsrc2=size=320x180:rate=30:duration=3"])
+            .args(["-f", "lavfi", "-i", "aevalsrc='if(between(t,1,2),0.5*sin(2*PI*300*t),0)':s=48000:d=3"])
+            .args(["-c:v", "libx264", "-pix_fmt", "yuv420p", "-c:a", "aac", "-shortest"])
+            .arg(tmp)
+            .status()
+            .is_ok_and(|s| s.success())
+    })
+}
+
+#[test]
+fn music_ducks_under_speech() {
+    let (Some(v), Some(m)) = (talking(), tone("mx-duck-music", 660)) else { return };
+    let mut s = Studio::new();
+    s.add_clip(v.to_str().unwrap()).unwrap();
+    let item = s.import(m.to_str().unwrap()).unwrap();
+    let music = s.add_to_lane(item, 0.0).unwrap()[0];
+    let vol = |s: &Studio, t: f64| s.props_at(music, t).unwrap().volume_db.unwrap();
+    assert_eq!(vol(&s, 1.5), 0.0);
+
+    // one dip, while the clip talks
+    assert_eq!(s.set_ducking(&[music], true, -12.0).unwrap(), 1);
+    let p = s.timeline().clips.into_iter().find(|c| c.id == music).unwrap().props;
+    assert_eq!(p.ducking, Some(-12.0));
+    let (before, during, after) = (vol(&s, 0.2), vol(&s, 1.5), vol(&s, 2.9));
+    assert!(before.abs() < 0.5 && (during + 12.0).abs() < 0.5 && after.abs() < 0.5, "{before} {during} {after}");
+
+    // off: steady again; on/off are one undo step each
+    s.set_ducking(&[music], false, -12.0).unwrap();
+    assert_eq!(s.timeline().clips.into_iter().find(|c| c.id == music).unwrap().props.ducking, None);
+    assert_eq!(vol(&s, 1.5), 0.0);
+    s.undo().unwrap();
+    assert!((vol(&s, 1.5) + 12.0).abs() < 0.5);
+
+    // talked over from end to end: off brings it back to where it was
+    let (Some(v2), Some(m2)) = (clip("mx-talk-all", 3, 300), tone("mx-duck-all", 660)) else { return };
+    let mut all = Studio::new();
+    all.add_clip(v2.to_str().unwrap()).unwrap();
+    let item = all.import(m2.to_str().unwrap()).unwrap();
+    let under = all.add_to_lane(item, 0.0).unwrap()[0];
+    all.set_props(&[under], &json!({"volumeDb": -4.0}), None).unwrap();
+    all.set_ducking(&[under], true, -10.0).unwrap();
+    assert!((all.props_at(under, 1.5).unwrap().volume_db.unwrap() + 14.0).abs() < 0.5);
+    all.set_ducking(&[under], false, -10.0).unwrap();
+    assert!((all.props_at(under, 1.5).unwrap().volume_db.unwrap() + 4.0).abs() < 1e-6, "{:?}", all.props_at(under, 1.5).unwrap().volume_db);
+
+    // what is refused
+    let main = s.timeline().clips.into_iter().find(|c| c.track == "V1").unwrap().id;
+    assert!(s.set_ducking(&[main], true, -12.0).is_err(), "the main track is what music ducks under");
+    assert!(s.set_ducking(&[music], true, f64::NAN).is_err());
+}

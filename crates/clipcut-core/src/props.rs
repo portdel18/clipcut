@@ -22,6 +22,8 @@ pub struct ClipProps {
     /// Sound clips: fade lengths, seconds.
     pub fade_in: f64,
     pub fade_out: f64,
+    /// Music on a lane: how far it goes down under speech (dB), when it ducks.
+    pub ducking: Option<f64>,
     /// Pictures and text: where the clip's centre sits, in canvas pixels.
     pub x: Option<f64>,
     pub y: Option<f64>,
@@ -56,6 +58,8 @@ pub struct TextProps {
     pub shadow: bool,
     pub background: bool,
     pub background_color: String,
+    /// How it comes in and goes out.
+    pub animations: crate::animations::TextAnimations,
 }
 
 fn float(e: Option<&EffectInstance>, id: &str) -> Option<f64> {
@@ -109,6 +113,7 @@ pub(crate) fn clip_props_at(s: &filmcraft_engine::Session, q: &Sequence, track: 
     let mut p = ClipProps { speed: (i.speed.abs() * 100.0 * 100.0).round() / 100.0, ..Default::default() };
     if track.kind == TrackKind::Audio {
         p.volume_db = Some(float_at(effect(i, "volume"), "level", at).unwrap_or(0.0));
+        p.ducking = crate::ducking::ducking_of(i);
         for t in &track.transitions {
             if t.to == Some(i.id) && t.from.is_none() {
                 p.fade_in = t.duration.seconds();
@@ -157,6 +162,7 @@ pub(crate) fn clip_props_at(s: &filmcraft_engine::Session, q: &Sequence, track: 
             shadow: boolean(l, "shadow"),
             background: boolean(l, "background"),
             background_color: color(l, "background_color"),
+            animations: crate::animations::animations_of(i).unwrap_or_default(),
         });
     }
     (kind, p)
@@ -279,6 +285,10 @@ impl Studio {
             if !is_text {
                 continue;
             }
+            // an animated text's keyframes come off while it changes, and are rebuilt for the new text
+            let restyles =
+                p.get("text").is_some() || p.get("bold").is_some() || p.get("italic").is_some() || TEXT_KEYS.iter().any(|(k, _)| p.get(*k).is_some());
+            let held = if restyles { self.hold_animations(clip)? } else { None };
             if let Some(t) = p.get("text").and_then(Value::as_str) {
                 let t = if t.trim().is_empty() { " " } else { t };
                 self.session.execute("graphics.setText", json!({"clip": clip, "layer": 0, "text": t})).map_err(engine)?;
@@ -305,6 +315,9 @@ impl Studio {
             }
             if !layer.is_empty() {
                 self.session.execute("graphics.set", json!({"clip": clip, "layer": 0, "props": layer})).map_err(engine)?;
+            }
+            if let Some(a) = held {
+                self.restore_animations(clip, a)?;
             }
         }
         Ok(())

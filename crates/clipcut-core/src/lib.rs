@@ -10,8 +10,10 @@
 
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
 
+mod animations;
 mod captions;
 mod colour;
+mod ducking;
 mod graphics;
 mod keyframes;
 mod lanes;
@@ -31,8 +33,10 @@ use filmcraft_time::Tick;
 use serde::Serialize;
 use serde_json::{Value, json};
 
+pub use animations::{ANIMATIONS_IN, ANIMATIONS_OUT, AnimView, TextAnimations, text_animations};
 pub use captions::{CaptionStyleView, CaptionView, CaptionsView, ModelView, TranscribeJob, WordView, caption_presets, download_model, speech_models};
 pub use colour::{ADJUST, ColourView, looks};
+pub use ducking::DUCK_DB;
 pub use graphics::{GRAPHIC_FILE, GRAPHIC_SOUND, read_graphic};
 pub use keyframes::{ANIMATABLE, KeyTrack};
 pub use mixer::{Level, Meters, MixView};

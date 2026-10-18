@@ -1855,6 +1855,92 @@ async function flushProps() {
   }
 }
 
+/* ---------- text animations (in and out) and music that ducks under speech ---------- */
+const AN = { list: null, timer: 0 };
+invoke('text_animations').then(l => { AN.list = l; propsSig = ''; if (has()) renderProps(); }).catch(() => {});
+/** Plays a text clip's animation once, so the choice can be seen. */
+async function previewAnimation(id, enter) {
+  const c = clipById(id), a = c && c.props.text && c.props.text.animations[enter ? 'in' : 'out'];
+  if (!a) return;
+  clearTimeout(AN.timer);
+  const from = enter ? c.start : Math.max(c.start, c.end - a.seconds - 0.4);
+  const to = enter ? Math.min(c.end, c.start + a.seconds + 0.4) : c.end;
+  await seek(from);
+  await play();
+  AN.timer = setTimeout(() => { if (S.playing) pause(); }, (to - from) * 1000);
+}
+/** The Animation section: how a text comes in and goes out, and how long each takes. */
+function animationControls(s, ids) {
+  if (!AN.list) { s.innerHTML += '<p class="hint">Loading the animations…</p>'; return; }
+  for (const [side, enter, label] of [['in', true, 'In'], ['out', false, 'Out']]) {
+    const now = c => c.props.text && c.props.text.animations[side];
+    const head = document.createElement('div');
+    head.className = 'prop wide lead';
+    head.innerHTML = `<span>${label}</span>`;
+    const opts = [{ id: null, name: 'None' }].concat(AN.list[side]);
+    const seg = buttons(opts.map(o => [o.name, o.id ? `${enter ? 'Come in' : 'Go out'} with ${o.name.toLowerCase()}` : `No animation ${enter ? 'in' : 'out'}`, async () => {
+      const c = clipById(ids[0]), cur = c && now(c);
+      const tl = await edit('set_text_animation', { clips: ids, enter, id: o.id, seconds: cur ? cur.seconds : AN.list.seconds });
+      if (tl && o.id) previewAnimation(ids[0], enter);
+    }]));
+    seg.id = `prop-anim-${side}`;
+    head.appendChild(seg);
+    controls.push({ el: seg, read: c => { const a = now(c); return a ? a.id : null; }, write: (el, v) => { [...el.children].forEach((b, i) => b.setAttribute('aria-pressed', String(opts[i].id === v))); } });
+    s.appendChild(head);
+    const row = document.createElement('label');
+    row.className = 'prop';
+    row.innerHTML = `<span>Length</span><input type="range" min="0.1" max="3" step="0.05"><input type="number" step="0.1" title="seconds">`;
+    const [range, num] = row.querySelectorAll('input');
+    range.id = `prop-anim-${side}-length`;
+    num.dataset.dp = '2';
+    let k = nextKey(`anim${side}`);
+    const send = (v, merge) => {
+      const c = clipById(ids[0]), cur = c && now(c);
+      num.value = v;
+      if (cur) edit('set_text_animation', { clips: ids, enter, id: cur.id, seconds: +v, merge });
+    };
+    range.addEventListener('input', () => send(range.value, k));
+    range.addEventListener('change', () => { k = nextKey(`anim${side}`); range.blur(); previewAnimation(ids[0], enter); });
+    num.addEventListener('change', () => { if (+num.value > 0) { range.value = num.value; send(+num.value, null); } });
+    const read = c => { const a = now(c); return a ? a.seconds : AN.list.seconds; };
+    controls.push({ el: range, read }, { el: num, read });
+    s.appendChild(row);
+  }
+}
+/** Ducking: music on a lane goes quieter while people talk. */
+async function setDucking(ids, on, reduceDb) {
+  const r = await run('set_ducking', { clips: ids, on, reduceDb });
+  if (!r) { propsSig = ''; renderProps(); return; }
+  apply(r.timeline);
+  if (on) toast(r.dips ? `The music goes down under speech in ${r.dips} ${r.dips === 1 ? 'place' : 'places'}` : 'There is no speech under this music to duck under');
+}
+function duckingControls(s, ids) {
+  const duck = c => (soundOf(c) || c).props.ducking;
+  const row = document.createElement('label');
+  row.className = 'prop wide';
+  row.innerHTML = '<span>Ducking</span><span class="check"><input type="checkbox" id="prop-duck"> Lower under speech</span>';
+  const box = row.querySelector('input');
+  const amount = document.createElement('label');
+  amount.className = 'prop';
+  amount.innerHTML = '<span>Lower by</span><input type="range" min="-40" max="-3" step="1"><input type="number" step="1" title="dB">';
+  const [range, num] = amount.querySelectorAll('input');
+  range.id = 'prop-duck-db';
+  num.dataset.dp = '0';
+  const want = () => clamp(+range.value || -15, -40, -3);
+  const again = buttons([['Update', 'Find the speech again (after moving or trimming clips)', () => setDucking(ids, true, want())]]);
+  box.addEventListener('change', () => { amount.hidden = again.hidden = !box.checked; setDucking(ids, box.checked, want()); });
+  range.addEventListener('input', () => { num.value = range.value; });
+  range.addEventListener('change', () => { range.blur(); if (box.checked) setDucking(ids, true, want()); });
+  num.addEventListener('change', () => { range.value = num.value; if (box.checked) setDucking(ids, true, want()); });
+  const read = c => { const d = duck(c); return d == null ? -15 : d; };
+  // how far, and Update, only while it ducks
+  const shown = on => { box.checked = on; amount.hidden = again.hidden = !on; };
+  controls.push({ el: box, read: c => duck(c) != null, write: (_, on) => shown(on) }, { el: range, read }, { el: num, read });
+  s.appendChild(row);
+  s.appendChild(amount);
+  s.appendChild(again);
+}
+
 /* ---------- precise trimming: edges to the playhead, slips, nudges, moving a cut ---------- */
 const hasMedia = c => c && c.kind !== 'text' && c.kind !== 'image' && !isCap(c);
 /** Clip `c`'s start or end to the playhead. */
@@ -1954,6 +2040,7 @@ function renderProps() {
     s.appendChild(buttons([[`Edit in Graphics`, `Open this ${(TOOL_NAMES[one.graphic] || 'graphic').toLowerCase()} in Graphics to change it`, () => openGraphics(one.id)]]));
   }
   if (one.kind === 'text') textControls(section('Text'), ids);
+  if (one.kind === 'text') animationControls(section('Animation'), ids);
   if (visual(one)) {
     const s = section('Picture');
     s.appendChild(slider('Scale', ids, 'scale', { min: 5, max: 400, step: 1, unit: '%', read: c => c.props.scale, kf: 'scale' }));
@@ -1975,6 +2062,7 @@ function renderProps() {
     if (!isMain(one)) {
       s.appendChild(slider('Fade in', ids, 'fadeIn', { min: 0, max: 10, step: 0.1, unit: 's', read: c => (soundOf(c) || c).props.fadeIn }));
       s.appendChild(slider('Fade out', ids, 'fadeOut', { min: 0, max: 10, step: 0.1, unit: 's', read: c => (soundOf(c) || c).props.fadeOut }));
+      duckingControls(s, ids);
     }
   }
   if (visual(one) || hasSound(one)) keyframeControls(section('Keyframes'), one);
@@ -2890,4 +2978,4 @@ invoke('restore').then(r => {
 });
 
 // For tests and debugging in the web inspector
-window.__clipcut = { S, apply, openGraphics, closeGraphics, selectCut, pickTransition, mainCuts, transitionEverywhere, seek, play, pause, split, splitKeep, deleteSelection, undo, redo, select, setPx, fitZoom, saveNow, addPaths, mainClips, addToLane, addText, queueProps, showTab, queueMixer, takeLevels, slipSel, nudgeSel, rollCut };
+window.__clipcut = { S, apply, openGraphics, closeGraphics, selectCut, pickTransition, mainCuts, transitionEverywhere, seek, play, pause, split, splitKeep, deleteSelection, undo, redo, select, setPx, fitZoom, saveNow, addPaths, mainClips, addToLane, addText, queueProps, showTab, queueMixer, takeLevels, slipSel, nudgeSel, rollCut, setDucking, previewAnimation };

@@ -998,6 +998,7 @@ dependencies = [
  "filmcraft-color",
  "filmcraft-edit",
  "filmcraft-engine",
+ "filmcraft-geom",
  "filmcraft-media",
  "filmcraft-project",
  "filmcraft-render",
