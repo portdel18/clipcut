@@ -24,6 +24,40 @@ pub(crate) struct Jobs {
     dirs: Mutex<HashMap<u64, PathBuf>>,
     /// The files of the latest drop on the window, which Graphics may read (see [`dropped_file`]).
     pub(crate) dropped: Mutex<Vec<PathBuf>>,
+    /// Where the person chose to save Graphics' last file (see [`save_graphic_file`]).
+    save_to: Mutex<Option<PathBuf>>,
+}
+
+/// Graphics saving a file of its own (a thumbnail, a rendered video, presets): the webview drops
+/// page downloads, so the interface asks here. Shows the Save dialog for `name`; returns where the
+/// person chose, or None when they cancelled. [`write_graphic_file`] then writes only there.
+#[tauri::command]
+pub(crate) async fn save_graphic_file(name: String, handle: tauri::AppHandle, app: tauri::State<'_, App>) -> Result<Option<String>, String> {
+    use tauri_plugin_dialog::DialogExt;
+    let file = crate::editing::safe_name(&name);
+    let ext = Path::new(&file).extension().map(|e| e.to_string_lossy().to_lowercase()).unwrap_or_default();
+    let picked = blocking(move || {
+        let mut d = handle.dialog().file().set_title("Save").set_file_name(&file);
+        if !ext.is_empty() {
+            d = d.add_filter(ext.to_uppercase(), &[ext.as_str()]);
+        }
+        Ok(d.blocking_save_file().and_then(|p| p.into_path().ok()))
+    })
+    .await?;
+    *lock(&app.graphics.save_to) = picked.clone();
+    Ok(picked.map(|p| p.to_string_lossy().into_owned()))
+}
+
+/// Writes the request's body to where [`save_graphic_file`] was last told to save, once.
+#[tauri::command]
+pub(crate) async fn write_graphic_file(request: Request<'_>, app: tauri::State<'_, App>) -> Result<(), String> {
+    let path = lock(&app.graphics.save_to).take().ok_or("Choose where to save it first.")?;
+    let bytes = body(&request)?;
+    blocking(move || {
+        std::fs::write(&path, bytes)
+            .map_err(|e| format!("Couldn't save {}: {e}. Check the folder can be written to and there's space on the drive.", path.display()))
+    })
+    .await
 }
 
 /// The largest dropped file handed to Graphics (it is read into memory there).

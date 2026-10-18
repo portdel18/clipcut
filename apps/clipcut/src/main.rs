@@ -321,6 +321,8 @@ fn main() {
             updates::install_update,
             updates::open_releases,
             graphics::dropped_file,
+            graphics::save_graphic_file,
+            graphics::write_graphic_file,
             editing::timeline,
             editing::set_colour,
             editing::set_look,

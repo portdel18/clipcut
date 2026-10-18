@@ -836,6 +836,15 @@ window.__clipcutHost = {
     toast(replace != null ? 'Graphic updated' : 'Graphic added at the playhead');
   },
   abort: job => { invoke('graphic_abort', { job }).catch(() => {}); },
+  // a thumbnail, a rendered video or presets Graphics would download: the Save dialog, then the file
+  async save(blob, name) {
+    let path;
+    try { path = await invoke('save_graphic_file', { name }); } catch (e) { toast(e, true); return null; }
+    if (!path) return null;
+    try { await invoke('write_graphic_file', new Uint8Array(await blob.arrayBuffer())); } catch (e) { toast(e, true); return null; }
+    toast(`Saved ${path.split(/[\\/]/).pop()}`);
+    return path;
+  },
 };
 function loadGraphics() {
   if (!GR.loaded) {

@@ -81,7 +81,9 @@ again with its settings; **Update in video** puts the new version in its place, 
 and size. Photos, videos and sound a graphic used aren't kept: add them again when you change it. A lower third is designed over your
 video: Graphics shows the frame at the playhead behind it (without the graphic being changed),
 never in what it renders. When **Ratio** changes the video's shape, ClipCut offers to make the
-graphics in the old shape again in the new one, each in its place.
+graphics in the old shape again in the new one, each in its place. Drop a photo, video, PDF or
+sound file on a Graphics tool's preview or file box and it goes there (not onto the timeline); a
+thumbnail, a render or presets saved from Graphics ask where to save them.
 Maps need the internet for their tiles and searches; scanned-PDF text recognition (Scroll Zoom)
 isn't available inside ClipCut.
 

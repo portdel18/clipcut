@@ -626,8 +626,18 @@ const hosted = {
   },
   snapshot, restore, add: addToVideo,
 };
+// A desktop app holding the page saves files itself (its webview drops page downloads):
+// HOST.save(blob, name) shows its own Save dialog.
+function saveFile(blob, name) {
+  if (HOST && typeof HOST.save === 'function') {
+    Promise.resolve().then(() => HOST.save(blob, name)).catch(() => { /* the app says what went wrong */ });
+    return true;
+  }
+  return false;
+}
 function downloadBlob(blob, name) {
   const url = URL.createObjectURL(blob);
+  if (saveFile(blob, name)) return url;
   const a = document.createElement('a');
   a.href = url; a.download = name; document.body.appendChild(a); a.click(); a.remove();
   return url;
@@ -704,7 +714,11 @@ async function runRender({ title, OW, OH, fps, total, format, name, setup, frame
 }
 $('#render-cancel').addEventListener('click', () => { render.cancel = true; });
 $('#render-close').addEventListener('click', () => $('#render-dlg').close());
-$('#render-save').addEventListener('click', () => { if (render.url) { const a = document.createElement('a'); a.href = render.url; a.download = render.name; a.click(); } });
+$('#render-save').addEventListener('click', async () => {
+  if (!render.url) return;
+  if (HOST && typeof HOST.save === 'function') { saveFile(await (await fetch(render.url)).blob(), render.name); return; }
+  const a = document.createElement('a'); a.href = render.url; a.download = render.name; a.click();
+});
 $('#render-dlg').addEventListener('cancel', e => { if (render.busy) { e.preventDefault(); render.cancel = true; } });
 
 /* Render the same clip as 16:9 and 9:16, one after the other */
