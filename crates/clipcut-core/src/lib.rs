@@ -10,6 +10,8 @@
 
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
 
+mod lanes;
+mod props;
 mod timeline;
 
 use std::sync::Arc;
@@ -21,7 +23,8 @@ use filmcraft_time::Tick;
 use serde::Serialize;
 use serde_json::{Value, json};
 
-pub use timeline::{ClipView, Keep, MediaView, ProjectView, TimelineView};
+pub use props::{ClipProps, PEAKS_PER_SECOND, Peaks, TextProps};
+pub use timeline::{ClipView, Keep, LaneView, MediaView, ProjectView, TimelineView};
 
 /// What went wrong, in words the app can show as they are.
 #[derive(Debug, thiserror::Error)]
@@ -144,6 +147,8 @@ impl Thumbs {
 /// One ClipCut window's engine session.
 pub struct Studio {
     session: Session,
+    /// The key and undo step of the last mergeable edit ([`Studio::set_props`] while a slider moves).
+    merge: Option<(String, Arc<Project>)>,
 }
 
 impl Default for Studio {
@@ -154,7 +159,7 @@ impl Default for Studio {
 
 impl Studio {
     pub fn new() -> Self {
-        Self { session: Session::default() }
+        Self { session: Session::default(), merge: None }
     }
 
     /// The engine session, for operations this façade doesn't cover yet.

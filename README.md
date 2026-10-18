@@ -6,9 +6,10 @@ pure-Rust editing engine (its own H.264, HEVC, ProRes, DNxHR, VP9, AV1, AAC and 
 frame timing, colour, audio mixing and export), and will bring in
 [Clip Studio](https://github.com/portdel18/clip-stu)'s news graphics.
 
-> **Status: Phase 1a, cutting.** Clips go on one magnetic main track that you split, trim, reorder
-> and ripple-delete, with undo and projects that save themselves. Text, sound tracks and captions come
-> next (1b, 1c). See [the roadmap](#roadmap).
+> **Status: Phase 1b, lanes and text.** A magnetic main track you split, trim, reorder and
+> ripple-delete; lanes above it for overlays and text and below it for music and voiceover; a
+> Properties panel for position, scale, volume, fades, speed and text style; vertical and square
+> canvases. Captions come next (1c). See [the roadmap](#roadmap).
 
 ## Install on Windows
 
@@ -31,15 +32,29 @@ it at the end again.
 **The main track is magnetic**, like CapCut's: its clips always sit back to back, so deleting or
 trimming a clip closes the gap and everything after it moves up. Each clip's own sound moves with it.
 
+**Lanes.** Drag a Media card *above* the main track to lay it over the clips there (an overlay, for
+b-roll or picture-in-picture). The **Text** tab adds text at the playhead in a style to start from
+(Plain, Outline, Box, Shadow, Caption, Title, Strap, Soft). The **Audio** tab imports music or a
+voiceover onto a lane below the main track. Lane clips stay where you put them when the main track
+changes; drag them along or onto another lane, trim their edges, and delete them without closing up.
+The switch at the left of each lane hides it or mutes it (the main track's switch mutes its sound).
+
+**Properties** (right panel) follow the selection: position, scale, rotation and opacity (or drag
+the picture or text in the player, with the wheel to scale it and the centre lines pulling it in);
+Fit, Fill and Centre; volume; fades on music and overlays; speed (0.5× to 3×, or any percent); and
+for text the words, font, size, bold and italic, alignment, colour, outline, box and shadow. A slider
+drag is one undo step. **Ratio** (under the player) turns the canvas into 9:16 for TikTok, Reels and
+Shorts, 1:1 or 4:5; clips are refitted to the new shape.
+
 | Key | What it does |
 |---|---|
 | `S` | Split at the playhead (only the selected clips, if any are selected) |
 | `Q` / `W` | Split and delete everything to the left / right of the playhead in that clip |
-| `Delete` | Delete the selected clips; the gap closes |
-| Drag a clip | Move it to another place on the main track |
+| `Delete` | Delete the selected clips; the main track closes up, lanes keep their gaps |
+| Drag a clip | Main track: move it to another place in the order. Lanes: move it in time or to another lane |
 | Drag a selected clip's edge | Trim it; the player shows the new first or last frame |
 | `N` | Snapping on or off (hold `Shift` while dragging to skip it once) |
-| `Ctrl+Z`, `Ctrl+Shift+Z` / `Ctrl+Y` | Undo, redo: every edit is one step |
+| `Ctrl+Z`, `Ctrl+Shift+Z` / `Ctrl+Y` | Undo, redo: every edit (and every slider drag) is one step |
 | Click, `Ctrl`/`Shift`+click, `Ctrl+A`, `Esc` | Select a clip, add to the selection, select all, select none |
 | `Space` or `K` | Play, pause |
 | `←` `→` | A frame back or on (`Shift`: 5 seconds); `J` / `L`: a second |
@@ -58,7 +73,7 @@ Cancel.
 | Phase | What it adds |
 |---|---|
 | **0. Prove it** (done) | Open, play with sound, scrub, export; the Windows installer from CI |
-| **1. Editor v1** (1a, cutting: this) | Split, trim, ripple delete, a magnetic main track plus overlay, text and audio lanes, speed, transitions, vertical and horizontal canvases, undo, autosave. First workflows: cutting down interviews and captioned explainers (auto-captions with styles, transcript cutting) |
+| **1. Editor v1** (1a cutting: done; 1b lanes, text, sound, properties: this; 1c captions next) | Split, trim, ripple delete, a magnetic main track plus overlay, text and audio lanes, speed, transitions, vertical and horizontal canvases, undo, autosave. First workflows: cutting down interviews and captioned explainers (auto-captions with styles, transcript cutting) |
 | **2. Clip Studio inside** | A Graphics tab with Clip Studio's tools (lower thirds, map zoom, numbers, timelines, underline); graphics become clips you can reopen and edit; TikTok, Reels and Shorts overlays in the preview |
 | **3. Pro panels** | Keyframes, colour, the audio mixer, scopes and precise trimming, from the engine |
 | **4. CapCut extras** | Caption styles, text animations, templates, beat markers, music ducking, quick social exports |
@@ -69,7 +84,7 @@ Cancel.
 | Layer | Where | What |
 |---|---|---|
 | Engine | `crates/*` (from FilmCraft) | Decoding, the timeline model, rendering, effects, audio mixing, export |
-| Façade | `crates/clipcut-core` | The engine operations the app calls: the magnetic main track's edits (each one undo step), projects, preview frames and thumbnails, playback audio, export jobs |
+| Façade | `crates/clipcut-core` | The engine operations the app calls: the magnetic main track and the lanes around it (`timeline.rs`, `lanes.rs`), clip properties, canvas and waveforms (`props.rs`), each edit one undo step; projects, preview frames and thumbnails, playback audio, export jobs |
 | App | `apps/clipcut` | A [Tauri](https://tauri.app) window: Rust commands in `src/`, the interface in `ui/` (HTML, CSS and JavaScript, no build step) |
 
 The sound card is the playback clock; the interface shows the frame the engine renders at that time.

@@ -14,6 +14,7 @@ use filmcraft_time::Tick;
 use serde::Serialize;
 use serde_json::{Value, json};
 
+use crate::props::{ClipProps, clip_props};
 use crate::{Error, Result, Studio, engine};
 
 /// A clip on the timeline, in seconds.
@@ -35,6 +36,21 @@ pub struct ClipView {
     pub link: Option<u64>,
     /// The media item the clip plays.
     pub item: u64,
+    /// `video`, `image`, `text` or `audio`.
+    pub kind: &'static str,
+    pub props: ClipProps,
+}
+
+/// A track as a lane of the timeline: `V1` and `A1` are the main track's picture and sound.
+#[derive(Clone, Debug, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LaneView {
+    pub id: String,
+    /// `video` or `audio`.
+    pub kind: &'static str,
+    /// False when the lane's picture is hidden or its sound muted.
+    pub on: bool,
+    pub clips: usize,
 }
 
 /// A media file in the project (the Media panel).
@@ -61,6 +77,8 @@ pub struct TimelineView {
     pub width: u32,
     pub height: u32,
     pub clips: Vec<ClipView>,
+    /// Every track, top to bottom of their kind: video `V1`, `V2`…, then audio `A1`, `A2`….
+    pub lanes: Vec<LaneView>,
     pub media: Vec<MediaView>,
     pub can_undo: bool,
     pub can_redo: bool,
@@ -96,12 +114,12 @@ fn secs(t: Tick) -> f64 {
 }
 
 impl Studio {
-    fn fps(&self) -> Result<filmcraft_time::FrameRate> {
+    pub(crate) fn fps(&self) -> Result<filmcraft_time::FrameRate> {
         Ok(self.session.active_sequence().ok_or(Error::NothingOpen)?.settings.frame_rate)
     }
 
     /// `seconds` on the sequence's frame grid, never negative.
-    fn frame_tick(&self, seconds: f64) -> Result<Tick> {
+    pub(crate) fn frame_tick(&self, seconds: f64) -> Result<Tick> {
         if !seconds.is_finite() {
             return Err(Error::Invalid("the time must be a number".into()));
         }
@@ -113,6 +131,7 @@ impl Studio {
     pub fn timeline(&self) -> TimelineView {
         let s = &self.session;
         let mut clips = Vec::new();
+        let mut lanes = Vec::new();
         let (mut fps, mut duration, mut width, mut height) = (30.0, 0.0, 1920, 1080);
         if let Some(q) = s.active_sequence() {
             fps = q.settings.frame_rate.as_f64();
@@ -120,7 +139,10 @@ impl Studio {
             (width, height) = (q.settings.width, q.settings.height);
             for (prefix, tracks) in [("V", &q.video_tracks), ("A", &q.audio_tracks)] {
                 for (n, t) in tracks.iter().enumerate() {
+                    let on = if prefix == "V" { t.enabled } else { !t.muted };
+                    lanes.push(LaneView { id: format!("{prefix}{}", n + 1), kind: if prefix == "V" { "video" } else { "audio" }, on, clips: t.items.len() });
                     for i in &t.items {
+                        let (kind, props) = clip_props(s, q, t, i);
                         clips.push(ClipView {
                             id: i.id.0,
                             track: format!("{prefix}{}", n + 1),
@@ -132,6 +154,8 @@ impl Studio {
                             name: i.name.clone(),
                             link: i.link,
                             item: i.item.0,
+                            kind,
+                            props,
                         });
                     }
                 }
@@ -164,6 +188,7 @@ impl Studio {
             width,
             height,
             clips,
+            lanes,
             media: media.into_iter().map(|(_, m)| m).collect(),
             can_undo: s.history.can_undo(),
             can_redo: s.history.can_redo(),
@@ -176,6 +201,13 @@ impl Studio {
     /// Imports a media file into the project. The first clip makes the sequence (matching it);
     /// later ones go to the end of the main track. Returns the media item.
     pub fn add_clip(&mut self, path: &str) -> Result<u64> {
+        let item = self.import(path)?;
+        self.append_item(item)?;
+        Ok(item)
+    }
+
+    /// Imports a media file into the project's media without putting it on the timeline.
+    pub fn import(&mut self, path: &str) -> Result<u64> {
         if path.trim().is_empty() {
             return Err(Error::Invalid("choose a file to add".into()));
         }
@@ -184,7 +216,6 @@ impl Studio {
             let why = r.get("errors").and_then(Value::as_array).map(|e| e.iter().filter_map(Value::as_str).collect::<Vec<_>>().join("; ")).unwrap_or_default();
             Error::Engine(if why.is_empty() { format!("{path} could not be opened") } else { why })
         })?;
-        self.append_item(item)?;
         Ok(item)
     }
 
@@ -221,8 +252,22 @@ impl Studio {
 
     /// Runs `f` as one undo step called `label`, however many engine edits it makes; if it fails,
     /// everything it changed is undone.
-    fn group<R>(&mut self, label: &str, f: impl FnOnce(&mut Self) -> Result<R>) -> Result<R> {
-        let mark = self.session.history.undo.len();
+    pub(crate) fn group<R>(&mut self, label: &str, f: impl FnOnce(&mut Self) -> Result<R>) -> Result<R> {
+        self.group_merge(label, None, f)
+    }
+
+    /// [`Studio::group`] that folds into the previous step when that one was made by the same
+    /// `merge` key and nothing happened since (a slider dragged through many values is one step).
+    pub(crate) fn group_merge<R>(&mut self, label: &str, merge: Option<&str>, f: impl FnOnce(&mut Self) -> Result<R>) -> Result<R> {
+        let top = self.session.history.undo.last().map(|e| e.1.clone());
+        let fold = match (merge, &self.merge, &top) {
+            (Some(k), Some((key, snap)), Some(t)) => k == key && std::sync::Arc::ptr_eq(snap, t) && self.session.history.redo.is_empty(),
+            _ => false,
+        };
+        self.merge = None;
+        let before = self.session.history.undo.len();
+        // a folded step keeps the state from before the first change of the run
+        let mark = if fold { before.saturating_sub(1) } else { before };
         let redo = self.session.history.redo.clone();
         let limit = self.session.history.limit;
         // keep every step, so the first one can be found afterwards
@@ -232,7 +277,9 @@ impl Studio {
         match r {
             Ok(v) => {
                 let h = &mut self.session.history;
-                if let Some(first) = h.undo.get(mark).map(|e| e.1.clone()) {
+                if h.undo.len() > before
+                    && let Some(first) = h.undo.get(mark).map(|e| e.1.clone())
+                {
                     h.undo.truncate(mark);
                     h.undo.push((label.to_string(), first));
                     if h.undo.len() > limit {
@@ -240,10 +287,13 @@ impl Studio {
                     }
                     h.merge_key = None;
                 }
+                if let (Some(k), Some(top)) = (merge, self.session.history.undo.last()) {
+                    self.merge = Some((k.to_string(), top.1.clone()));
+                }
                 Ok(v)
             }
             Err(e) => {
-                while self.session.history.undo.len() > mark {
+                while self.session.history.undo.len() > before {
                     if self.session.execute("edit.undo", json!({})).is_err() {
                         break;
                     }
@@ -307,7 +357,13 @@ impl Studio {
         }
         let mut playhead = t;
         let label = if keep == Keep::Right { "Delete to the Left" } else { "Delete to the Right" };
+        let main_ids: Vec<u64> = self
+            .session
+            .active_sequence()
+            .map(|q| q.video_tracks.first().into_iter().chain(q.audio_tracks.first()).flat_map(|t| t.items.iter().map(|i| i.id.0)).collect())
+            .unwrap_or_default();
         self.group(label, |st| {
+            st.unlock_lanes()?;
             st.session
                 .edit_group(label, |s| {
                     let mut remove = Vec::new();
@@ -325,7 +381,7 @@ impl Studio {
                             .iter()
                             .find(|i| if keep == Keep::Right { i.end() == t && i.start >= item.start } else { i.start == t && i.end() <= item.end() });
                         if let Some(p) = piece {
-                            if keep == Keep::Right {
+                            if keep == Keep::Right && main_ids.contains(c) {
                                 playhead = playhead.min(p.start);
                             }
                             if !remove.contains(&p.id.0) {
@@ -333,8 +389,13 @@ impl Studio {
                             }
                         }
                     }
-                    if !remove.is_empty() {
-                        s.execute("edit.rippleDelete", json!({"clips": remove}))?;
+                    // main-track pieces close up; lane pieces leave their place empty
+                    let (main, lanes): (Vec<u64>, Vec<u64>) = remove.iter().partition(|c| main_ids.contains(c));
+                    if !lanes.is_empty() {
+                        s.execute("edit.clear", json!({"clips": lanes}))?;
+                    }
+                    if !main.is_empty() {
+                        s.execute("edit.rippleDelete", json!({"clips": main}))?;
                     }
                     Ok(())
                 })
@@ -349,8 +410,16 @@ impl Studio {
         if clips.is_empty() {
             return Err(Error::Invalid("select a clip to delete".into()));
         }
+        // the main track closes up; clips on lanes leave their place empty, as in CapCut
+        let (main, lanes): (Vec<u64>, Vec<u64>) = clips.iter().partition(|c| self.on_main(**c));
         self.group("Delete", |s| {
-            s.session.execute("edit.rippleDelete", json!({"clips": clips})).map_err(engine)?;
+            s.unlock_lanes()?;
+            if !lanes.is_empty() {
+                s.session.execute("edit.clear", json!({"clips": lanes})).map_err(engine)?;
+            }
+            if !main.is_empty() {
+                s.session.execute("edit.rippleDelete", json!({"clips": main})).map_err(engine)?;
+            }
             s.pack_main()
         })
     }
@@ -367,10 +436,13 @@ impl Studio {
         if frames == 0 {
             return Ok(0.0);
         }
+        // the main track ripples; a lane clip's edge just moves
+        let mode = if self.on_main(clip) { "ripple" } else { "regular" };
         self.group("Trim", |s| {
+            s.unlock_lanes()?;
             let r = s
                 .session
-                .execute("timeline.trim", json!({"clip": clip, "edge": if edge_in { "in" } else { "out" }, "mode": "ripple", "deltaFrames": frames}))
+                .execute("timeline.trim", json!({"clip": clip, "edge": if edge_in { "in" } else { "out" }, "mode": mode, "deltaFrames": frames}))
                 .map_err(engine)?;
             s.pack_main()?;
             Ok(r.get("delta").and_then(Value::as_i64).map(|d| secs(Tick(d))).unwrap_or(0.0))
@@ -396,7 +468,7 @@ impl Studio {
     }
 
     /// Closes any gap on the main track (the magnetic rule).
-    fn pack_main(&mut self) -> Result<()> {
+    pub(crate) fn pack_main(&mut self) -> Result<()> {
         let order = self.main_order()?;
         self.pack(&order, "Close Gaps")
     }

@@ -91,10 +91,11 @@ pub async fn pick_clips(handle: tauri::AppHandle) -> Result<Vec<String>, String>
     .await
 }
 
-/// Adds files in order. A file that can't be added doesn't stop the rest: its reason comes back
-/// in `errors`.
+/// Adds files in order: videos and pictures to the end of the main track, sound to a lane at
+/// `seconds` (the playhead). A file that can't be added doesn't stop the rest: its reason comes
+/// back in `errors`.
 #[tauri::command]
-pub async fn add_clips(paths: Vec<String>, app: tauri::State<'_, App>) -> Result<AddResult, String> {
+pub async fn add_clips(paths: Vec<String>, seconds: Option<f64>, app: tauri::State<'_, App>) -> Result<AddResult, String> {
     let (studio, player) = (app.studio.clone(), app.player.clone());
     blocking(move || {
         lock(&player).stop();
@@ -102,7 +103,7 @@ pub async fn add_clips(paths: Vec<String>, app: tauri::State<'_, App>) -> Result
         {
             let mut s = lock(&studio);
             for p in &paths {
-                if let Err(e) = s.add_clip(p) {
+                if let Err(e) = s.add_file(p, seconds.unwrap_or(0.0)) {
                     let name = Path::new(p).file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_else(|| p.clone());
                     errors.push(format!("{name}: {e}"));
                 }
@@ -181,6 +182,119 @@ pub async fn redo(app: tauri::State<'_, App>) -> Result<TimelineView, String> {
     edit(&app, |s| s.redo()).await
 }
 
+/* ---------- lanes, text and properties ---------- */
+
+/// Imports files into the Media panel without putting them on the timeline (the Audio tab's
+/// Import). Returns the new media items in order, and why any file couldn't be read.
+#[tauri::command]
+pub async fn import_media(paths: Vec<String>, app: tauri::State<'_, App>) -> Result<ImportResult, String> {
+    let studio = app.studio.clone();
+    blocking(move || {
+        let mut s = lock(&studio);
+        let (mut items, mut errors) = (Vec::new(), Vec::new());
+        for p in &paths {
+            match s.import(p) {
+                Ok(i) => items.push(i),
+                Err(e) => {
+                    let name = Path::new(p).file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_else(|| p.clone());
+                    errors.push(format!("{name}: {e}"));
+                }
+            }
+        }
+        Ok(ImportResult { timeline: s.timeline(), items, errors })
+    })
+    .await
+}
+
+#[derive(serde::Serialize)]
+pub struct ImportResult {
+    timeline: TimelineView,
+    items: Vec<u64>,
+    errors: Vec<String>,
+}
+
+/// Media on a lane at `seconds`: a picture above the main track, sound below it.
+#[tauri::command]
+pub async fn add_to_lane(item: u64, seconds: f64, app: tauri::State<'_, App>) -> Result<ClipResult, String> {
+    let (studio, player) = (app.studio.clone(), app.player.clone());
+    blocking(move || {
+        lock(&player).stop();
+        let mut s = lock(&studio);
+        let clips = s.add_to_lane(item, seconds).map_err(|e| e.to_string())?;
+        Ok(ClipResult { timeline: s.timeline(), clips })
+    })
+    .await
+}
+
+#[derive(serde::Serialize)]
+pub struct ClipResult {
+    timeline: TimelineView,
+    /// The clips the action made (to select them).
+    clips: Vec<u64>,
+}
+
+#[tauri::command]
+pub async fn add_text(seconds: f64, duration: f64, text: String, style: serde_json::Value, app: tauri::State<'_, App>) -> Result<ClipResult, String> {
+    let (studio, player) = (app.studio.clone(), app.player.clone());
+    blocking(move || {
+        lock(&player).stop();
+        let mut s = lock(&studio);
+        let clip = s.add_text(seconds, duration, &text, &style).map_err(|e| e.to_string())?;
+        Ok(ClipResult { timeline: s.timeline(), clips: vec![clip] })
+    })
+    .await
+}
+
+#[tauri::command]
+pub async fn move_clip(clip: u64, lane: String, seconds: f64, app: tauri::State<'_, App>) -> Result<TimelineView, String> {
+    edit(&app, move |s| s.move_clip(clip, &lane, seconds)).await
+}
+
+/// Properties from the Properties panel or the preview; `merge` joins a slider's run of changes
+/// into one undo step.
+#[tauri::command]
+pub async fn set_props(clips: Vec<u64>, props: serde_json::Value, merge: Option<String>, app: tauri::State<'_, App>) -> Result<TimelineView, String> {
+    edit(&app, move |s| s.set_props(&clips, &props, merge.as_deref())).await
+}
+
+#[tauri::command]
+pub async fn set_canvas(width: u32, height: u32, app: tauri::State<'_, App>) -> Result<TimelineView, String> {
+    edit(&app, move |s| s.set_canvas(width, height)).await
+}
+
+#[tauri::command]
+pub async fn fit_clips(clips: Vec<u64>, fill: bool, app: tauri::State<'_, App>) -> Result<TimelineView, String> {
+    edit(&app, move |s| s.fit_clips(&clips, fill)).await
+}
+
+#[tauri::command]
+pub async fn set_lane(lane: String, on: bool, app: tauri::State<'_, App>) -> Result<TimelineView, String> {
+    edit(&app, move |s| s.set_lane(&lane, on)).await
+}
+
+#[tauri::command]
+pub async fn fonts(app: tauri::State<'_, App>) -> Result<Vec<String>, String> {
+    let studio = app.studio.clone();
+    blocking(move || Ok(lock(&studio).fonts())).await
+}
+
+/// A media item's waveform: one byte (0…255, the loudest sample) per 1/100 s. Worked out once per
+/// item, without holding the session.
+#[tauri::command]
+pub async fn peaks(item: u64, app: tauri::State<'_, App>) -> Result<tauri::ipc::Response, String> {
+    if let Some(p) = lock(&app.peaks).get(&item) {
+        return Ok(tauri::ipc::Response::new(p.as_ref().clone()));
+    }
+    let reader = lock(&app.studio).peaks(item).map_err(|e| e.to_string())?;
+    let cache = app.peaks.clone();
+    blocking(move || {
+        let p = std::sync::Arc::new(reader.compute());
+        lock(&cache).insert(item, p.clone());
+        Ok(tauri::ipc::Response::new(p.as_ref().clone()))
+    })
+    .await
+}
+
 /* ---------- projects ---------- */
 
 /// Saves the project, giving it a file in `Documents\ClipCut` the first time. Nothing to save
@@ -227,6 +341,8 @@ pub fn save_on_close(handle: &tauri::AppHandle) {
 #[tauri::command]
 pub async fn new_project(handle: tauri::AppHandle, app: tauri::State<'_, App>) -> Result<TimelineView, String> {
     remember(&handle, None);
+    // media ids start again in another project
+    lock(&app.peaks).clear();
     edit(&app, |s| s.new_project("Untitled")).await
 }
 
@@ -246,6 +362,7 @@ pub async fn pick_project(handle: tauri::AppHandle) -> Result<Option<String>, St
 #[tauri::command]
 pub async fn open_project(path: String, handle: tauri::AppHandle, app: tauri::State<'_, App>) -> Result<TimelineView, String> {
     let p = path.clone();
+    lock(&app.peaks).clear();
     let v = edit(&app, move |s| s.open_project(&p)).await?;
     remember(&handle, Some(&path));
     Ok(v)
@@ -263,7 +380,7 @@ pub async fn restore(handle: tauri::AppHandle, app: tauri::State<'_, App>) -> Re
         let mut errors = Vec::new();
         if !startup.is_empty() {
             for f in &startup {
-                if let Err(e) = s.add_clip(f) {
+                if let Err(e) = s.add_file(f, 0.0) {
                     let name = Path::new(f).file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_else(|| f.clone());
                     errors.push(format!("{name}: {e}"));
                 }
