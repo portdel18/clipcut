@@ -375,8 +375,13 @@ pub async fn restore(handle: tauri::AppHandle, app: tauri::State<'_, App>) -> Re
     let startup = std::mem::take(&mut *lock(&app.startup_files));
     let last = last_project_file(&handle).and_then(|f| std::fs::read_to_string(f).ok()).map(|s| s.trim().to_string()).filter(|p| Path::new(p).is_file());
     let studio = app.studio.clone();
+    // the user's own titles are kept in the app's data folder
+    let data = handle.path().app_data_dir().ok();
     blocking(move || {
         let mut s = lock(&studio);
+        if let Some(d) = &data {
+            s.set_data_dir(d);
+        }
         let mut errors = Vec::new();
         if !startup.is_empty() {
             for f in &startup {
@@ -660,4 +665,54 @@ pub async fn clear_beats(clip: u64, app: tauri::State<'_, App>) -> Result<Timeli
 #[tauri::command]
 pub async fn toggle_beat(clip: u64, seconds: f64, app: tauri::State<'_, App>) -> Result<TimelineView, String> {
     edit(&app, move |s| s.toggle_beat(clip, seconds).map(|_| ())).await
+}
+
+/* ---------- titles (the engine's graphics templates, and the user's own) ---------- */
+
+#[tauri::command]
+pub async fn titles(app: tauri::State<'_, App>) -> Result<Vec<clipcut_core::TitleView>, String> {
+    let studio = app.studio.clone();
+    blocking(move || lock(&studio).titles().map_err(|e| e.to_string())).await
+}
+
+/// A title's picture as base64 PNG.
+#[tauri::command]
+pub async fn title_thumbnail(id: String, width: u32, app: tauri::State<'_, App>) -> Result<String, String> {
+    let studio = app.studio.clone();
+    blocking(move || lock(&studio).title_thumbnail(&id, width).map_err(|e| e.to_string())).await
+}
+
+#[tauri::command]
+pub async fn add_title(id: String, seconds: f64, app: tauri::State<'_, App>) -> Result<ClipResult, String> {
+    let (studio, player) = (app.studio.clone(), app.player.clone());
+    blocking(move || {
+        lock(&player).stop();
+        let mut s = lock(&studio);
+        let clip = s.add_title(&id, seconds).map_err(|e| e.to_string())?;
+        Ok(ClipResult { timeline: s.timeline(), clips: vec![clip] })
+    })
+    .await
+}
+
+#[tauri::command]
+pub async fn title_controls(clip: u64, app: tauri::State<'_, App>) -> Result<serde_json::Value, String> {
+    let studio = app.studio.clone();
+    blocking(move || lock(&studio).title_controls(clip).map_err(|e| e.to_string())).await
+}
+
+#[tauri::command]
+pub async fn set_title(clip: u64, values: serde_json::Value, merge: Option<String>, app: tauri::State<'_, App>) -> Result<TimelineView, String> {
+    edit(&app, move |s| s.set_title(clip, &values, merge.as_deref())).await
+}
+
+#[tauri::command]
+pub async fn save_title(clip: u64, name: String, app: tauri::State<'_, App>) -> Result<String, String> {
+    let studio = app.studio.clone();
+    blocking(move || lock(&studio).save_title(clip, &name).map_err(|e| e.to_string())).await
+}
+
+#[tauri::command]
+pub async fn remove_title(id: String, app: tauri::State<'_, App>) -> Result<(), String> {
+    let studio = app.studio.clone();
+    blocking(move || lock(&studio).remove_title(&id).map_err(|e| e.to_string())).await
 }

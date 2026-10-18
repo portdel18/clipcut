@@ -321,6 +321,9 @@ impl Studio {
         if v.is_empty() {
             return Err(Error::Invalid("select a text clip first".into()));
         }
+        if v.iter().any(|c| q.find_item(ClipId(*c)).is_some_and(|(_, i)| crate::titles::title_of(i).is_some())) {
+            return Err(Error::Invalid("a title moves the way its template does: animations are for text clips".into()));
+        }
         Ok(v)
     }
 

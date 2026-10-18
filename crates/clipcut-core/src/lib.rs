@@ -23,6 +23,7 @@ mod mixer;
 mod props;
 mod scopes;
 mod timeline;
+mod titles;
 mod transitions;
 mod trimming;
 
@@ -46,6 +47,7 @@ pub use mixer::{Level, Meters, MixView};
 pub use props::{ClipProps, PEAKS_PER_SECOND, Peaks, TextProps};
 pub use scopes::SCOPES;
 pub use timeline::{ClipView, Keep, LaneView, MediaView, ProjectView, TimelineView};
+pub use titles::{MY_TITLES, TitleView};
 pub use transitions::{DEFAULT_SECONDS as TRANSITION_SECONDS, TRANSITIONS, TransitionPresetView, TransitionView, transition_presets, transition_previews};
 
 /// What went wrong, in words the app can show as they are.

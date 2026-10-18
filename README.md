@@ -100,6 +100,11 @@ and play.
 slide, shrink, zoom, erase, word by word), and how long each takes. Picking one plays it once.
 They stay on the clip's ends when it is trimmed, and follow new words when the text changes.
 
+**Titles.** The Text tab's **Titles** are ready-made designs (lower thirds, titles, end credits,
+callouts, a news ticker): click one to add it at the playhead, then change its words, colours, font
+and what shows in Properties. **Save as title** keeps any text, with its look and animations, under
+**My Titles** to use again (the × on one removes it).
+
 **Ducking.** Music on a lane can **Lower under speech**: it goes down (15 dB, or as far as you
 set) wherever the main track or another lane has sound under it, with short fades. The dips are
 volume keyframes on the music; **Update** finds the speech again after you move or trim clips.
@@ -166,7 +171,7 @@ ProRes `.mov` for the master, a `.wav` for the sound) with progress and Cancel.
 | **1. Editor v1** (done: 1a cutting, 1b lanes and properties, 1c captions, 1d transitions) | Split, trim, ripple delete, a magnetic main track plus overlay, text and audio lanes, speed, transitions, vertical and horizontal canvases, undo, autosave. First workflows: cutting down interviews and captioned explainers (auto-captions with styles, transcript cutting) |
 | **2. Clip Studio inside** (this) | A Graphics tab with Clip Studio's tools (lower thirds, map zoom, numbers, timelines, underline); graphics become clips you can reopen and edit; TikTok, Reels and Shorts overlays in the preview |
 | **3. Pro panels** (done: 3a keyframes, 3b colour and scopes, 3c the mixer and precise trimming) | Keyframes, colour, the audio mixer, scopes and precise trimming, from the engine |
-| **4. CapCut extras** (4a text animations and ducking, 4b beats and quick exports: this; templates next) | Caption styles, text animations, templates, beat markers, music ducking, quick social exports |
+| **4. CapCut extras** (done: 4a text animations and ducking, 4b beats and quick exports; 4c titles: this) | Caption styles, text animations, templates, beat markers, music ducking, quick social exports |
 | **5. Polish** | Live graphics, proxies, speed work, signed installers and updates |
 
 ## How it is built
@@ -174,7 +179,7 @@ ProRes `.mov` for the master, a `.wav` for the sound) with progress and Cancel.
 | Layer | Where | What |
 |---|---|---|
 | Engine | `crates/*` (from FilmCraft) | Decoding, the timeline model, rendering, effects, audio mixing, export |
-| Façade | `crates/clipcut-core` | The engine operations the app calls: the magnetic main track and the lanes around it (`timeline.rs`, `lanes.rs`), clip properties, canvas and waveforms (`props.rs`), captions and transcript cutting (`captions.rs`), transitions (`transitions.rs`), graphics from the Graphics tab (`graphics.rs`), keyframes (`keyframes.rs`), colour and scopes (`colour.rs`, `scopes.rs`), the mixer and precise trimming (`mixer.rs`, `trimming.rs`), text animations (`animations.rs`), ducking (`ducking.rs`), beats (`beats.rs`) and quick exports (`exporting.rs`), each edit one undo step; projects, preview frames and thumbnails, playback audio, export jobs |
+| Façade | `crates/clipcut-core` | The engine operations the app calls: the magnetic main track and the lanes around it (`timeline.rs`, `lanes.rs`), clip properties, canvas and waveforms (`props.rs`), captions and transcript cutting (`captions.rs`), transitions (`transitions.rs`), graphics from the Graphics tab (`graphics.rs`), keyframes (`keyframes.rs`), colour and scopes (`colour.rs`, `scopes.rs`), the mixer and precise trimming (`mixer.rs`, `trimming.rs`), text animations (`animations.rs`), ducking (`ducking.rs`), beats (`beats.rs`), quick exports (`exporting.rs`) and titles (`titles.rs`), each edit one undo step; projects, preview frames and thumbnails, playback audio, export jobs |
 | App | `apps/clipcut` | A [Tauri](https://tauri.app) window: Rust commands in `src/`, the interface in `ui/` (HTML, CSS and JavaScript, no build step) |
 
 The sound card is the playback clock; the interface shows the frame the engine renders at that time.

@@ -332,3 +332,17 @@ select:disabled { opacity: .5; }
 .choice[aria-checked="true"] { border-color: var(--accent); }
 .choice[aria-checked="true"] b { color: var(--accent); }
 #export-note { min-height: 1.4em; font-family: var(--ui); }
+
+/* titles in the Text tab */
+.titles-head { margin-top: 18px; }
+h3.sub { margin: 12px 0 6px; font-size: 11px; font-weight: 600; color: var(--muted); }
+.title-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+.title-tile { position: relative; display: grid; gap: 4px; padding: 0 0 6px; border-radius: 8px; border: 1px solid var(--line); background: var(--panel-2); color: var(--text); cursor: pointer; overflow: hidden; text-align: left; }
+.title-tile:hover { border-color: var(--accent); }
+.title-tile .pic { display: block; aspect-ratio: 16 / 9; background: repeating-conic-gradient(#2c2c33 0 25%, #24242a 0 50%) 0 0 / 14px 14px; }
+.title-tile .pic img, .title-tile .pic canvas { width: 100%; height: 100%; object-fit: contain; display: block; }
+.title-tile .name { padding: 0 8px; font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.title-tile .remove { position: absolute; top: 4px; right: 4px; width: 20px; height: 20px; display: grid; place-items: center; border-radius: 5px; background: rgba(0, 0, 0, .6); color: var(--text); font-size: 14px; opacity: 0; }
+.title-tile:hover .remove { opacity: 1; }
+.title-controls { display: grid; gap: 8px; }
+.title-controls textarea { width: 100%; resize: vertical; min-height: 28px; }
