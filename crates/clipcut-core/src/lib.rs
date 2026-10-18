@@ -11,10 +11,12 @@
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
 
 mod captions;
+mod colour;
 mod graphics;
 mod keyframes;
 mod lanes;
 mod props;
+mod scopes;
 mod timeline;
 mod transitions;
 
@@ -28,9 +30,11 @@ use serde::Serialize;
 use serde_json::{Value, json};
 
 pub use captions::{CaptionStyleView, CaptionView, CaptionsView, ModelView, TranscribeJob, WordView, caption_presets, download_model, speech_models};
+pub use colour::{ADJUST, ColourView, looks};
 pub use graphics::{GRAPHIC_FILE, GRAPHIC_SOUND, read_graphic};
 pub use keyframes::{ANIMATABLE, KeyTrack};
 pub use props::{ClipProps, PEAKS_PER_SECOND, Peaks, TextProps};
+pub use scopes::SCOPES;
 pub use timeline::{ClipView, Keep, LaneView, MediaView, ProjectView, TimelineView};
 pub use transitions::{DEFAULT_SECONDS as TRANSITION_SECONDS, TRANSITIONS, TransitionPresetView, TransitionView, transition_presets, transition_previews};
 

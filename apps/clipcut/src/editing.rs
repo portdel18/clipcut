@@ -479,3 +479,74 @@ pub async fn toggle_keyframe(clip: u64, prop: String, seconds: f64, app: tauri::
 pub async fn set_easing(clip: u64, smooth: bool, app: tauri::State<'_, App>) -> Result<TimelineView, String> {
     edit(&app, move |s| s.set_easing(clip, smooth)).await
 }
+
+/* ---------- colour: adjustments, filters, scopes ---------- */
+
+#[tauri::command]
+pub async fn set_colour(clips: Vec<u64>, values: serde_json::Value, merge: Option<String>, app: tauri::State<'_, App>) -> Result<TimelineView, String> {
+    edit(&app, move |s| s.set_colour(&clips, &values, merge.as_deref())).await
+}
+
+#[tauri::command]
+pub async fn set_look(
+    clips: Vec<u64>,
+    look: Option<String>,
+    intensity: f64,
+    merge: Option<String>,
+    app: tauri::State<'_, App>,
+) -> Result<TimelineView, String> {
+    edit(&app, move |s| s.set_look(&clips, look.as_deref(), intensity, merge.as_deref())).await
+}
+
+#[tauri::command]
+pub async fn reset_colour(clips: Vec<u64>, app: tauri::State<'_, App>) -> Result<TimelineView, String> {
+    edit(&app, move |s| s.reset_colour(&clips)).await
+}
+
+#[tauri::command]
+pub async fn colour_everywhere(clip: u64, app: tauri::State<'_, App>) -> Result<TimelineView, String> {
+    edit(&app, move |s| s.colour_everywhere(clip).map(|_| ())).await
+}
+
+#[tauri::command]
+pub fn looks() -> Vec<&'static str> {
+    clipcut_core::looks()
+}
+
+/// Frames as one buffer: count, then each frame's width and height (u32 LE) and RGBA pixels.
+fn frames_response(frames: Vec<clipcut_core::Frame>) -> tauri::ipc::Response {
+    let mut out = Vec::with_capacity(4 + frames.iter().map(|f| 8 + f.rgba.len()).sum::<usize>());
+    out.extend_from_slice(&u32::try_from(frames.len()).unwrap_or(0).to_le_bytes());
+    for f in &frames {
+        out.extend_from_slice(&f.w.to_le_bytes());
+        out.extend_from_slice(&f.h.to_le_bytes());
+        out.extend_from_slice(&f.rgba);
+    }
+    tauri::ipc::Response::new(out)
+}
+
+/// The Filters tab's previews: clip `clip`'s picture at `seconds`, then with each look.
+#[tauri::command]
+pub async fn look_previews(clip: u64, seconds: f64, width: u32, app: tauri::State<'_, App>) -> Result<tauri::ipc::Response, String> {
+    let studio = app.studio.clone();
+    blocking(move || {
+        let s = lock(&studio);
+        s.look_previews(clip, seconds, width).map(frames_response).map_err(|e| e.to_string())
+    })
+    .await
+}
+
+/// Scope `kind` of the program frame at `seconds` (8 bytes of size, then RGBA, as `frame`).
+#[tauri::command]
+pub async fn scope(seconds: f64, kind: String, app: tauri::State<'_, App>) -> Result<tauri::ipc::Response, String> {
+    let studio = app.studio.clone();
+    blocking(move || {
+        let f = lock(&studio).scope(seconds, &kind).map_err(|e| e.to_string())?;
+        let mut out = Vec::with_capacity(8 + f.rgba.len());
+        out.extend_from_slice(&f.w.to_le_bytes());
+        out.extend_from_slice(&f.h.to_le_bytes());
+        out.extend_from_slice(&f.rgba);
+        Ok(tauri::ipc::Response::new(out))
+    })
+    .await
+}

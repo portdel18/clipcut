@@ -114,6 +114,21 @@ select:disabled { opacity: .5; }
 .text-style:hover { border-color: var(--accent); }
 .text-style span { padding: 0 6px; border-radius: 3px; }
 
+/* Scopes over the Properties panel, and the Filters tab */
+.scopes { margin: -4px 0 14px; padding: 8px; border: 1px solid var(--line); border-radius: 8px; background: var(--well); }
+.scopes-bar { display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px; }
+.scopes canvas { width: 100%; display: block; image-rendering: auto; border-radius: 4px; background: #101012; }
+.details { position: relative; }
+#scopes-btn { position: absolute; top: 12px; right: 12px; z-index: 1; }
+.scopes:not([hidden]) + h2 + .props, .scopes:not([hidden]) { margin-top: 30px; }
+.btn.small { height: 26px; padding: 0 10px; font-size: 12px; }
+.btn[aria-pressed="true"] { border-color: var(--accent); color: var(--accent); }
+.adjust { border-top: 1px solid var(--line); padding-top: 10px; }
+.adjust > summary { cursor: pointer; margin-bottom: 10px; font-size: 11px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; color: var(--faint); }
+.adjust[open] > summary { color: var(--muted); }
+.adjust .prop { margin-bottom: 8px; }
+#fl-strength-row { grid-template-columns: 64px minmax(0, 1fr) 54px; margin-bottom: 10px; }
+
 /* Keyframes: the diamond beside a property, and the clip's keyframes on the timeline */
 .prop > span:first-child { display: flex; align-items: center; gap: 4px; }
 .kf { width: 16px; height: 16px; flex: none; padding: 0; display: grid; place-items: center; border: 0; background: none; color: var(--faint); cursor: pointer; }

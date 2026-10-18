@@ -33,6 +33,8 @@ pub struct ClipProps {
     /// Percent: 100 plays at normal speed.
     pub speed: f64,
     pub text: Option<TextProps>,
+    /// Picture clips: adjustments and filter, once the clip has any.
+    pub colour: Option<crate::colour::ColourView>,
 }
 
 /// A text clip's words and look (its first text layer).
@@ -132,6 +134,7 @@ pub(crate) fn clip_props_at(s: &filmcraft_engine::Session, q: &Sequence, track: 
     p.scale = Some(float_at(motion, "scale", at).unwrap_or(100.0));
     p.rotation = Some(float_at(motion, "rotation", at).unwrap_or(0.0));
     p.opacity = Some(float_at(effect(i, "opacity"), "opacity", at).unwrap_or(100.0));
+    p.colour = crate::colour::colour_of(&i.effects);
     if kind == "text" {
         let l = effect(i, filmcraft_project::graphic::TEXT_LAYER);
         let style = text(l, "font_style").to_ascii_lowercase();
