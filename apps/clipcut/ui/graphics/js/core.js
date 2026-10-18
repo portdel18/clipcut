@@ -590,6 +590,22 @@ const hosted = {
     return !!img;
   },
   onBackdrop(fn) { backdropFns.push(fn); },
+  // Files dropped on the page, handed over by the app: an app may handle drops itself (Tauri does on
+  // Windows, so the page never sees them). They go to the drop zone at (x, y) as a real drop would.
+  // Returns true when a drop zone took them.
+  drop(files, x, y) {
+    // files made in the app's own window are another realm's, so no instanceof
+    const list = [...(files || [])].filter(f => f && typeof f.arrayBuffer === 'function' && typeof f.name === 'string');
+    if (!list.length) return false;
+    const el = document.elementFromPoint(x, y) || document.body;
+    const dt = new DataTransfer();
+    for (const f of list) dt.items.add(f);
+    const fire = type => el.dispatchEvent(new DragEvent(type, { bubbles: true, cancelable: true, composed: true, dataTransfer: dt, clientX: x, clientY: y }));
+    fire('dragenter');
+    // a zone that wants files cancels dragover; one that doesn't is never handed them
+    if (fire('dragover')) { fire('dragleave'); return false; }
+    return !fire('drop');
+  },
   setAspect(a) {
     for (const o of Object.values(outputs)) {
       if (!o.aspects.includes(a) || o.out.aspect === a) continue;

@@ -106,8 +106,6 @@ function setEditing(on) {
   const btn = $('#layout-edit');
   btn.setAttribute('aria-pressed', String(on));
   btn.textContent = on ? 'Done' : 'Edit layout';
-  $$('.tabs .tab, .subtabs .subtab').forEach(b => { b.draggable = on; });
-  $$('.rack > details.sec > summary').forEach(s => { s.draggable = on; });
   if (on) renderChips();
 }
 /** The tab list in the layout bar: a checkbox to show or hide each tab, and arrows to move it. */
@@ -140,55 +138,76 @@ $('#layout-tabs').addEventListener('change', e => {
   if (!setTabHidden(c.closest('.lchip').dataset.id, !c.checked)) c.checked = true;
 });
 
-/* Drag and drop: tabs within their own bar, sections within their own panel */
-let dragEl = null;
-function dropSpot(el, e, across) {
+/* Dragging: tabs within their own bar, sections within their own panel. Pointer events, not HTML5
+   drag and drop: an app that embeds the page may take over the webview's drag handling (Tauri does
+   on Windows), and then dragstart/drop never reach the page. */
+let dragEl = null, press = null, justDragged = false;
+function dropSpot(el, x, y, across) {
   const r = el.getBoundingClientRect();
-  return across ? e.clientX > r.left + r.width / 2 : e.clientY > r.top + r.height / 2;
+  return across ? x > r.left + r.width / 2 : y > r.top + r.height / 2;
 }
 function clearMarks() { $$('.drop-before, .drop-after').forEach(x => x.classList.remove('drop-before', 'drop-after')); }
-document.addEventListener('dragstart', e => {
-  if (!editing) return;
-  const tab = e.target.closest?.('.tabs .tab, .subtabs .subtab');
-  const sum = e.target.closest?.('.rack > details.sec > summary');
-  dragEl = tab || (sum && sum.parentElement) || null;
-  if (!dragEl) return;
-  e.dataTransfer.effectAllowed = 'move';
-  e.dataTransfer.setData('text/plain', dragEl.id || dragEl.dataset.sec);
-  dragEl.classList.add('dragging');
-});
-function targetOf(e) {
+function targetAt(x, y) {
   if (!dragEl) return null;
-  const t = dragEl.matches('details') ? e.target.closest?.('.rack > details.sec') : e.target.closest?.('.tab, .subtab');
+  const under = document.elementFromPoint(x, y);
+  const t = dragEl.matches('details') ? under?.closest?.('.rack > details.sec') : under?.closest?.('.tab, .subtab');
   return t && t !== dragEl && t.parentElement === dragEl.parentElement ? t : null;
 }
-document.addEventListener('dragover', e => {
-  const t = targetOf(e);
-  if (!t) return;
+function endDrag() {
+  clearMarks();
+  dragEl?.classList.remove('dragging');
+  document.body.classList.remove('dragging-layout');
+  dragEl = null; press = null;
+}
+document.addEventListener('pointerdown', e => {
+  if (!editing || e.button !== 0) return;
+  const tab = e.target.closest?.('.tabs .tab, .subtabs .subtab');
+  const sum = e.target.closest?.('.rack > details.sec > summary');
+  const el = tab || (sum && sum.parentElement);
+  if (el) press = { el, x: e.clientX, y: e.clientY, id: e.pointerId };
+});
+document.addEventListener('pointermove', e => {
+  if (!press || e.pointerId !== press.id) return;
+  if (!dragEl) {
+    // a press that moves a few pixels is a drag; less is a click
+    if (Math.hypot(e.clientX - press.x, e.clientY - press.y) < 5) return;
+    dragEl = press.el;
+    dragEl.classList.add('dragging');
+    document.body.classList.add('dragging-layout');
+  }
   e.preventDefault();
   clearMarks();
-  t.classList.add(dropSpot(t, e, !dragEl.matches('details')) ? 'drop-after' : 'drop-before');
+  const t = targetAt(e.clientX, e.clientY);
+  if (t) t.classList.add(dropSpot(t, e.clientX, e.clientY, !dragEl.matches('details')) ? 'drop-after' : 'drop-before');
 });
-document.addEventListener('drop', e => {
-  const t = targetOf(e);
-  if (!t) return;
-  e.preventDefault();
-  const after = dropSpot(t, e, !dragEl.matches('details'));
-  if (dragEl.matches('details')) {
-    const tool = dragEl.closest('.tool').id.slice(5), order = L.secs[tool].order;
-    const from = order.indexOf(dragEl.dataset.sec);
-    let to = order.indexOf(t.dataset.sec) + (after ? 1 : 0);
-    if (from < to) to--;
-    moveSec(tool, dragEl.dataset.sec, to);
-  } else {
-    const id = dragEl.id.slice(4), list = listOf(id);
-    const from = list.indexOf(id);
-    let to = list.indexOf(t.id.slice(4)) + (after ? 1 : 0);
-    if (from < to) to--;
-    if (move(list, id, to)) changed();
+document.addEventListener('pointerup', e => {
+  if (!press || e.pointerId !== press.id) return;
+  const t = dragEl && targetAt(e.clientX, e.clientY);
+  if (dragEl) justDragged = true;
+  if (t) {
+    const after = dropSpot(t, e.clientX, e.clientY, !dragEl.matches('details'));
+    if (dragEl.matches('details')) {
+      const tool = dragEl.closest('.tool').id.slice(5), order = L.secs[tool].order;
+      const from = order.indexOf(dragEl.dataset.sec);
+      let to = order.indexOf(t.dataset.sec) + (after ? 1 : 0);
+      if (from < to) to--;
+      moveSec(tool, dragEl.dataset.sec, to);
+    } else {
+      const id = dragEl.id.slice(4), list = listOf(id);
+      const from = list.indexOf(id);
+      let to = list.indexOf(t.id.slice(4)) + (after ? 1 : 0);
+      if (from < to) to--;
+      if (move(list, id, to)) changed();
+    }
   }
+  endDrag();
+  setTimeout(() => { justDragged = false; }, 0);
 });
-document.addEventListener('dragend', () => { clearMarks(); dragEl?.classList.remove('dragging'); dragEl = null; });
+document.addEventListener('pointercancel', endDrag);
+// the click that ends a drag doesn't also open a section or switch tabs
+document.addEventListener('click', e => {
+  if (justDragged) { e.preventDefault(); e.stopPropagation(); justDragged = false; }
+}, true);
 
 /* ---------- saved layouts ---------- */
 function fillSaved(selected) {

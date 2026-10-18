@@ -293,10 +293,15 @@ fn main() {
     }
     let built = builder
         .manage(app)
-        .on_window_event(|window, event| {
-            if let tauri::WindowEvent::CloseRequested { .. } = event {
-                editing::save_on_close(tauri::Manager::app_handle(window));
+        .on_window_event(|window, event| match event {
+            tauri::WindowEvent::CloseRequested { .. } => editing::save_on_close(tauri::Manager::app_handle(window)),
+            // the files Graphics may ask for (graphics::dropped_file)
+            tauri::WindowEvent::DragDrop(tauri::DragDropEvent::Drop { paths, .. }) => {
+                if let Some(app) = tauri::Manager::try_state::<App>(window) {
+                    *lock(&app.graphics.dropped) = paths.clone();
+                }
             }
+            _ => {}
         })
         .invoke_handler(tauri::generate_handler![
             frame,
@@ -315,6 +320,7 @@ fn main() {
             updates::check_update,
             updates::install_update,
             updates::open_releases,
+            graphics::dropped_file,
             editing::timeline,
             editing::set_colour,
             editing::set_look,

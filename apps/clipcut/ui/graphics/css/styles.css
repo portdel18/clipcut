@@ -75,12 +75,13 @@ a { color: var(--accent); }
 .editing-layout .sec-tools { display: inline-flex; }
 .sec-eye::before { content: ""; width: 14px; height: 9px; border: 1.5px solid currentColor; border-radius: 50% / 60%; box-sizing: border-box; background: radial-gradient(circle, currentColor 2px, transparent 2.5px); }
 .sec-eye[aria-pressed="false"]::before { background: linear-gradient(to top right, transparent 45%, currentColor 46% 54%, transparent 55%); }
-.editing-layout .rack > .sec > summary { cursor: grab; }
-.editing-layout .tabs .tab, .editing-layout .subtab { cursor: grab; outline: 1px dashed var(--line); outline-offset: -8px; }
+.editing-layout .rack > .sec > summary { cursor: grab; touch-action: none; }
+.editing-layout .tabs .tab, .editing-layout .subtab { cursor: grab; touch-action: none; outline: 1px dashed var(--line); outline-offset: -8px; }
 .rack > .sec.lay-hidden { display: none; }
 .editing-layout .rack > .sec.lay-hidden { display: block; opacity: .45; }
 .editing-layout .rack > .sec.lay-hidden > summary { text-decoration: line-through; }
 .dragging { opacity: .4; }
+.dragging-layout, .dragging-layout * { user-select: none; -webkit-user-select: none; cursor: grabbing; }
 .rack > .sec.drop-before { box-shadow: inset 0 3px 0 var(--accent); }
 .rack > .sec.drop-after { box-shadow: inset 0 -3px 0 var(--accent); }
 .tab.drop-before, .subtab.drop-before { box-shadow: inset 3px 0 0 var(--accent); }

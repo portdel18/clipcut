@@ -22,6 +22,31 @@ use crate::{App, blocking, lock};
 pub(crate) struct Jobs {
     next: AtomicU64,
     dirs: Mutex<HashMap<u64, PathBuf>>,
+    /// The files of the latest drop on the window, which Graphics may read (see [`dropped_file`]).
+    pub(crate) dropped: Mutex<Vec<PathBuf>>,
+}
+
+/// The largest dropped file handed to Graphics (it is read into memory there).
+const MAX_DROPPED: u64 = 1 << 30;
+
+/// The bytes of a file just dropped on the window, for Clip Studio's drop zones: the window takes
+/// drops itself (on Windows the page never sees them), so the interface asks for the file here and
+/// hands it to the drop zone under the pointer. Only files from the latest drop can be read.
+#[tauri::command]
+pub(crate) async fn dropped_file(index: usize, app: tauri::State<'_, App>) -> Result<tauri::ipc::Response, String> {
+    let path = lock(&app.graphics.dropped).get(index).cloned().ok_or("That file is no longer being dropped. Drop it again.")?;
+    blocking(move || {
+        let name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+        let len = std::fs::metadata(&path).map_err(|e| format!("Couldn't read {name}: {e}"))?.len();
+        if len > MAX_DROPPED {
+            return Err(format!(
+                "{name} is too big to drop into Graphics ({} MB; up to 1024 MB). Choose it with the tool's own file button instead.",
+                len >> 20
+            ));
+        }
+        std::fs::read(&path).map(tauri::ipc::Response::new).map_err(|e| format!("Couldn't read {name}: {e}"))
+    })
+    .await
 }
 
 /// Where graphics go: `Graphics` beside the project, or in ClipCut's projects folder before the

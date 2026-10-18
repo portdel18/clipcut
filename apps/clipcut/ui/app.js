@@ -809,6 +809,11 @@ function markWord() {
 /* ---------- Graphics: Clip Studio over the editor; its graphics come in as clips ---------- */
 const TOOL_NAMES = { ul: 'Underline', mp: 'Map', sp: 'Split screen', sz: 'Scroll zoom', tl: 'Timeline', nm: 'Numbers', au: 'Audiogram', lt: 'Lower third' };
 const GR = { loaded: null, batch: false };
+/** Graphics covers the editor: while it shows, the editor underneath can't take focus or clicks. */
+function showGraphicsView(on) {
+  $('#graphics-view').hidden = !on;
+  $('.app').inert = on;
+}
 const graphicsWin = () => $('#graphics-frame').contentWindow;
 /* What Clip Studio calls (see "Inside ClipCut" in graphics/js/core.js): it renders with its own draw
    functions and hands each frame here; the frames go to a folder beside the project, then the timeline. */
@@ -847,8 +852,8 @@ async function openGraphics(edit = null) {
   if (edit != null) {
     try { made = await invoke('graphic_info', { clip: edit }); } catch (e) { toast(e, true); return; }
   }
-  $('#graphics-view').hidden = false;
-  try { await loadGraphics(); } catch (e) { $('#graphics-view').hidden = true; toast(e, true); return; }
+  showGraphicsView(true);
+  try { await loadGraphics(); } catch (e) { showGraphicsView(false); toast(e, true); return; }
   const cs = graphicsWin().CS;
   if (made && made.tool) cs.hosted.open(made.tool, made.state, edit);
   else cs.hosted.open(null);
@@ -899,8 +904,8 @@ async function offerRemake() {
 }
 async function remakeGraphics(ids) {
   if (S.playing) await pause();
-  $('#graphics-view').hidden = false;
-  try { await loadGraphics(); } catch (e) { $('#graphics-view').hidden = true; toast(e, true); return; }
+  showGraphicsView(true);
+  try { await loadGraphics(); } catch (e) { showGraphicsView(false); toast(e, true); return; }
   const cs = graphicsWin().CS;
   GR.batch = true;
   let done = 0;
@@ -923,7 +928,7 @@ async function remakeGraphics(ids) {
   toast(done === ids.length ? `${done === 1 ? 'The graphic was' : `All ${done} graphics were`} made for the new shape.` : `${done} of ${ids.length} graphics were made for the new shape. Open the others with Edit in Graphics.`, done < ids.length);
 }
 function closeGraphics() {
-  $('#graphics-view').hidden = true;
+  showGraphicsView(false);
   // a graphic being changed and left unfinished: the next one is new
   try { graphicsWin().CS?.hosted?.open(null); } catch (_) { /* not loaded */ }
   $('#tab-graphics').blur();
@@ -3305,14 +3310,41 @@ document.addEventListener('keydown', e => {
 new ResizeObserver(() => { fitCanvas(); if (has() && !S.playing) showFrame(S.t); }).observe($('#stage'));
 new ResizeObserver(() => { if (S.tl) layoutTimeline(); }).observe(scroller());
 
-// Files dropped on the window: videos to the end of the main track, sound below it at the playhead
-listen('tauri://drag-enter', () => $('#drop-veil').classList.add('on'));
+// Files dropped on the window: videos to the end of the main track, sound below it at the playhead.
+// While Graphics is open they go to the Clip Studio drop zone under the pointer instead: the window
+// takes every drop itself (on Windows the page never sees one), so the files are handed over.
+const graphicsOpen = () => !$('#graphics-view').hidden;
+listen('tauri://drag-enter', () => { if (!graphicsOpen()) $('#drop-veil').classList.add('on'); });
 listen('tauri://drag-leave', () => $('#drop-veil').classList.remove('on'));
 listen('tauri://drag-drop', e => {
   $('#drop-veil').classList.remove('on');
   const paths = (e.payload && e.payload.paths) || [];
-  if (paths.length) addPaths(paths);
+  if (!paths.length) return;
+  if (graphicsOpen()) dropIntoGraphics(paths, e.payload.position);
+  else addPaths(paths);
 });
+const DROP_TYPES = {
+  png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', webp: 'image/webp', gif: 'image/gif', avif: 'image/avif',
+  mp4: 'video/mp4', m4v: 'video/mp4', mov: 'video/quicktime', webm: 'video/webm', mkv: 'video/x-matroska',
+  wav: 'audio/wav', mp3: 'audio/mpeg', m4a: 'audio/mp4', aac: 'audio/aac', flac: 'audio/flac', ogg: 'audio/ogg', opus: 'audio/ogg',
+  pdf: 'application/pdf', srt: 'application/x-subrip', vtt: 'text/vtt', txt: 'text/plain',
+};
+async function dropIntoGraphics(paths, pos) {
+  const frame = $('#graphics-frame'), cs = graphicsWin().CS;
+  if (!cs || !cs.hosted || !cs.hosted.drop) return;
+  const files = [];
+  try {
+    for (let i = 0; i < paths.length; i++) {
+      const name = paths[i].split(/[\\/]/).pop();
+      const bytes = await invoke('dropped_file', { index: i });
+      files.push(new (graphicsWin().File)([bytes], name, { type: DROP_TYPES[(name.split('.').pop() || '').toLowerCase()] || '' }));
+    }
+  } catch (err) { toast(String(err), true); return; }
+  // the drop's position is in the screen's pixels, the page's in CSS pixels
+  const r = frame.getBoundingClientRect(), k = window.devicePixelRatio || 1;
+  const x = (pos ? pos.x / k : r.width / 2 + r.left) - r.left, y = (pos ? pos.y / k : r.height / 2 + r.top) - r.top;
+  if (!cs.hosted.drop(files, x, y)) toast('Drop it on the preview or a photo, video or sound box of the tool on screen.');
+}
 
 renderTextStyles();
 // The last project comes back (or files given on the command line start a new one)

@@ -72,6 +72,10 @@ remote `upstream`). Read `README.md` for what it is and the roadmap.
   playhead (`graphic_backdrop`, which leaves out the graphic being changed), and after a Ratio
   change `offerRemake` re-renders graphics in the old shape through `CS.hosted.add` one by one
   (`GR.batch` keeps `finish` from closing Graphics between them).
+- Drops: the window takes every file drop itself (`dragDropEnabled`; on Windows WebView2's drop handler is
+  replaced, so HTML5 drag and drop never reaches the page). In-page dragging uses pointer events, never
+  `draggable`. While Graphics is open, dropped files are read back through `graphics::dropped_file` (only
+  the latest drop's paths) and handed to Clip Studio's drop zone under the pointer with `CS.hosted.drop`.
 - Disk is tight here: `rm -rf target/debug/incremental` when a build fails with "no space left".
 - Interface copy: plain words from the user's side, errors that say what went wrong and how to fix it.
   One dark theme from the tokens at the top of `ui/app.css`; amber (`--accent`) marks the active thing.
