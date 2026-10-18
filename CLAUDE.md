@@ -16,7 +16,13 @@ remote `upstream`). Read `README.md` for what it is and the roadmap.
   plain HTML/CSS/JS with **no build step** (`window.__TAURI__` globals). Engine work stays in Rust; the
   interface only asks for it. `--self-test <in> <out> <report.json>` runs open/preview/sound/export
   without a window (CI runs it on Windows).
-- Clip Studio (https://github.com/portdel18/clip-stu) joins in Phase 2 as the Graphics tab.
+- Clip Studio (https://github.com/portdel18/clip-stu) is the Graphics tab: a copy in
+  `apps/clipcut/ui/graphics/`, never edited here. Change Clip Studio in its own repo, then run
+  `python3 packaging/clipcut/sync-graphics.py ../clip-stu` (after `npm ci` there): it copies the page
+  and bundles its pinned libraries locally, because the CSP allows scripts only from the app. The
+  page talks to ClipCut through `window.__clipcutHost` (`ui/app.js`) and `CS.hosted` (its
+  `js/core.js`, "Inside ClipCut"); frames go to `src/graphics.rs` as raw request bodies, and
+  `clipcut-core/src/graphics.rs` imports them as an image sequence.
 - `.github/workflows/clipcut-windows.yml`: tests, the NSIS installer, the self-test, the artifact.
 
 ## Running and looking at the app

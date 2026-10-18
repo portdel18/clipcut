@@ -1,0 +1,10 @@
+{
+  "source": "https://github.com/portdel18/clip-stu",
+  "commit": "cb9420534a1621227ae92b142a3b4350b5813b1f",
+  "libraries": {
+    "maplibre-gl": "5.24.0",
+    "mp4-muxer": "5.2.2",
+    "fflate": "0.8.2",
+    "pdfjs-dist": "3.11.174"
+  }
+}

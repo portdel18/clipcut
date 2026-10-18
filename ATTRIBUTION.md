@@ -164,6 +164,24 @@ the original copyright and permission notice in its header.
 |---|---|---|---|
 | `crates/platform/src/nvenc/ffi.rs` | NVIDIA Corporation (`nvEncodeAPI.h`); FilmCraft contributors (Rust transcription) | Structures (including `NV_ENC_CONFIG_HEVC` and its bit-field masks, `NV_ENC_PIC_PARAMS_HEVC`, `NV_ENC_SEI_PAYLOAD`, `NV_ENC_TIME_CODE`), function table, codec / profile GUIDs (H.264, HEVC Main, HEVC Main 10) and constants (`NV_ENC_LEVEL_HEVC_*`, tier, CU size, `NV_ENC_BUFFER_FORMAT_YUV420_10BIT`, `NV_ENC_CAPS_SUPPORT_10BIT_ENCODE`, BT.2020 / PQ / HLG VUI codes) transcribed from `nvEncodeAPI.h`, NVIDIA Video Codec SDK, API 12.1 (https://developer.nvidia.com/video-codec-sdk) | MIT (Copyright (c) 2010-2023 NVIDIA Corporation; notice kept in the file header) |
 
+## ClipCut's Graphics tab (bundled web code)
+
+`apps/clipcut/ui/graphics/` is a copy of Clip Studio and the JavaScript libraries it loads, made by
+`packaging/clipcut/sync-graphics.py` (`graphics/clip-studio.json` records the commit and versions).
+It runs in the app's web view, never in the engine. Each library keeps its licence file beside it.
+
+| Files | Author | Source | Licence |
+|---|---|---|---|
+| `graphics/index.html`, `graphics/css/`, `graphics/js/` (also `ui/cs-shim.js`, a copy of its `roundRect`) | portdel18 (Clip Studio) | https://github.com/portdel18/clip-stu | MIT (`graphics/LICENSE`) |
+| `graphics/lib/maplibre-gl/` (`maplibre-gl.js`, `maplibre-gl.css`) 5.24.0 | MapLibre contributors | https://github.com/maplibre/maplibre-gl-js | BSD-3-Clause (`LICENSE.txt`) |
+| `graphics/lib/mp4-muxer/` 5.2.2 | Vanilagy | https://github.com/Vanilagy/mp4-muxer | MIT |
+| `graphics/lib/fflate/` 0.8.2 | Arjun Barrett | https://github.com/101arrowz/fflate | MIT |
+| `graphics/lib/pdfjs-dist/` (`pdf.min.js`, `pdf.worker.min.js`) 3.11.174 | Mozilla | https://github.com/mozilla/pdf.js | Apache-2.0 |
+
+Map tiles, place searches, routes, boundaries (Census TIGERweb, us-atlas), Google Fonts and pdf.js's
+own fonts are fetched by the Graphics tab while it is used, as in Clip Studio; nothing of theirs is
+bundled.
+
 ## Downloaded at runtime
 
 These files are never in the repository or the app bundle. FilmCraft downloads them into the

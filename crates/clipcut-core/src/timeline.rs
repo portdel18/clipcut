@@ -39,6 +39,8 @@ pub struct ClipView {
     /// `video`, `image`, `text` or `audio`.
     pub kind: &'static str,
     pub props: ClipProps,
+    /// The Clip Studio tool that made it (`"lt"`, `"mp"`…), for a graphic from the Graphics tab.
+    pub graphic: Option<String>,
 }
 
 /// A track as a lane of the timeline: `V1` and `A1` are the main track's picture and sound.
@@ -160,6 +162,7 @@ impl Studio {
                             item: i.item.0,
                             kind,
                             props,
+                            graphic: if prefix == "V" { self.graphic_tool(i.item) } else { None },
                         });
                     }
                 }

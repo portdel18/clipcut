@@ -11,6 +11,7 @@
 
 mod captioning;
 mod editing;
+mod graphics;
 mod playback;
 
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
@@ -32,6 +33,8 @@ pub(crate) struct App {
     pub(crate) startup_files: Mutex<Vec<String>>,
     /// Waveforms already worked out, by media item.
     pub(crate) peaks: Arc<Mutex<std::collections::HashMap<u64, Arc<Vec<u8>>>>>,
+    /// Graphics from the Graphics tab being rendered.
+    pub(crate) graphics: graphics::Jobs,
 }
 
 pub(crate) fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
@@ -246,6 +249,7 @@ fn main() {
         studio: Arc::new(Mutex::new(studio)),
         player: Arc::new(Mutex::new(playback::Player::default())),
         peaks: Arc::default(),
+        graphics: graphics::Jobs::default(),
         startup_files: Mutex::new(args.into_iter().filter(|a| !a.starts_with("--")).collect()),
     };
     let built = tauri::Builder::default()
@@ -269,6 +273,12 @@ fn main() {
             cancel_export,
             reveal,
             editing::timeline,
+            graphics::graphic_begin,
+            graphics::graphic_frame,
+            graphics::graphic_audio,
+            graphics::graphic_finish,
+            graphics::graphic_abort,
+            graphics::graphic_info,
             editing::transition_presets,
             editing::transition_previews,
             editing::set_transition,

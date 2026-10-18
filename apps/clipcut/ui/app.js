@@ -263,6 +263,7 @@ function drawOverlay() {
   const g = o.getContext('2d');
   g.setTransform(1, 0, 0, 1, 0, 0);
   g.clearRect(0, 0, o.width, o.height);
+  if (has()) { g.setTransform(dpr, 0, 0, dpr, 0, 0); drawGuide(g, w, h); g.setTransform(1, 0, 0, 1, 0, 0); }
   const c = has() && !S.playing ? stageClip() : null;
   $('#stage').classList.toggle('grab', !!c);
   if (!c || !w) return;
@@ -742,6 +743,89 @@ function markWord() {
   }
 }
 
+/* ---------- Graphics: Clip Studio over the editor; its graphics come in as clips ---------- */
+const TOOL_NAMES = { ul: 'Underline', mp: 'Map', sp: 'Split screen', sz: 'Scroll zoom', tl: 'Timeline', nm: 'Numbers', au: 'Audiogram', lt: 'Lower third' };
+const GR = { loaded: null };
+const graphicsWin = () => $('#graphics-frame').contentWindow;
+/* What Clip Studio calls (see "Inside ClipCut" in graphics/js/core.js): it renders with its own draw
+   functions and hands each frame here; the frames go to a folder beside the project, then the timeline. */
+window.__clipcutHost = {
+  get aspect() { return S.tl && S.tl.hasSequence ? ratioName(S.tl.width, S.tl.height) : '16:9'; },
+  begin: info => invoke('graphic_begin', { name: info.name || 'Graphic' }),
+  frame: (job, i, bytes, ext) => invoke('graphic_frame', bytes, { headers: { job: String(job), index: String(i), ext } }),
+  audio: (job, bytes) => invoke('graphic_audio', bytes, { headers: { job: String(job) } }),
+  async finish(job, info) {
+    const replace = typeof info.edit === 'number' && clipById(info.edit) ? info.edit : null;
+    const r = await run('graphic_finish', { job, info, seconds: S.t, replace });
+    if (!r) throw new Error('The graphic could not be added to the video.');
+    S.sel = new Set(r.clips.filter(id => r.timeline.clips.some(c => c.id === id && c.track[0] === 'V')));
+    apply(r.timeline);
+    closeGraphics();
+    toast(replace != null ? 'Graphic updated' : 'Graphic added at the playhead');
+  },
+  abort: job => { invoke('graphic_abort', { job }).catch(() => {}); },
+};
+function loadGraphics() {
+  if (!GR.loaded) {
+    GR.loaded = new Promise((resolve, reject) => {
+      const f = $('#graphics-frame');
+      f.addEventListener('load', () => (graphicsWin().CS && graphicsWin().CS.hosted ? resolve() : reject(new Error('Graphics did not load.'))), { once: true });
+      f.src = 'graphics/index.html';
+    });
+    GR.loaded.catch(() => { GR.loaded = null; });
+  }
+  return GR.loaded;
+}
+/** Opens the Graphics view: for a new graphic, or (`edit`, a clip) to change the graphic it is. */
+async function openGraphics(edit = null) {
+  if (S.playing) await pause();
+  let made = null;
+  if (edit != null) {
+    try { made = await invoke('graphic_info', { clip: edit }); } catch (e) { toast(e, true); return; }
+  }
+  $('#graphics-view').hidden = false;
+  try { await loadGraphics(); } catch (e) { $('#graphics-view').hidden = true; toast(e, true); return; }
+  const cs = graphicsWin().CS;
+  if (made && made.tool) cs.hosted.open(made.tool, made.state, edit);
+  else cs.hosted.open(null);
+  // the video's shape, even for a graphic made when it had another
+  cs.hosted.setAspect(window.__clipcutHost.aspect);
+  $('#graphics-note').innerHTML = made
+    ? `Changing <b>${TOOL_NAMES[made.tool] || 'a graphic'}</b>. <b>Update in video</b> puts the new version in its place. Photos, videos and sound it used must be added again.`
+    : 'Made with Clip Studio. <b>Add to video</b> puts the graphic on a lane at the playhead.';
+  $('#graphics-frame').focus();
+}
+function closeGraphics() {
+  $('#graphics-view').hidden = true;
+  // a graphic being changed and left unfinished: the next one is new
+  try { graphicsWin().CS?.hosted?.open(null); } catch (_) { /* not loaded */ }
+  $('#tab-graphics').blur();
+}
+
+/* The player's overlay: what TikTok, Reels or Shorts cover (9:16), or the safe zones. Never exported. */
+let guideKind = 'none';
+try { guideKind = localStorage.getItem('clipcut.guide') || 'none'; } catch (_) {}
+function drawGuide(g, w, h) {
+  if (guideKind === 'none' || !w || !h) return;
+  const tall = S.tl && ratioName(S.tl.width, S.tl.height) === '9:16';
+  if (guideKind !== 'safe' && tall && window.CS && window.CS.drawPlatformUI) { window.CS.drawPlatformUI(g, w, h, guideKind); return; }
+  g.save();
+  g.lineWidth = Math.max(1, w / 640);
+  g.setLineDash([6, 5]);
+  g.strokeStyle = 'rgba(244,196,67,0.85)';
+  g.strokeRect(w * 0.05, h * 0.05, w * 0.9, h * 0.9);
+  g.strokeStyle = 'rgba(255,255,255,0.45)';
+  g.strokeRect(w * 0.1, h * 0.1, w * 0.8, h * 0.8);
+  g.restore();
+  if (guideKind !== 'safe' && !tall) {
+    g.save();
+    g.font = `600 ${Math.max(11, w / 60)}px system-ui, sans-serif`;
+    g.fillStyle = 'rgba(244,196,67,0.9)';
+    g.fillText('App overlays are for 9:16 videos', w * 0.05 + 6, h * 0.05 + Math.max(14, w / 45));
+    g.restore();
+  }
+}
+
 /* ---------- transitions: one per cut on the main track ---------- */
 const TR = { presets: null, frames: null, w: 0, h: 0, n: 0, len: 0.5 };
 try { const v = +localStorage.getItem('clipcut.trlen'); if (v > 0) TR.len = v; } catch (_) {}
@@ -1043,7 +1127,8 @@ function makeClipEl(c) {
   else if (kind === 'audio') el.innerHTML = '<div class="wave"><canvas></canvas></div><div class="fade in"></div><div class="fade out"></div><span class="label"></span>' + handles;
   else el.innerHTML = '<span class="label"></span>' + handles;
   const name = kind === 'caption' ? c.text.replace(/\n/g, ' ') : kind === 'text' ? (c.props.text && c.props.text.text.split('\n')[0]) || 'Text' : c.name;
-  el.querySelector('.label').textContent = kind === 'caption' ? name : `${name} · ${fmtLen(c.end - c.start)}`;
+  el.querySelector('.label').textContent = kind === 'caption' ? name : `${c.graphic ? TOOL_NAMES[c.graphic] || 'Graphic' : name} · ${fmtLen(c.end - c.start)}`;
+  if (c.graphic) { const t = document.createElement('span'); t.className = 'gr-tag'; t.textContent = 'Graphic'; el.appendChild(t); el.title = `${name}: made in Graphics. Select it and press Edit in Graphics to change it.`; }
   if (kind === 'caption') el.title = c.text;
   if (kind === 'main') el.querySelector('.snd').classList.toggle('none', !hasSound(c));
   if (kind === 'audio') {
@@ -1375,7 +1460,7 @@ function renderProps() {
   }
   const one = sel.length === 1 ? sel[0] : null;
   const sig = one ? `${one.id}:${one.kind}:${isCap(one) || isMain(one)}:${!isCap(one) && hasSound(one)}` : `n${sel.length}`;
-  $('#props-title').textContent = one ? ({ text: 'Text', audio: 'Sound', image: 'Picture', caption: 'Caption' }[one.kind] || (isMain(one) ? 'Clip' : 'Overlay')) : sel.length ? `${sel.length} clips` : 'Project';
+  $('#props-title').textContent = one ? (one.graphic ? 'Graphic' : { text: 'Text', audio: 'Sound', image: 'Picture', caption: 'Caption' }[one.kind] || (isMain(one) ? 'Clip' : 'Overlay')) : sel.length ? `${sel.length} clips` : 'Project';
   if (sig === propsSig) { syncProps(one); return; }
   propsSig = sig;
   box.innerHTML = '';
@@ -1390,6 +1475,10 @@ function renderProps() {
     box.appendChild(s);
     return s;
   };
+  if (one.graphic) {
+    const s = section('Graphic');
+    s.appendChild(buttons([[`Edit in Graphics`, `Open this ${(TOOL_NAMES[one.graphic] || 'graphic').toLowerCase()} in Graphics to change it`, () => openGraphics(one.id)]]));
+  }
   if (one.kind === 'text') textControls(section('Text'), ids);
   if (visual(one)) {
     const s = section('Picture');
@@ -2178,6 +2267,10 @@ click('#tab-audio', () => showTab('audio'));
 click('#tab-text', () => showTab('text'));
 click('#tab-captions', () => showTab('captions'));
 click('#tab-transitions', () => showTab('transitions'));
+click('#tab-graphics', () => openGraphics());
+click('#graphics-back', closeGraphics);
+$('#guide').value = guideKind;
+$('#guide').addEventListener('change', e => { guideKind = e.target.value; try { localStorage.setItem('clipcut.guide', guideKind); } catch (_) {} drawOverlay(); e.target.blur(); });
 click('#tr-all', transitionEverywhere);
 click('#cap-go', autoCaptions);
 click('#cap-cancel', () => invoke('cancel_captions'));
@@ -2235,6 +2328,7 @@ scroller().addEventListener('wheel', e => {
 }, { passive: false });
 
 document.addEventListener('keydown', e => {
+  if (!$('#graphics-view').hidden) { if (e.key === 'Escape') { e.preventDefault(); closeGraphics(); } return; }
   if (e.target.closest('input, textarea, select') || document.querySelector('dialog[open]') || S.dragging) return;
   // words selected in the transcript: Delete cuts them out of the video
   if (W.sel && !$('#panel-captions').hidden && (e.key === 'Delete' || e.key === 'Backspace')) { e.preventDefault(); if (!e.repeat) cutSelectedWords(); return; }
@@ -2298,4 +2392,4 @@ invoke('restore').then(r => {
 });
 
 // For tests and debugging in the web inspector
-window.__clipcut = { S, apply, selectCut, pickTransition, mainCuts, transitionEverywhere, seek, play, pause, split, splitKeep, deleteSelection, undo, redo, select, setPx, fitZoom, saveNow, addPaths, mainClips, addToLane, addText, queueProps, showTab };
+window.__clipcut = { S, apply, openGraphics, closeGraphics, selectCut, pickTransition, mainCuts, transitionEverywhere, seek, play, pause, split, splitKeep, deleteSelection, undo, redo, select, setPx, fitZoom, saveNow, addPaths, mainClips, addToLane, addText, queueProps, showTab };
