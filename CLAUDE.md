@@ -76,6 +76,11 @@ remote `upstream`). Read `README.md` for what it is and the roadmap.
   replaced, so HTML5 drag and drop never reaches the page). In-page dragging uses pointer events, never
   `draggable`. While Graphics is open, dropped files are read back through `graphics::dropped_file` (only
   the latest drop's paths) and handed to Clip Studio's drop zone under the pointer with `CS.hosted.drop`.
+- Media: `Studio::new` sets the engine's `media.defaultMediaScaling` to `setToFrameSize`, so a clip of
+  another size fits the frame through its Scale when added. Footage the engine can't decode (H.264
+  beyond 8-bit 4:2:0 progressive, codecs without a decoder) shows the unreadable slate:
+  `Studio::check_picture` names it in plain words on import (`MediaView.unreadable`). Folder and file
+  names from the user go through `safe_name` (Windows device names, trailing dots).
 - Disk is tight here: `rm -rf target/debug/incremental` when a build fails with "no space left".
 - Interface copy: plain words from the user's side, errors that say what went wrong and how to fix it.
   One dark theme from the tokens at the top of `ui/app.css`; amber (`--accent`) marks the active thing.

@@ -372,6 +372,11 @@ fn a_project_mixing_frame_and_sample_rates_exports_whole() {
     }
     let tl = s.timeline();
     assert!((tl.duration - 6.0).abs() < 0.1, "{}", tl.duration);
+    // clips of other sizes fit the 640 × 360 frame: 1280 × 720 at half, upright 360 × 640 by its height
+    let main: Vec<&clipcut_core::ClipView> = tl.clips.iter().filter(|c| c.track == "V1").collect();
+    assert_eq!(main.len(), 3);
+    let scale = |k: usize| s.props_at(main[k].id, main[k].start + 0.5).unwrap().scale.unwrap();
+    assert!((scale(0) - 100.0).abs() < 0.01 && (scale(1) - 50.0).abs() < 0.01 && (scale(2) - 56.25).abs() < 0.1, "{} {} {}", scale(0), scale(1), scale(2));
     for choice in ["project", "social"] {
         let out = fixtures_dir("clipcut-core").join(format!("mix-export-{choice}-{}.mp4", std::process::id()));
         let _ = std::fs::remove_file(&out);

@@ -197,7 +197,11 @@ impl Default for Studio {
 
 impl Studio {
     pub fn new() -> Self {
-        Self { session: Session::default(), merge: None, graphics: Default::default() }
+        let mut session = Session::default();
+        // a clip of another size fits the frame when it's added (CapCut-style), through its Scale,
+        // so it stays sharp when zoomed in; the engine's own default leaves it at its pixel size
+        session.prefs.media.default_media_scaling = "setToFrameSize".into();
+        Self { session, merge: None, graphics: Default::default() }
     }
 
     /// The engine session, for operations this façade doesn't cover yet.

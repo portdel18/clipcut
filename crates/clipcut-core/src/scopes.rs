@@ -43,7 +43,7 @@ fn over(dst: &mut [u8], dw: usize, src: &[u8], sw: usize, sh: usize, x0: usize, 
 /// Lines at 0, 25, 50, 75 and 100 % across a `w × h` waveform.
 fn levels(px: &mut [u8], w: usize, h: usize) {
     for k in 0..=4 {
-        let y = ((h - 1) as f32 * (1.0 - k as f32 / 4.0)).round() as usize;
+        let y = (h.saturating_sub(1) as f32 * (1.0 - k as f32 / 4.0)).round() as usize;
         for x in (0..w).step_by(if k % 2 == 0 { 1 } else { 3 }) {
             put(px, w, x, y, LINE);
         }
@@ -122,7 +122,7 @@ impl Studio {
                 for (bins, c) in [(&hi.r, [255u8, 80, 70, 110]), (&hi.g, [90, 255, 110, 110]), (&hi.b, [90, 130, 255, 110])] {
                     for (x, n) in bins.iter().enumerate().take(w) {
                         // square-root scale, so dark and bright tails stay visible
-                        let bar = ((*n as f32 / top).sqrt() * (h - 1) as f32).round() as usize;
+                        let bar = (((*n as f32 / top).sqrt() * (h - 1) as f32).round() as usize).min(h);
                         for y in (h - bar)..h {
                             if let Some(d) = px.get_mut((y * w + x) * 4..(y * w + x) * 4 + 4) {
                                 for k in 0..3 {

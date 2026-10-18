@@ -48,7 +48,8 @@ function toast(msg, err = false) {
   clearTimeout(toastTimer);
   toastTimer = setTimeout(() => { el.hidden = true; }, err ? 6000 : 3500);
 }
-const cap = s => s ? s[0].toUpperCase() + s.slice(1) : s;
+// a message that starts with a file's name keeps the name as it is
+const cap = s => !s || /^[^\n:]+\.[a-z0-9]{2,5}:/i.test(s) ? s : s[0].toUpperCase() + s.slice(1);
 const pad = n => String(n).padStart(2, '0');
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
