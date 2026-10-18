@@ -6,8 +6,9 @@ pure-Rust editing engine (its own H.264, HEVC, ProRes, DNxHR, VP9, AV1, AAC and 
 frame timing, colour, audio mixing and export), and will bring in
 [Clip Studio](https://github.com/portdel18/clip-stu)'s news graphics.
 
-> **Status: Phase 0.** The app opens a clip, plays it with sound, scrubs, and exports it through the
-> engine. Editing (split, trim, more tracks) starts in Phase 1. See [the roadmap](#roadmap).
+> **Status: Phase 1a, cutting.** Clips go on one magnetic main track that you split, trim, reorder
+> and ripple-delete, with undo and projects that save themselves. Text, sound tracks and captions come
+> next (1b, 1c). See [the roadmap](#roadmap).
 
 ## Install on Windows
 
@@ -21,20 +22,43 @@ frame timing, colour, audio mixing and export), and will bring in
 
 Your footage stays on your computer: ClipCut reads it from disk and writes exports where you choose.
 
-## Using it (Phase 0)
+## Using it
 
-- **Import** (or `Ctrl+I`, or drop a file on the window) opens a video as the project's clip.
-- **Space** plays and pauses; **←/→** step a frame (**Shift** for a second); **Home/End** jump to
-  the ends. Click or drag the timeline to scrub; the zoom slider widens it.
-- **Export** (`Ctrl+E`) saves an H.264 MP4 (or ProRes `.mov`, or a `.wav` of the sound) with progress
-  and Cancel.
+**Adding clips.** **Import** (`Ctrl+I`) or drop videos on the window: they go to the end of the main
+track, in order. Drag a Media card onto the timeline to put it between clips, or press its **+** to add
+it at the end again.
+
+**The main track is magnetic**, like CapCut's: its clips always sit back to back, so deleting or
+trimming a clip closes the gap and everything after it moves up. Each clip's own sound moves with it.
+
+| Key | What it does |
+|---|---|
+| `S` | Split at the playhead (only the selected clips, if any are selected) |
+| `Q` / `W` | Split and delete everything to the left / right of the playhead in that clip |
+| `Delete` | Delete the selected clips; the gap closes |
+| Drag a clip | Move it to another place on the main track |
+| Drag a selected clip's edge | Trim it; the player shows the new first or last frame |
+| `N` | Snapping on or off (hold `Shift` while dragging to skip it once) |
+| `Ctrl+Z`, `Ctrl+Shift+Z` / `Ctrl+Y` | Undo, redo: every edit is one step |
+| Click, `Ctrl`/`Shift`+click, `Ctrl+A`, `Esc` | Select a clip, add to the selection, select all, select none |
+| `Space` or `K` | Play, pause |
+| `←` `→` | A frame back or on (`Shift`: 5 seconds); `J` / `L`: a second |
+| `↑` `↓` | The previous or next cut; `Home` / `End`: the start or the end |
+| `Ctrl`+wheel, `Ctrl+=` / `Ctrl+-`, `Ctrl+0` | Zoom the timeline at the pointer, in and out, fit it all |
+
+**Projects save themselves.** The first edit gives the project a folder, `Documents\ClipCut\<first
+clip's name>`, and every change after that is saved a moment later. ClipCut reopens the last project
+when it starts. **New** (`Ctrl+N`) starts another, **Open** (`Ctrl+O`) picks a saved one.
+
+**Export** (`Ctrl+E`) saves an H.264 MP4 (or ProRes `.mov`, or a `.wav` of the sound) with progress and
+Cancel.
 
 ## Roadmap
 
 | Phase | What it adds |
 |---|---|
-| **0. Prove it** (this) | Open, play with sound, scrub, export; the Windows installer from CI |
-| **1. Editor v1** | Split, trim, ripple delete, a magnetic main track plus overlay, text and audio lanes, speed, transitions, vertical and horizontal canvases, undo, autosave. First workflows: cutting down interviews and captioned explainers (auto-captions with styles, transcript cutting) |
+| **0. Prove it** (done) | Open, play with sound, scrub, export; the Windows installer from CI |
+| **1. Editor v1** (1a, cutting: this) | Split, trim, ripple delete, a magnetic main track plus overlay, text and audio lanes, speed, transitions, vertical and horizontal canvases, undo, autosave. First workflows: cutting down interviews and captioned explainers (auto-captions with styles, transcript cutting) |
 | **2. Clip Studio inside** | A Graphics tab with Clip Studio's tools (lower thirds, map zoom, numbers, timelines, underline); graphics become clips you can reopen and edit; TikTok, Reels and Shorts overlays in the preview |
 | **3. Pro panels** | Keyframes, colour, the audio mixer, scopes and precise trimming, from the engine |
 | **4. CapCut extras** | Caption styles, text animations, templates, beat markers, music ducking, quick social exports |
@@ -45,7 +69,7 @@ Your footage stays on your computer: ClipCut reads it from disk and writes expor
 | Layer | Where | What |
 |---|---|---|
 | Engine | `crates/*` (from FilmCraft) | Decoding, the timeline model, rendering, effects, audio mixing, export |
-| Façade | `crates/clipcut-core` | The engine operations the app calls: open a clip, preview frames, playback audio, export jobs |
+| Façade | `crates/clipcut-core` | The engine operations the app calls: the magnetic main track's edits (each one undo step), projects, preview frames and thumbnails, playback audio, export jobs |
 | App | `apps/clipcut` | A [Tauri](https://tauri.app) window: Rust commands in `src/`, the interface in `ui/` (HTML, CSS and JavaScript, no build step) |
 
 The sound card is the playback clock; the interface shows the frame the engine renders at that time.
@@ -59,7 +83,7 @@ librsvg2-dev libasound2-dev libxdo-dev libssl-dev`.
 
 ```sh
 cargo test -p clipcut-core                         # the façade, against a clip ffmpeg generates
-cargo run -p clipcut -- path/to/clip.mp4           # the app, opening a clip
+cargo run -p clipcut -- a.mp4 b.mp4                # the app, starting a project with these clips
 cargo run -p clipcut -- --self-test in.mp4 out.mp4 report.json   # open, preview, sound, export; no window
 cd apps/clipcut && npx @tauri-apps/cli@2 build     # the installer (target/release/bundle/)
 ```

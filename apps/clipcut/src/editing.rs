@@ -1,0 +1,299 @@
+//! The commands the timeline and project buttons call: adding clips, editing on the magnetic main
+//! track (split, Q/W, ripple delete, trim, reorder), undo/redo, and projects that save themselves.
+//!
+//! Every edit returns the whole [`TimelineView`] so the interface redraws from one source of truth.
+//!
+//! Projects live in `Documents\ClipCut\<name>\<name>.fcproj` (named after the first clip, made
+//! unique), with their render previews beside them. The interface asks for a save shortly after
+//! each change; the last project opened comes back at the next start.
+
+use std::path::{Path, PathBuf};
+
+use clipcut_core::{Keep, ProjectView, Studio, TimelineView};
+use tauri::Manager;
+use tauri_plugin_dialog::DialogExt;
+
+use crate::{App, OPEN_EXTENSIONS, blocking, lock};
+
+/// Where ClipCut keeps projects: `Documents\ClipCut` (the home folder when there is no Documents).
+fn projects_root(handle: &tauri::AppHandle) -> PathBuf {
+    let base = handle.path().document_dir().or_else(|_| handle.path().home_dir()).unwrap_or_else(|_| PathBuf::from("."));
+    base.join("ClipCut")
+}
+
+/// The file that remembers the last project, in the app's settings folder.
+fn last_project_file(handle: &tauri::AppHandle) -> Option<PathBuf> {
+    handle.path().app_config_dir().ok().map(|d| d.join("last-project.txt"))
+}
+
+fn remember(handle: &tauri::AppHandle, path: Option<&str>) {
+    let Some(f) = last_project_file(handle) else { return };
+    match path {
+        Some(p) => {
+            if let Some(dir) = f.parent() {
+                let _ = std::fs::create_dir_all(dir);
+            }
+            let _ = std::fs::write(&f, p);
+        }
+        None => {
+            let _ = std::fs::remove_file(&f);
+        }
+    }
+}
+
+/// A folder name from a clip or project name: no characters Windows refuses, never empty.
+fn safe_name(name: &str) -> String {
+    let n: String = name.chars().map(|c| if "\\/:*?\"<>|".contains(c) || c.is_control() { ' ' } else { c }).collect();
+    let n = n.trim().trim_end_matches('.').trim().to_string();
+    if n.is_empty() { "Untitled".to_string() } else { n.chars().take(80).collect() }
+}
+
+/// `root/<name>/<name>.fcproj`, or `<name> 2`, `<name> 3`… when that folder is taken.
+fn new_project_path(root: &Path, name: &str) -> PathBuf {
+    let base = safe_name(name);
+    for n in 1..10_000 {
+        let folder = if n == 1 { base.clone() } else { format!("{base} {n}") };
+        let dir = root.join(&folder);
+        if !dir.exists() {
+            return dir.join(format!("{folder}.fcproj"));
+        }
+    }
+    root.join(format!("{base}.fcproj"))
+}
+
+fn view(studio: &std::sync::Arc<std::sync::Mutex<Studio>>) -> TimelineView {
+    lock(studio).timeline()
+}
+
+/// Runs an edit with playback stopped (the player plays a snapshot of the sequence) and returns
+/// the timeline afterwards.
+async fn edit(app: &tauri::State<'_, App>, f: impl FnOnce(&mut Studio) -> clipcut_core::Result<()> + Send + 'static) -> Result<TimelineView, String> {
+    let (studio, player) = (app.studio.clone(), app.player.clone());
+    blocking(move || {
+        lock(&player).stop();
+        f(&mut lock(&studio)).map_err(|e| e.to_string())?;
+        Ok(view(&studio))
+    })
+    .await
+}
+
+#[tauri::command]
+pub fn timeline(app: tauri::State<'_, App>) -> TimelineView {
+    view(&app.studio)
+}
+
+#[tauri::command]
+pub async fn pick_clips(handle: tauri::AppHandle) -> Result<Vec<String>, String> {
+    blocking(move || {
+        let files = handle.dialog().file().set_title("Import media").add_filter("Media", OPEN_EXTENSIONS).blocking_pick_files().unwrap_or_default();
+        Ok(files.into_iter().filter_map(|p| p.into_path().ok()).map(|p| p.to_string_lossy().into_owned()).collect())
+    })
+    .await
+}
+
+/// Adds files in order. A file that can't be added doesn't stop the rest: its reason comes back
+/// in `errors`.
+#[tauri::command]
+pub async fn add_clips(paths: Vec<String>, app: tauri::State<'_, App>) -> Result<AddResult, String> {
+    let (studio, player) = (app.studio.clone(), app.player.clone());
+    blocking(move || {
+        lock(&player).stop();
+        let mut errors = Vec::new();
+        {
+            let mut s = lock(&studio);
+            for p in &paths {
+                if let Err(e) = s.add_clip(p) {
+                    let name = Path::new(p).file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_else(|| p.clone());
+                    errors.push(format!("{name}: {e}"));
+                }
+            }
+        }
+        Ok(AddResult { timeline: view(&studio), errors })
+    })
+    .await
+}
+
+#[derive(serde::Serialize)]
+pub struct AddResult {
+    timeline: TimelineView,
+    errors: Vec<String>,
+}
+
+#[tauri::command]
+pub async fn append_media(item: u64, app: tauri::State<'_, App>) -> Result<TimelineView, String> {
+    edit(&app, move |s| s.append_item(item)).await
+}
+
+/// A Media card dropped on the main track, before the clip at `index`.
+#[tauri::command]
+pub async fn insert_media(item: u64, index: usize, app: tauri::State<'_, App>) -> Result<TimelineView, String> {
+    edit(&app, move |s| s.insert_item(item, index)).await
+}
+
+#[tauri::command]
+pub async fn split(seconds: f64, selection: Vec<u64>, app: tauri::State<'_, App>) -> Result<TimelineView, String> {
+    edit(&app, move |s| s.split(seconds, &selection).map(|_| ())).await
+}
+
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SplitKeepResult {
+    timeline: TimelineView,
+    playhead: f64,
+}
+
+/// Q (`keep: "right"`) or W (`keep: "left"`).
+#[tauri::command]
+pub async fn split_keep(seconds: f64, selection: Vec<u64>, keep: String, app: tauri::State<'_, App>) -> Result<SplitKeepResult, String> {
+    let (studio, player) = (app.studio.clone(), app.player.clone());
+    blocking(move || {
+        lock(&player).stop();
+        let side = if keep == "right" { Keep::Right } else { Keep::Left };
+        let playhead = lock(&studio).split_keep(seconds, &selection, side).map_err(|e| e.to_string())?;
+        lock(&player).set_position(playhead);
+        Ok(SplitKeepResult { timeline: view(&studio), playhead })
+    })
+    .await
+}
+
+#[tauri::command]
+pub async fn delete_clips(clips: Vec<u64>, app: tauri::State<'_, App>) -> Result<TimelineView, String> {
+    edit(&app, move |s| s.delete(&clips)).await
+}
+
+#[tauri::command]
+pub async fn trim(clip: u64, edge: String, delta: f64, app: tauri::State<'_, App>) -> Result<TimelineView, String> {
+    edit(&app, move |s| s.trim(clip, edge == "in", delta).map(|_| ())).await
+}
+
+#[tauri::command]
+pub async fn reorder(clip: u64, to: usize, app: tauri::State<'_, App>) -> Result<TimelineView, String> {
+    edit(&app, move |s| s.reorder(clip, to)).await
+}
+
+#[tauri::command]
+pub async fn undo(app: tauri::State<'_, App>) -> Result<TimelineView, String> {
+    edit(&app, |s| s.undo()).await
+}
+
+#[tauri::command]
+pub async fn redo(app: tauri::State<'_, App>) -> Result<TimelineView, String> {
+    edit(&app, |s| s.redo()).await
+}
+
+/* ---------- projects ---------- */
+
+/// Saves the project, giving it a file in `Documents\ClipCut` the first time. Nothing to save
+/// (an empty project) is not an error.
+#[tauri::command]
+pub async fn save_project(handle: tauri::AppHandle, app: tauri::State<'_, App>) -> Result<ProjectView, String> {
+    let studio = app.studio.clone();
+    blocking(move || {
+        let mut s = lock(&studio);
+        let v = s.timeline();
+        if !v.has_sequence {
+            return Ok(v.project);
+        }
+        match v.project.path {
+            Some(_) => s.save().map_err(|e| e.to_string())?,
+            None => {
+                let name = s.info().map(|i| i.name).unwrap_or_else(|_| "Untitled".into());
+                let root = projects_root(&handle);
+                let path = new_project_path(&root, &name);
+                if let Some(dir) = path.parent() {
+                    std::fs::create_dir_all(dir).map_err(|e| format!("couldn't make the project folder {}: {e}", dir.display()))?;
+                }
+                let p = path.to_string_lossy().into_owned();
+                s.save_as(&p).map_err(|e| e.to_string())?;
+                remember(&handle, Some(&p));
+            }
+        }
+        Ok(s.timeline().project)
+    })
+    .await
+}
+
+/// The window is closing: an edit made in the last moment (before the interface's autosave) is
+/// kept, for a project that already has its file.
+pub fn save_on_close(handle: &tauri::AppHandle) {
+    let Some(app) = handle.try_state::<App>() else { return };
+    let mut s = lock(&app.studio);
+    let v = s.timeline();
+    if v.has_sequence && v.project.dirty && v.project.path.is_some() {
+        let _ = s.save();
+    }
+}
+
+#[tauri::command]
+pub async fn new_project(handle: tauri::AppHandle, app: tauri::State<'_, App>) -> Result<TimelineView, String> {
+    remember(&handle, None);
+    edit(&app, |s| s.new_project("Untitled")).await
+}
+
+#[tauri::command]
+pub async fn pick_project(handle: tauri::AppHandle) -> Result<Option<String>, String> {
+    let root = projects_root(&handle);
+    blocking(move || {
+        let mut d = handle.dialog().file().set_title("Open a project").add_filter("ClipCut project", &["fcproj"]);
+        if root.is_dir() {
+            d = d.set_directory(&root);
+        }
+        Ok(d.blocking_pick_file().and_then(|p| p.into_path().ok()).map(|p| p.to_string_lossy().into_owned()))
+    })
+    .await
+}
+
+#[tauri::command]
+pub async fn open_project(path: String, handle: tauri::AppHandle, app: tauri::State<'_, App>) -> Result<TimelineView, String> {
+    let p = path.clone();
+    let v = edit(&app, move |s| s.open_project(&p)).await?;
+    remember(&handle, Some(&path));
+    Ok(v)
+}
+
+/// At start-up: files named on the command line start a new project with them, in order; otherwise the last
+/// project comes back (if its file still exists).
+#[tauri::command]
+pub async fn restore(handle: tauri::AppHandle, app: tauri::State<'_, App>) -> Result<AddResult, String> {
+    let startup = std::mem::take(&mut *lock(&app.startup_files));
+    let last = last_project_file(&handle).and_then(|f| std::fs::read_to_string(f).ok()).map(|s| s.trim().to_string()).filter(|p| Path::new(p).is_file());
+    let studio = app.studio.clone();
+    blocking(move || {
+        let mut s = lock(&studio);
+        let mut errors = Vec::new();
+        if !startup.is_empty() {
+            for f in &startup {
+                if let Err(e) = s.add_clip(f) {
+                    let name = Path::new(f).file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_else(|| f.clone());
+                    errors.push(format!("{name}: {e}"));
+                }
+            }
+        } else if let Some(p) = last
+            && let Err(e) = s.open_project(&p)
+        {
+            errors.push(format!("the last project couldn't be opened ({e}); starting a new one"));
+            let _ = s.new_project("Untitled");
+        }
+        Ok(AddResult { timeline: s.timeline(), errors })
+    })
+    .await
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn project_names_are_safe_and_unique() {
+        assert_eq!(safe_name("Interview: take 2?"), "Interview  take 2");
+        assert_eq!(safe_name("  ...  "), "Untitled");
+        assert_eq!(safe_name("con."), "con");
+        let root = std::env::temp_dir().join(format!("clipcut-names-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let first = new_project_path(&root, "Mayor interview");
+        assert_eq!(first, root.join("Mayor interview").join("Mayor interview.fcproj"));
+        std::fs::create_dir_all(first.parent().unwrap()).unwrap();
+        assert_eq!(new_project_path(&root, "Mayor interview"), root.join("Mayor interview 2").join("Mayor interview 2.fcproj"));
+        let _ = std::fs::remove_dir_all(&root);
+    }
+}

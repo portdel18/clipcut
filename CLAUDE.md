@@ -24,6 +24,13 @@ remote `upstream`). Read `README.md` for what it is and the roadmap.
   `xvfb-run -s "-screen 0 1600x1000x24" target/debug/clipcut clip.mp4` and screenshot with
   `import -window root shot.png`. **Look at the result** after interface changes.
 - The user tests on Windows with real footage; CI is the only Windows build here.
+- The `ui/` files are built into the binary: rebuild (`cargo build -p clipcut`) after changing them.
+  `clipcut a.mp4 b.mp4` starts a project with those clips (handy under Xvfb, where the file dialog is
+  hard to drive). WebKit (Linux, and Safari-like engines) needs `-webkit-user-select`, or drags paint
+  the selection highlight over canvases.
+- The timeline UI redraws from the `TimelineView` every edit returns; edits run one at a time
+  (`serial` in `app.js`). Each `Studio` edit is one undo step (`group` in `clipcut-core`'s
+  `timeline.rs`): keep it that way for new edits.
 - Interface copy: plain words from the user's side, errors that say what went wrong and how to fix it.
   One dark theme from the tokens at the top of `ui/app.css`; amber (`--accent`) marks the active thing.
 - Branding: ClipCut's own name and icon (`packaging/clipcut/icon.py`). Never ArtCraft/FilmCraft

@@ -10,6 +10,8 @@
 
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
 
+mod timeline;
+
 use std::sync::Arc;
 
 use filmcraft_engine::Session;
@@ -18,6 +20,8 @@ use filmcraft_project::{ItemId, Project};
 use filmcraft_time::Tick;
 use serde::Serialize;
 use serde_json::{Value, json};
+
+pub use timeline::{ClipView, Keep, MediaView, ProjectView, TimelineView};
 
 /// What went wrong, in words the app can show as they are.
 #[derive(Debug, thiserror::Error)]
@@ -108,6 +112,35 @@ impl AudioFeed {
     }
 }
 
+/// Renders media frames (not the program) for the Media panel and the timeline's filmstrips, on any
+/// thread: like [`AudioFeed`] it holds a snapshot of the project, so it doesn't keep the session busy.
+pub struct Thumbs {
+    project: Arc<Project>,
+    provider: PoolProvider,
+}
+
+impl Thumbs {
+    /// Media item `item`'s picture at `seconds` into the media, at most `max_width` wide (never
+    /// upscaled). Times are clamped to the media.
+    pub fn frame(&self, item: u64, seconds: f64, max_width: u32) -> Result<Frame> {
+        if !seconds.is_finite() {
+            return Err(Error::Invalid("the time must be a number".into()));
+        }
+        let id = ItemId(item);
+        let pi = self.project.item(id).ok_or_else(|| Error::Invalid(format!("there is no media {item}")))?;
+        let (_, m, _) = self.project.resolve_media(id).ok_or_else(|| Error::Invalid(format!("{} has no picture", pi.name)))?;
+        let v = m.info.video.as_ref().ok_or_else(|| Error::Invalid(format!("{} has no picture", pi.name)))?;
+        let last = (pi.duration().seconds() - 1.0 / v.frame_rate.as_f64().max(1.0)).max(0.0);
+        let t = Tick::from_seconds_f64(seconds.clamp(0.0, last));
+        let scale = if v.width == 0 { 1.0 } else { (max_width.max(16) as f32 / v.width as f32).min(1.0) };
+        let img = filmcraft_render::render_item(&self.project, id, t, scale, &self.provider)
+            .ok_or_else(|| Error::Engine(format!("{} couldn't be read at {seconds:.2} s", pi.name)))?;
+        let w = u32::try_from(img.w).map_err(engine)?;
+        let h = u32::try_from(img.h).map_err(engine)?;
+        Ok(Frame { w, h, rgba: img.over_black_rgba8() })
+    }
+}
+
 /// One ClipCut window's engine session.
 pub struct Studio {
     session: Session,
@@ -188,6 +221,11 @@ impl Studio {
         let length = q.duration().to_units_floor(sample_rate as i64);
         let provider = self.session.media.full_res_provider(self.session.project.clone(), self.session.services.clone());
         Ok(AudioFeed { project: self.session.project.clone(), sequence: id, provider, sample_rate, length })
+    }
+
+    /// A frame renderer for media thumbnails over the project as it is now.
+    pub fn thumbs(&self) -> Thumbs {
+        Thumbs { project: self.session.project.clone(), provider: self.session.media.provider(self.session.project.clone(), self.session.services.clone()) }
     }
 
     /// Starts exporting the whole sequence to `path` as a background job and returns its id. The
