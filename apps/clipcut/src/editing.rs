@@ -594,3 +594,40 @@ pub async fn slip(clip: u64, frames: i64, app: tauri::State<'_, App>) -> Result<
 pub async fn roll(from: u64, frames: i64, app: tauri::State<'_, App>) -> Result<TimelineView, String> {
     edit(&app, move |s| s.roll(from, frames)).await
 }
+
+/// The text animations, in and out, for the Animation section.
+#[tauri::command]
+pub fn text_animations() -> serde_json::Value {
+    clipcut_core::text_animations()
+}
+
+#[tauri::command]
+pub async fn set_text_animation(
+    clips: Vec<u64>,
+    enter: bool,
+    id: Option<String>,
+    seconds: f64,
+    merge: Option<String>,
+    app: tauri::State<'_, App>,
+) -> Result<TimelineView, String> {
+    edit(&app, move |s| s.set_text_animation(&clips, enter, id.as_deref(), seconds, merge.as_deref())).await
+}
+
+/// Music that ducks under speech (or not): the timeline, and how many dips were made.
+#[derive(serde::Serialize)]
+pub struct Ducked {
+    timeline: TimelineView,
+    dips: usize,
+}
+
+#[tauri::command]
+pub async fn set_ducking(clips: Vec<u64>, on: bool, reduce_db: f64, app: tauri::State<'_, App>) -> Result<Ducked, String> {
+    let (studio, player) = (app.studio.clone(), app.player.clone());
+    blocking(move || {
+        lock(&player).stop();
+        let mut s = lock(&studio);
+        let dips = s.set_ducking(&clips, on, reduce_db).map_err(|e| e.to_string())?;
+        Ok(Ducked { timeline: s.timeline(), dips })
+    })
+    .await
+}

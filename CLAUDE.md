@@ -47,6 +47,10 @@ remote `upstream`). Read `README.md` for what it is and the roadmap.
   `transitions.rs`). A new edit that moves main-track clips must use `group_follow`.
   Whisper models can't be downloaded from this sandbox (Hugging Face is blocked): test with
   `Studio::hear` / `CLIPCUT_TEST_TRANSCRIPT`; the Windows CI step runs the real model on real speech.
+- Text animations (`clipcut-core/src/animations.rs`) are keyframes on the text layer kept on the
+  clip's ends by the engine's Responsive Design – Time; which ones a clip has lives in a clip marker
+  named "ClipCut animation". Any edit of an animated text's words or style must go through
+  `hold_animations` / `restore_animations` (as `apply_props` does) so they are rebuilt for it.
 - Disk is tight here: `rm -rf target/debug/incremental` when a build fails with "no space left".
 - Interface copy: plain words from the user's side, errors that say what went wrong and how to fix it.
   One dark theme from the tokens at the top of `ui/app.css`; amber (`--accent`) marks the active thing.

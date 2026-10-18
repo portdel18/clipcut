@@ -95,6 +95,15 @@ of it is the engine's Lumetri Color, so the export matches the player.
 an RGB parade, a vectorscope (with the colour-bar targets) or a histogram, updated as you scrub
 and play.
 
+**Text animations.** A text clip's Properties have an **Animation** section: how it comes in
+(fade, rise, drop, slide, pop, zoom, typewriter, word by word) and goes out (fade, rise, sink,
+slide, shrink, zoom, erase, word by word), and how long each takes. Picking one plays it once.
+They stay on the clip's ends when it is trimmed, and follow new words when the text changes.
+
+**Ducking.** Music on a lane can **Lower under speech**: it goes down (15 dB, or as far as you
+set) wherever the main track or another lane has sound under it, with short fades. The dips are
+volume keyframes on the music; **Update** finds the speech again after you move or trim clips.
+
 **Mixer.** The **Mixer** tab has a strip for the main track's sound, one for each sound lane and
 one for the Mix (everything, as exported): volume and pan, Mute and Solo, and a level meter that
 moves while the video plays (red past 0 dB, where the sound distorts). Faders change the sound as
@@ -146,8 +155,8 @@ Cancel.
 | **0. Prove it** (done) | Open, play with sound, scrub, export; the Windows installer from CI |
 | **1. Editor v1** (done: 1a cutting, 1b lanes and properties, 1c captions, 1d transitions) | Split, trim, ripple delete, a magnetic main track plus overlay, text and audio lanes, speed, transitions, vertical and horizontal canvases, undo, autosave. First workflows: cutting down interviews and captioned explainers (auto-captions with styles, transcript cutting) |
 | **2. Clip Studio inside** (this) | A Graphics tab with Clip Studio's tools (lower thirds, map zoom, numbers, timelines, underline); graphics become clips you can reopen and edit; TikTok, Reels and Shorts overlays in the preview |
-| **3. Pro panels** (3a keyframes, 3b colour and scopes: done; 3c the mixer and precise trimming: this) | Keyframes, colour, the audio mixer, scopes and precise trimming, from the engine |
-| **4. CapCut extras** | Caption styles, text animations, templates, beat markers, music ducking, quick social exports |
+| **3. Pro panels** (done: 3a keyframes, 3b colour and scopes, 3c the mixer and precise trimming) | Keyframes, colour, the audio mixer, scopes and precise trimming, from the engine |
+| **4. CapCut extras** (4a text animations and ducking: this; beat markers and quick social exports, then templates, next) | Caption styles, text animations, templates, beat markers, music ducking, quick social exports |
 | **5. Polish** | Live graphics, proxies, speed work, signed installers and updates |
 
 ## How it is built
@@ -155,7 +164,7 @@ Cancel.
 | Layer | Where | What |
 |---|---|---|
 | Engine | `crates/*` (from FilmCraft) | Decoding, the timeline model, rendering, effects, audio mixing, export |
-| Façade | `crates/clipcut-core` | The engine operations the app calls: the magnetic main track and the lanes around it (`timeline.rs`, `lanes.rs`), clip properties, canvas and waveforms (`props.rs`), captions and transcript cutting (`captions.rs`), transitions (`transitions.rs`), graphics from the Graphics tab (`graphics.rs`), keyframes (`keyframes.rs`), colour and scopes (`colour.rs`, `scopes.rs`), each edit one undo step; projects, preview frames and thumbnails, playback audio, export jobs |
+| Façade | `crates/clipcut-core` | The engine operations the app calls: the magnetic main track and the lanes around it (`timeline.rs`, `lanes.rs`), clip properties, canvas and waveforms (`props.rs`), captions and transcript cutting (`captions.rs`), transitions (`transitions.rs`), graphics from the Graphics tab (`graphics.rs`), keyframes (`keyframes.rs`), colour and scopes (`colour.rs`, `scopes.rs`), the mixer and precise trimming (`mixer.rs`, `trimming.rs`), text animations (`animations.rs`) and ducking (`ducking.rs`), each edit one undo step; projects, preview frames and thumbnails, playback audio, export jobs |
 | App | `apps/clipcut` | A [Tauri](https://tauri.app) window: Rust commands in `src/`, the interface in `ui/` (HTML, CSS and JavaScript, no build step) |
 
 The sound card is the playback clock; the interface shows the frame the engine renders at that time.

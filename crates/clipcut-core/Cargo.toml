@@ -13,6 +13,7 @@ workspace = true
 filmcraft-edit = { workspace = true }
 filmcraft-engine = { workspace = true }
 filmcraft-media = { workspace = true }
+filmcraft-geom = { workspace = true }
 filmcraft-project = { workspace = true }
 filmcraft-render = { workspace = true }
 filmcraft-scopes = { workspace = true }
