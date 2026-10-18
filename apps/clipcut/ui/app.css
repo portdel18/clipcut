@@ -114,6 +114,19 @@ select:disabled { opacity: .5; }
 .text-style:hover { border-color: var(--accent); }
 .text-style span { padding: 0 6px; border-radius: 3px; }
 
+/* Keyframes: the diamond beside a property, and the clip's keyframes on the timeline */
+.prop > span:first-child { display: flex; align-items: center; gap: 4px; }
+.kf { width: 16px; height: 16px; flex: none; padding: 0; display: grid; place-items: center; border: 0; background: none; color: var(--faint); cursor: pointer; }
+.kf svg { width: 11px; height: 11px; fill: none; stroke: currentColor; stroke-width: 1.4; }
+.kf:hover { color: var(--text); }
+.kf[data-state="anim"] { color: var(--accent); }
+.kf[data-state="on"] { color: var(--accent); }
+.kf[data-state="on"] svg { fill: currentColor; }
+.clip .kfs { position: absolute; left: 0; right: 0; bottom: 3px; height: 9px; pointer-events: none; z-index: 2; }
+.clip.main .kfs { bottom: 17px; }
+.clip .kfs i { position: absolute; top: 0; width: 8px; height: 8px; margin-left: -4px; background: var(--accent); border: 1px solid #1d1600; transform: rotate(45deg); pointer-events: auto; cursor: pointer; }
+.clip:not(.sel) .kfs i { opacity: .55; }
+
 /* Graphics: Clip Studio over the whole editor */
 .graphics-view { position: fixed; inset: 0; z-index: 50; display: grid; grid-template-rows: 44px minmax(0, 1fr); background: var(--bg); }
 .graphics-bar { display: flex; align-items: center; gap: 14px; padding: 0 12px; background: var(--panel); border-bottom: 1px solid var(--line); }

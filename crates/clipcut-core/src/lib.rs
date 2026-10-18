@@ -12,6 +12,7 @@
 
 mod captions;
 mod graphics;
+mod keyframes;
 mod lanes;
 mod props;
 mod timeline;
@@ -28,6 +29,7 @@ use serde_json::{Value, json};
 
 pub use captions::{CaptionStyleView, CaptionView, CaptionsView, ModelView, TranscribeJob, WordView, caption_presets, download_model, speech_models};
 pub use graphics::{GRAPHIC_FILE, GRAPHIC_SOUND, read_graphic};
+pub use keyframes::{ANIMATABLE, KeyTrack};
 pub use props::{ClipProps, PEAKS_PER_SECOND, Peaks, TextProps};
 pub use timeline::{ClipView, Keep, LaneView, MediaView, ProjectView, TimelineView};
 pub use transitions::{DEFAULT_SECONDS as TRANSITION_SECONDS, TRANSITIONS, TransitionPresetView, TransitionView, transition_presets, transition_previews};

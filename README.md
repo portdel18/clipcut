@@ -74,6 +74,14 @@ and size. Photos, videos and sound a graphic used aren't kept: add them again wh
 Maps need the internet for their tiles and searches; scanned-PDF text recognition (Scroll Zoom)
 isn't available inside ClipCut.
 
+**Keyframes.** Every picture and text clip's scale, position, rotation and opacity, and every
+clip's volume, can change over time. Press the ◇ beside a property: it keeps its value at the
+playhead as a keyframe (◆), and changing the property at another time makes the next one, so a
+clip fades, moves or grows between them. The Keyframes row goes to the previous or next keyframe
+and makes the motion **Smooth** (easing in and out) or steady; the clip shows its keyframes as
+diamonds on the timeline (click one to go there). Keyframes stay on their frames of the clip when
+it is moved or trimmed.
+
 **Platform overlays.** The player's **Overlay** menu shows what TikTok, Instagram Reels or YouTube
 Shorts cover on a 9:16 video (the same drawing as Clip Studio's), or the safe zones on any shape.
 It is only in the player, never in an export.
@@ -115,7 +123,7 @@ Cancel.
 | **0. Prove it** (done) | Open, play with sound, scrub, export; the Windows installer from CI |
 | **1. Editor v1** (done: 1a cutting, 1b lanes and properties, 1c captions, 1d transitions) | Split, trim, ripple delete, a magnetic main track plus overlay, text and audio lanes, speed, transitions, vertical and horizontal canvases, undo, autosave. First workflows: cutting down interviews and captioned explainers (auto-captions with styles, transcript cutting) |
 | **2. Clip Studio inside** (this) | A Graphics tab with Clip Studio's tools (lower thirds, map zoom, numbers, timelines, underline); graphics become clips you can reopen and edit; TikTok, Reels and Shorts overlays in the preview |
-| **3. Pro panels** | Keyframes, colour, the audio mixer, scopes and precise trimming, from the engine |
+| **3. Pro panels** (3a keyframes: this; colour and scopes, the mixer and precise trimming next) | Keyframes, colour, the audio mixer, scopes and precise trimming, from the engine |
 | **4. CapCut extras** | Caption styles, text animations, templates, beat markers, music ducking, quick social exports |
 | **5. Polish** | Live graphics, proxies, speed work, signed installers and updates |
 
@@ -124,7 +132,7 @@ Cancel.
 | Layer | Where | What |
 |---|---|---|
 | Engine | `crates/*` (from FilmCraft) | Decoding, the timeline model, rendering, effects, audio mixing, export |
-| Façade | `crates/clipcut-core` | The engine operations the app calls: the magnetic main track and the lanes around it (`timeline.rs`, `lanes.rs`), clip properties, canvas and waveforms (`props.rs`), captions and transcript cutting (`captions.rs`), transitions (`transitions.rs`), graphics from the Graphics tab (`graphics.rs`), each edit one undo step; projects, preview frames and thumbnails, playback audio, export jobs |
+| Façade | `crates/clipcut-core` | The engine operations the app calls: the magnetic main track and the lanes around it (`timeline.rs`, `lanes.rs`), clip properties, canvas and waveforms (`props.rs`), captions and transcript cutting (`captions.rs`), transitions (`transitions.rs`), graphics from the Graphics tab (`graphics.rs`), keyframes (`keyframes.rs`), each edit one undo step; projects, preview frames and thumbnails, playback audio, export jobs |
 | App | `apps/clipcut` | A [Tauri](https://tauri.app) window: Rust commands in `src/`, the interface in `ui/` (HTML, CSS and JavaScript, no build step) |
 
 The sound card is the playback clock; the interface shows the frame the engine renders at that time.

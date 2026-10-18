@@ -461,3 +461,21 @@ pub async fn remove_transitions(from: Vec<u64>, app: tauri::State<'_, App>) -> R
 pub async fn transition_everywhere(preset: String, seconds: f64, app: tauri::State<'_, App>) -> Result<TimelineView, String> {
     edit(&app, move |s| s.transition_everywhere(&preset, seconds).map(|_| ())).await
 }
+
+/* ---------- keyframes ---------- */
+
+/// Clip `clip`'s properties as they are at `seconds` (animated ones from their keyframes).
+#[tauri::command]
+pub fn props_at(clip: u64, seconds: f64, app: tauri::State<'_, App>) -> Result<clipcut_core::ClipProps, String> {
+    lock(&app.studio).props_at(clip, seconds).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn toggle_keyframe(clip: u64, prop: String, seconds: f64, app: tauri::State<'_, App>) -> Result<TimelineView, String> {
+    edit(&app, move |s| s.toggle_keyframe(clip, &prop, seconds).map(|_| ())).await
+}
+
+#[tauri::command]
+pub async fn set_easing(clip: u64, smooth: bool, app: tauri::State<'_, App>) -> Result<TimelineView, String> {
+    edit(&app, move |s| s.set_easing(clip, smooth)).await
+}

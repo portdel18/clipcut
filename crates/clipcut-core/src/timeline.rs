@@ -41,6 +41,8 @@ pub struct ClipView {
     pub props: ClipProps,
     /// The Clip Studio tool that made it (`"lt"`, `"mp"`…), for a graphic from the Graphics tab.
     pub graphic: Option<String>,
+    /// Its keyframed properties.
+    pub keys: Vec<crate::keyframes::KeyTrack>,
 }
 
 /// A track as a lane of the timeline: `V1` and `A1` are the main track's picture and sound.
@@ -163,6 +165,7 @@ impl Studio {
                             kind,
                             props,
                             graphic: if prefix == "V" { self.graphic_tool(i.item) } else { None },
+                            keys: crate::keyframes::keys_of(q, t, i),
                         });
                     }
                 }

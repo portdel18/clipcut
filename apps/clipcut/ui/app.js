@@ -239,7 +239,7 @@ function stageClip() {
 }
 /** Where a clip sits on the canvas: centre, size and turn (canvas pixels). Text is estimated. */
 function boxOf(c) {
-  const p = c.props, k = (p.scale || 100) / 100;
+  const p = liveClip(c).props, k = (p.scale || 100) / 100;
   let w, h, cy = p.y;
   if (c.kind === 'text' && p.text) {
     const lines = (p.text.text || ' ').split('\n');
@@ -310,7 +310,7 @@ function stagePointerDown(e) {
   if (hit && (!c || hit.id !== c.id)) { select([hit.id]); c = hit; }
   if (!c) { if (S.sel.size || S.cut != null) select([]); return; }
   e.preventDefault();
-  const x0 = c.props.x, y0 = c.props.y, cx = e.clientX, cy = e.clientY;
+  const x0 = liveClip(c).props.x, y0 = liveClip(c).props.y, cx = e.clientX, cy = e.clientY;
   const key = nextKey('move');
   let moved = false;
   follow(e, ev => {
@@ -971,6 +971,89 @@ function transitionControls(box, t) {
   ]));
 }
 
+/* ---------- keyframes: an animated clip's properties as they are at the playhead ---------- */
+const LIVE = { id: null, t: -1, props: null, seq: 0 };
+const KF_EPS = () => frameStep() / 2;
+/** The clip, with its animated properties as they are at the playhead (once props_at has said). */
+function liveClip(c) {
+  if (!c || LIVE.id !== c.id || !LIVE.props || Math.abs(LIVE.t - S.t) > 1e-6) return c;
+  const p = {};
+  for (const [k, v] of Object.entries(LIVE.props)) if (v != null) p[k] = v;
+  return { ...c, props: { ...c.props, ...p }, live: LIVE.props };
+}
+const keyTimes = c => [...new Set((c.keys || []).flatMap(k => k.times))].sort((a, b) => a - b);
+/** A property's keyframe state at the playhead: 'on' (a keyframe here), 'anim' (animated), ''. */
+function kfState(c, prop) {
+  const k = (c.keys || []).find(x => x.prop === prop);
+  if (!k) return '';
+  return k.times.some(t => Math.abs(t - S.t) < KF_EPS()) ? 'on' : 'anim';
+}
+let liveTimer = 0;
+function refreshLive() {
+  clearTimeout(liveTimer);
+  const one = S.sel.size === 1 ? clipById([...S.sel][0]) : null;
+  if (!one || isCap(one) || !(one.keys || []).length || S.playing) { LIVE.id = null; return; }
+  liveTimer = setTimeout(async () => {
+    const seq = ++LIVE.seq, t = S.t;
+    try {
+      const props = await invoke('props_at', { clip: one.id, seconds: t });
+      if (seq !== LIVE.seq) return;
+      Object.assign(LIVE, { id: one.id, t, props });
+      renderProps();
+      drawOverlay();
+    } catch (_) { /* the clip went */ }
+  }, 30);
+}
+/** The diamond beside a property: adds a keyframe at the playhead, or removes the one there. */
+function kfButton(ids, prop) {
+  const b = document.createElement('button');
+  b.className = 'kf';
+  b.innerHTML = '<svg viewBox="0 0 12 12" aria-hidden="true"><path d="M6 1l5 5-5 5-5-5z"/></svg>';
+  b.addEventListener('click', e => {
+    e.preventDefault();
+    e.stopPropagation();
+    edit('toggle_keyframe', { clip: ids[0], prop, seconds: S.t });
+  });
+  controls.push({
+    el: b,
+    read: c => kfState(c, prop),
+    write: (el, v) => {
+      el.dataset.state = v;
+      el.title = v === 'on' ? 'Remove the keyframe here' : v === 'anim' ? 'Add a keyframe here (or change the value: it makes one)' : 'Animate it: a keyframe here, with the value now';
+      el.setAttribute('aria-label', el.title);
+    },
+  });
+  return b;
+}
+/** Previous / next keyframe, and whether the clip's keyframes ease in and out. */
+function keyframeControls(s, c) {
+  const times = keyTimes(c);
+  if (!times.length) {
+    const p = document.createElement('p');
+    p.className = 'hint';
+    p.textContent = 'Press ◇ beside a property to animate it: it keeps its value here, and changing it at another time makes the next keyframe.';
+    s.appendChild(p);
+    return;
+  }
+  const go = dir => {
+    const t = dir < 0 ? [...keyTimes(clipById(c.id))].reverse().find(x => x < S.t - KF_EPS()) : keyTimes(clipById(c.id)).find(x => x > S.t + KF_EPS());
+    if (t == null) { toast(dir < 0 ? 'No keyframe before the playhead' : 'No keyframe after the playhead'); return; }
+    seek(t);
+    scrollToTime(t);
+  };
+  const row = buttons([
+    ['◀ Previous', 'Go to the previous keyframe', () => go(-1)],
+    ['Next ▶', 'Go to the next keyframe', () => go(1)],
+    ['Smooth', 'Ease in and out of every keyframe, rather than changing at a steady rate', () => {
+      const cc = clipById(c.id);
+      edit('set_easing', { clip: c.id, smooth: !(cc.keys || []).every(k => k.smooth) });
+    }],
+  ]);
+  const smooth = row.lastChild;
+  controls.push({ el: smooth, read: x => (x.keys || []).length > 0 && x.keys.every(k => k.smooth), write: (el, v) => el.setAttribute('aria-pressed', String(!!v)) });
+  s.appendChild(row);
+}
+
 /* ---------- timeline layout: lanes above and below the main track ---------- */
 const minPx = () => {
   const d = dur(), w = scroller().clientWidth - 2 * PAD - 40;
@@ -1137,6 +1220,19 @@ function makeClipEl(c) {
   }
   el.classList.toggle('muted', kind === 'caption' ? !S.tl.captions.on : !laneOn(c.track));
   if (kind === 'main') el.querySelector('.snd').classList.toggle('off', !laneOn('A1'));
+  const times = keyTimes(c);
+  if (times.length && c.end > c.start) {
+    const kfs = document.createElement('div');
+    kfs.className = 'kfs';
+    for (const t of times) {
+      const d = document.createElement('i');
+      d.style.left = ((t - c.start) / (c.end - c.start) * 100) + '%';
+      d.title = `Keyframe at ${fmtFrames(t)}`;
+      d.addEventListener('pointerdown', e => { if (e.button !== 0) return; e.stopPropagation(); e.preventDefault(); if (!S.sel.has(c.id)) select([c.id]); seek(t); });
+      kfs.appendChild(d);
+    }
+    el.appendChild(kfs);
+  }
   el.addEventListener('pointerdown', e => clipPointerDown(c, el, e));
   return el;
 }
@@ -1372,6 +1468,13 @@ function updateTime() {
   $('#playhead').style.left = (PAD + S.t * S.px) + 'px';
   renderTools();
   markWord();
+  if (!S.playing && LIVE.t !== S.t) { refreshLive(); syncKfButtons(); }
+}
+/** The diamonds follow the playhead before props_at answers. */
+function syncKfButtons() {
+  const one = S.sel.size === 1 ? clipById([...S.sel][0]) : null;
+  if (!one) return;
+  for (const k of controls) if (k.el.classList && k.el.classList.contains('kf') && k.write) k.write(k.el, k.read(one));
 }
 /** The clips a split at the playhead would cut: the selected ones, or the main track's. */
 function cutTargets() {
@@ -1410,6 +1513,7 @@ function select(ids) {
   renderSelection();
 }
 function renderSelection() {
+  refreshLive();
   for (const [id, el] of S.els) el.classList.toggle('sel', S.sel.has(id));
   for (const el of document.querySelectorAll('#track .cut, #track .tr-span')) el.classList.toggle('sel', +el.dataset.from === S.cut);
   renderTransitionsPanel();
@@ -1426,6 +1530,9 @@ const propQueue = [];
 let propBusy = false, keySeq = 0;
 const nextKey = name => `${name}:${++keySeq}`;
 function queueProps(ids, props, merge = null) {
+  // an animated property gets its keyframe at the playhead (kept on the clip)
+  const c = ids.length === 1 ? clipById(ids[0]) : null;
+  if (c && props.at == null) props = { ...props, at: clamp(S.t, c.start, Math.max(c.start, c.end - frameStep())) };
   const last = propQueue[propQueue.length - 1];
   if (last && merge && last.merge === merge && String(last.ids) === String(ids)) Object.assign(last.props, props);
   else propQueue.push({ ids, props: { ...props }, merge });
@@ -1459,7 +1566,7 @@ function renderProps() {
     return;
   }
   const one = sel.length === 1 ? sel[0] : null;
-  const sig = one ? `${one.id}:${one.kind}:${isCap(one) || isMain(one)}:${!isCap(one) && hasSound(one)}` : `n${sel.length}`;
+  const sig = one ? `${one.id}:${one.kind}:${isCap(one) || isMain(one)}:${!isCap(one) && hasSound(one)}:${keyTimes(one).length > 0}` : `n${sel.length}`;
   $('#props-title').textContent = one ? (one.graphic ? 'Graphic' : { text: 'Text', audio: 'Sound', image: 'Picture', caption: 'Caption' }[one.kind] || (isMain(one) ? 'Clip' : 'Overlay')) : sel.length ? `${sel.length} clips` : 'Project';
   if (sig === propsSig) { syncProps(one); return; }
   propsSig = sig;
@@ -1482,10 +1589,10 @@ function renderProps() {
   if (one.kind === 'text') textControls(section('Text'), ids);
   if (visual(one)) {
     const s = section('Picture');
-    s.appendChild(slider('Scale', ids, 'scale', { min: 5, max: 400, step: 1, unit: '%', read: c => c.props.scale }));
-    s.appendChild(pair('Position', ids, [['x', c => c.props.x], ['y', c => c.props.y]]));
-    s.appendChild(slider('Rotation', ids, 'rotation', { min: -180, max: 180, step: 1, unit: '°', read: c => c.props.rotation }));
-    s.appendChild(slider('Opacity', ids, 'opacity', { min: 0, max: 100, step: 1, unit: '%', read: c => c.props.opacity }));
+    s.appendChild(slider('Scale', ids, 'scale', { min: 5, max: 400, step: 1, unit: '%', read: c => c.props.scale, kf: 'scale' }));
+    s.appendChild(pair('Position', ids, [['x', c => c.props.x], ['y', c => c.props.y]], 'position'));
+    s.appendChild(slider('Rotation', ids, 'rotation', { min: -180, max: 180, step: 1, unit: '°', read: c => c.props.rotation, kf: 'rotation' }));
+    s.appendChild(slider('Opacity', ids, 'opacity', { min: 0, max: 100, step: 1, unit: '%', read: c => c.props.opacity, kf: 'opacity' }));
     if (one.kind !== 'text') {
       s.appendChild(buttons([
         ['Fit', 'Show the whole picture', () => edit('fit_clips', { clips: ids, fill: false })],
@@ -1496,13 +1603,14 @@ function renderProps() {
   }
   if (hasSound(one)) {
     const s = section('Sound');
-    s.appendChild(slider('Volume', ids, 'volumeDb', { min: -60, max: 15, step: 0.5, unit: 'dB', read: c => (soundOf(c) || c).props.volumeDb }));
+    s.appendChild(slider('Volume', ids, 'volumeDb', { min: -60, max: 15, step: 0.5, unit: 'dB', read: c => (c.live && c.live.volumeDb != null ? c.live.volumeDb : (soundOf(c) || c).props.volumeDb), kf: 'volume' }));
     // a main clip's edges meet its neighbours, so its fades belong to transitions (later)
     if (!isMain(one)) {
       s.appendChild(slider('Fade in', ids, 'fadeIn', { min: 0, max: 10, step: 0.1, unit: 's', read: c => (soundOf(c) || c).props.fadeIn }));
       s.appendChild(slider('Fade out', ids, 'fadeOut', { min: 0, max: 10, step: 0.1, unit: 's', read: c => (soundOf(c) || c).props.fadeOut }));
     }
   }
+  if (visual(one) || hasSound(one)) keyframeControls(section('Keyframes'), one);
   if (one.kind !== 'text' && one.kind !== 'image') {
     const s = section('Speed');
     const presets = [50, 100, 150, 200, 300];
@@ -1548,7 +1656,7 @@ function syncTransition() {
 }
 function syncProps(one) {
   if (!one) return;
-  const c = clipById(one.id);
+  const c = liveClip(clipById(one.id));
   if (!c) return;
   for (const k of controls) {
     if (k.el.contains(document.activeElement) && document.activeElement !== document.body && !k.el.matches('.seg')) continue;
@@ -1559,10 +1667,11 @@ function syncProps(one) {
   }
 }
 /** A labelled slider with a number box; dragging it is one undo step. */
-function slider(label, ids, key, { min, max, step, unit, read, live = true }) {
+function slider(label, ids, key, { min, max, step, unit, read, live = true, kf = null }) {
   const row = document.createElement('label');
   row.className = 'prop';
   row.innerHTML = `<span>${label}</span><input type="range" min="${min}" max="${max}" step="${step}"><input type="number" step="${step}" title="${unit}">`;
+  if (kf) row.firstChild.prepend(kfButton(ids, kf));
   const [range, num] = row.querySelectorAll('input');
   range.id = `prop-${key}`;
   let k = nextKey(key);
@@ -1574,10 +1683,11 @@ function slider(label, ids, key, { min, max, step, unit, read, live = true }) {
   return row;
 }
 /** Two number boxes on one row (position X and Y). */
-function pair(label, ids, keys) {
+function pair(label, ids, keys, kf = null) {
   const row = document.createElement('div');
   row.className = 'prop';
   row.innerHTML = `<span>${label}</span><input type="number" step="1" title="X, canvas pixels"><input type="number" step="1" title="Y, canvas pixels">`;
+  if (kf) row.firstChild.prepend(kfButton(ids, kf));
   row.querySelectorAll('input').forEach((inp, i) => {
     const [key, read] = keys[i];
     inp.dataset.dp = '0';
