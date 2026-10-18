@@ -1875,7 +1875,7 @@ function animationControls(s, ids) {
   for (const [side, enter, label] of [['in', true, 'In'], ['out', false, 'Out']]) {
     const now = c => c.props.text && c.props.text.animations[side];
     const head = document.createElement('div');
-    head.className = 'prop wide top';
+    head.className = 'prop wide lead';
     head.innerHTML = `<span>${label}</span>`;
     const opts = [{ id: null, name: 'None' }].concat(AN.list[side]);
     const seg = buttons(opts.map(o => [o.name, o.id ? `${enter ? 'Come in' : 'Go out'} with ${o.name.toLowerCase()}` : `No animation ${enter ? 'in' : 'out'}`, async () => {
