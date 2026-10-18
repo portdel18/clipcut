@@ -20,7 +20,7 @@ const MAX_PX = 600;      // px per second at full zoom (about 20 px a frame at 3
 const THUMB_W = 192;     // filmstrip pictures are rendered this wide
 const SAVE_MS = 800;     // autosave this long after the last edit
 const PEAKS_PER_SECOND = 100;
-const ROW = { main: 64, video: 40, audio: 40, gap: 6, top: 14 };
+const ROW = { main: 64, video: 40, audio: 40, caption: 30, gap: 6, top: 14 };
 
 const S = {
   tl: null,              // TimelineView from the engine
@@ -101,10 +101,15 @@ const byStart = (a, b) => a.start - b.start;
 const mainClips = () => S.tl ? S.tl.clips.filter(c => c.track === 'V1').sort(byStart) : [];
 /** Every clip the timeline shows: all but the main track's own sound, which is drawn inside it. */
 const visibleClips = () => S.tl ? S.tl.clips.filter(c => c.track !== 'A1') : [];
-const clipById = id => S.tl && S.tl.clips.find(c => c.id === id);
+const clipById = id => S.tl && (S.tl.clips.find(c => c.id === id) || capClips().find(c => c.id === id));
 const isMain = c => c.track === 'V1';
 const laneKind = c => c.track[0] === 'A' ? 'audio' : 'video';
 const laneNo = id => parseInt(id.slice(1), 10) || 0;
+/** The captions, shaped like clips for the timeline (lane `C1`). */
+const capClips = () => S.tl && S.tl.captions.exists ? S.tl.captions.items.map(c => ({ ...c, track: 'C1', kind: 'caption', props: {} })) : [];
+const isCap = c => c && c.kind === 'caption';
+/** Everything on the timeline's lanes: clips and captions. */
+const laneThings = () => visibleClips().concat(capClips());
 /** A clip's sound: itself for a sound clip, else its linked sound clip, if any. */
 const soundOf = c => c.track[0] === 'A' ? c : (c.link ? S.tl.clips.find(a => a.link === c.link && a.track[0] === 'A') : null);
 const hasSound = c => !!soundOf(c);
@@ -157,7 +162,7 @@ async function make(cmd, args) {
 function apply(tl, { fit = false } = {}) {
   const had = has();
   S.tl = tl;
-  const ids = new Set(visibleClips().map(c => c.id));
+  const ids = new Set(laneThings().map(c => c.id));
   for (const id of [...S.sel]) if (!ids.has(id)) S.sel.delete(id);
   S.geom.clear();
   S.t = clampT(S.t);
@@ -176,6 +181,7 @@ function apply(tl, { fit = false } = {}) {
   fitCanvas();
   if (has()) showFrame(S.t); else clearPreview();
   if (tl.project.dirty && has()) saveSoon();
+  renderCaptionsPanel();
 }
 
 /* ---------- preview ---------- */
@@ -526,9 +532,208 @@ async function addText(s) {
   if (r) { const ta = $('#props textarea'); if (ta) { ta.focus(); ta.select(); } }
 }
 function showTab(id) {
-  for (const t of ['media', 'audio', 'text']) {
+  for (const t of ['media', 'audio', 'text', 'captions']) {
     $(`#tab-${t}`).setAttribute('aria-selected', String(t === id));
     $(`#panel-${t}`).hidden = t !== id;
+  }
+  if (id === 'captions') openCaptionsPanel();
+}
+
+/* ---------- captions: auto captions, their look, cleaning up the speech, the transcript ---------- */
+const CAP = { models: null, presets: null, busy: false };
+async function openCaptionsPanel() {
+  if (!CAP.models) {
+    try {
+      const r = await invoke('speech_models');
+      CAP.models = r.models;
+      const sel = $('#cap-model');
+      sel.innerHTML = '';
+      const names = { 'whisper-tiny': 'Fast', 'whisper-base': 'Balanced', 'whisper-small': 'Best (slow)' };
+      for (const m of r.models) {
+        const o = document.createElement('option');
+        o.value = m.id;
+        o.textContent = `${names[m.id] || m.name} · ${Math.round(m.size / 1e6)} MB${m.installed ? ', ready' : ''}`;
+        sel.appendChild(o);
+      }
+      let want = 'whisper-base';
+      try { want = localStorage.getItem('clipcut.model') || want; } catch (_) {}
+      if ([...sel.options].some(o => o.value === want)) sel.value = want;
+    } catch (e) { toast(e, true); }
+    try { const l = localStorage.getItem('clipcut.lang'); if (l) $('#cap-lang').value = l; } catch (_) {}
+  }
+  if (!CAP.presets) {
+    try {
+      CAP.presets = await invoke('caption_presets');
+      const box = $('#cap-styles');
+      for (const p of CAP.presets) {
+        const b = document.createElement('button');
+        b.className = 'text-style cap';
+        b.title = `${p.name} captions`;
+        const st = p.style;
+        b.innerHTML = `<span>${p.name}</span>`;
+        const span = b.querySelector('span');
+        span.style.color = st.color;
+        if (st.background) span.style.background = st.backgroundColor;
+        if (st.outline) span.style.webkitTextStroke = `1px ${st.outlineColor}`;
+        if (st.font === 'Noto Serif') span.style.fontFamily = 'Georgia, serif';
+        b.addEventListener('click', () => edit('set_caption_style', { style: st }));
+        box.appendChild(b);
+      }
+    } catch (e) { /* the presets stay hidden */ }
+  }
+  renderCaptionsPanel();
+  loadWords();
+}
+function capNote() {
+  const m = CAP.models && CAP.models.find(x => x.id === $('#cap-model').value);
+  const c = S.tl && S.tl.captions;
+  let note = 'The speech model downloads once and runs on this computer: nothing is uploaded.';
+  if (m && !m.installed) note = `The first run downloads this speech model (${Math.round(m.size / 1e6)} MB, once). It runs on this computer: nothing is uploaded.`;
+  if (c && c.exists && c.untranscribed) note = `${c.untranscribed} clip${c.untranscribed > 1 ? 's' : ''} on the main track ${c.untranscribed > 1 ? "aren't" : "isn't"} captioned yet: press Auto captions to add ${c.untranscribed > 1 ? 'them' : 'it'}.`;
+  else if (c && c.exists) note = 'Captions follow the speech when you cut, trim or move clips. Press Auto captions again to lay them out afresh.';
+  $('#cap-note').textContent = note;
+}
+function renderCaptionsPanel() {
+  if (!S.tl) return;
+  const c = S.tl.captions;
+  $('#cap-tools').hidden = !c.exists;
+  $('#cap-on').checked = c.on;
+  $('#cap-go').disabled = CAP.busy || !has();
+  $('#cap-go').textContent = c.exists ? 'Auto captions again' : 'Auto captions';
+  capNote();
+  if (!$('#panel-captions').hidden) loadWordsSoon();
+}
+async function autoCaptions() {
+  if (!has() || CAP.busy) return;
+  CAP.busy = true;
+  $('#cap-go').disabled = true;
+  $('#cap-progress').hidden = false;
+  $('#cap-bar').style.width = '0';
+  $('#cap-status').textContent = 'Starting…';
+  if (S.playing) await pause();
+  // again: lay the captions out afresh from all the speech (an existing transcript is reused)
+  const again = false;
+  try {
+    const tl = await invoke('auto_captions', { model: $('#cap-model').value, language: $('#cap-lang').value, again });
+    apply(tl);
+    toast(`${tl.captions.items.length} captions made`);
+    CAP.models = null;  // a model may have been downloaded
+    openCaptionsPanel();
+  } catch (e) {
+    if (/cancel/i.test(String(e))) toast('Captions cancelled: nothing was changed');
+    else toast(e, true);
+  } finally {
+    CAP.busy = false;
+    $('#cap-progress').hidden = true;
+    renderCaptionsPanel();
+  }
+}
+async function removeFillers() {
+  const r = await run('remove_fillers');
+  if (!r) return;
+  apply(r.timeline);
+  toast(r.removed ? `${r.removed} filler word${r.removed > 1 ? 's' : ''} cut` : 'No filler words found');
+}
+async function removePauses() {
+  const r = await run('remove_pauses', { minSeconds: 0.5, keepSeconds: 0.15 });
+  if (!r) return;
+  apply(r.timeline);
+  toast(r.removed ? `${r.removed} pause${r.removed > 1 ? 's' : ''} shortened, ${r.seconds.toFixed(1)} s saved` : 'No long pauses found');
+}
+async function saveSubtitles() {
+  let path;
+  try { path = await invoke('pick_captions_path', { name: projectName() }); } catch (e) { toast(e, true); return; }
+  if (!path) return;
+  try {
+    const n = await invoke('export_captions', { path });
+    toast(`${n} captions saved`);
+  } catch (e) { toast(e, true); }
+}
+
+/* The transcript: the main track's words, as paragraphs; click to go, drag or Shift+click to
+   select, Delete to cut */
+const W = { words: [], spans: [], sel: null, anchor: null, now: -1 };
+let wordsTimer = 0;
+function loadWordsSoon() { clearTimeout(wordsTimer); wordsTimer = setTimeout(loadWords, 120); }
+async function loadWords() {
+  if ($('#panel-captions').hidden || !has()) return;
+  try { W.words = await invoke('words'); } catch (e) { W.words = []; }
+  W.sel = null;
+  renderTranscript();
+}
+function renderTranscript() {
+  const box = $('#transcript');
+  box.innerHTML = '';
+  W.spans = [];
+  W.now = -1;
+  if (!W.words.length) { box.innerHTML = '<p class="empty">No transcript yet: press Auto captions.</p>'; return; }
+  let p = null, last = null;
+  W.words.forEach((w, i) => {
+    if (!p || w.start - last.end > 1.2 || w.speaker !== last.speaker) {
+      p = document.createElement('p');
+      if (w.speaker && (!last || w.speaker !== last.speaker)) { const who = document.createElement('span'); who.className = 'who'; who.textContent = w.speaker; p.appendChild(who); }
+      box.appendChild(p);
+    }
+    const sp = document.createElement('span');
+    sp.className = 'w';
+    sp.dataset.i = i;
+    sp.textContent = w.text;
+    p.appendChild(sp);
+    p.appendChild(document.createTextNode(' '));
+    W.spans.push(sp);
+    last = w;
+  });
+  markWord();
+}
+function paintWordSel() {
+  W.spans.forEach((sp, i) => sp.classList.toggle('sel', !!W.sel && i >= W.sel[0] && i <= W.sel[1]));
+}
+function wireTranscript() {
+  const box = $('#transcript');
+  let dragging = false;
+  box.addEventListener('mousedown', e => {
+    const sp = e.target.closest('span.w');
+    if (!sp || e.button !== 0) return;
+    e.preventDefault();
+    box.focus();
+    const i = +sp.dataset.i;
+    if (e.shiftKey && W.anchor != null) W.sel = [Math.min(W.anchor, i), Math.max(W.anchor, i)];
+    else { W.anchor = i; W.sel = null; seek(W.words[i].start); scrollToTime(W.words[i].start); }
+    dragging = true;
+    paintWordSel();
+  });
+  box.addEventListener('mouseover', e => {
+    if (!dragging || W.anchor == null) return;
+    const sp = e.target.closest('span.w');
+    if (!sp) return;
+    const i = +sp.dataset.i;
+    W.sel = [Math.min(W.anchor, i), Math.max(W.anchor, i)];
+    paintWordSel();
+  });
+  window.addEventListener('mouseup', () => { dragging = false; });
+}
+async function cutSelectedWords() {
+  if (!W.sel) return;
+  const [a, b] = W.sel;
+  W.sel = null;
+  const tl = await edit('cut_words', { from: a, to: b });
+  if (tl) toast(a === b ? 'Word cut' : `${b - a + 1} words cut`);
+}
+/** Lights the word under the playhead (and keeps it in view while playing). */
+function markWord() {
+  if (!W.spans.length || $('#panel-captions').hidden) return;
+  let lo = 0, hi = W.words.length - 1, at = -1;
+  while (lo <= hi) {
+    const mid = (lo + hi) >> 1;
+    if (W.words[mid].start <= S.t + 1e-6) { at = mid; lo = mid + 1; } else hi = mid - 1;
+  }
+  if (at >= 0 && W.words[at].end < S.t - 0.3) at = -1;
+  if (at === W.now) return;
+  if (W.now >= 0 && W.spans[W.now]) W.spans[W.now].classList.remove('now');
+  W.now = at;
+  if (at >= 0 && W.spans[at]) {
+    W.spans[at].classList.add('now');
+    if (S.playing) W.spans[at].scrollIntoView({ block: 'nearest' });
   }
 }
 
@@ -578,6 +783,7 @@ function layoutRows() {
   const auds = lanes.filter(l => l.kind === 'audio' && l.id !== 'A1' && used.has(l.id)).sort((a, b) => laneNo(a.id) - laneNo(b.id));
   const rows = [];
   let y = ROW.top;
+  if (S.tl && S.tl.captions.exists && S.tl.captions.items.length) { rows.push({ id: 'C1', kind: 'captions', top: y, h: ROW.caption }); y += ROW.caption + ROW.gap * 2; }
   for (const l of vids) { rows.push({ id: l.id, kind: 'video', top: y, h: ROW.video }); y += ROW.video + ROW.gap; }
   if (vids.length) y += ROW.gap;
   rows.push({ id: 'V1', kind: 'main', top: y, h: ROW.main });
@@ -611,7 +817,7 @@ function renderTrack() {
   if (!mainClips().length) {
     $('#track').innerHTML = '<div class="track-empty">Drop videos here, or press + on a Media card</div>';
   }
-  for (const c of visibleClips().sort(byStart)) {
+  for (const c of laneThings().sort(byStart)) {
     const row = rowsEl.querySelector(`[data-lane="${c.track}"]`);
     if (!row) continue;
     const el = makeClipEl(c);
@@ -627,6 +833,17 @@ function laneHead(r) {
   head.className = 'head';
   head.style.top = (26 + r.top) + 'px';
   head.style.height = r.h + 'px';
+  if (r.kind === 'captions') {
+    const on = S.tl.captions.on;
+    const b = document.createElement('button');
+    b.className = 'tool' + (on ? '' : ' off');
+    b.innerHTML = on ? ICON.eye : ICON.eyeOff;
+    b.title = on ? 'Hide the captions (and leave them out of exports)' : 'Show the captions';
+    b.setAttribute('aria-label', b.title);
+    b.addEventListener('click', () => edit('set_captions_on', { on: !on }));
+    head.appendChild(b);
+    return head;
+  }
   const lane = r.kind === 'main' ? 'A1' : r.id;
   const sound = r.kind !== 'video';
   const on = laneOn(lane);
@@ -642,7 +859,7 @@ function laneHead(r) {
 }
 function makeClipEl(c) {
   const el = document.createElement('div');
-  const kind = isMain(c) ? 'main' : c.kind === 'audio' ? 'audio' : c.kind === 'text' ? 'text' : 'overlay';
+  const kind = isCap(c) ? 'caption' : isMain(c) ? 'main' : c.kind === 'audio' ? 'audio' : c.kind === 'text' ? 'text' : 'overlay';
   el.className = 'clip ' + kind;
   el.dataset.id = c.id;
   const handles = '<div class="handle in" title="Drag to trim the start"></div><div class="handle out" title="Drag to trim the end"></div>';
@@ -650,14 +867,15 @@ function makeClipEl(c) {
   else if (kind === 'overlay') el.innerHTML = '<div class="pics"><canvas></canvas></div><span class="label"></span>' + handles;
   else if (kind === 'audio') el.innerHTML = '<div class="wave"><canvas></canvas></div><div class="fade in"></div><div class="fade out"></div><span class="label"></span>' + handles;
   else el.innerHTML = '<span class="label"></span>' + handles;
-  const name = kind === 'text' ? (c.props.text && c.props.text.text.split('\n')[0]) || 'Text' : c.name;
-  el.querySelector('.label').textContent = `${name} · ${fmtLen(c.end - c.start)}`;
+  const name = kind === 'caption' ? c.text.replace(/\n/g, ' ') : kind === 'text' ? (c.props.text && c.props.text.text.split('\n')[0]) || 'Text' : c.name;
+  el.querySelector('.label').textContent = kind === 'caption' ? name : `${name} · ${fmtLen(c.end - c.start)}`;
+  if (kind === 'caption') el.title = c.text;
   if (kind === 'main') el.querySelector('.snd').classList.toggle('none', !hasSound(c));
   if (kind === 'audio') {
     el.querySelector('.fade.in').style.width = (c.props.fadeIn * S.px) + 'px';
     el.querySelector('.fade.out').style.width = (c.props.fadeOut * S.px) + 'px';
   }
-  el.classList.toggle('muted', !laneOn(c.track));
+  el.classList.toggle('muted', kind === 'caption' ? !S.tl.captions.on : !laneOn(c.track));
   if (kind === 'main') el.querySelector('.snd').classList.toggle('off', !laneOn('A1'));
   el.addEventListener('pointerdown', e => clipPointerDown(c, el, e));
   return el;
@@ -665,7 +883,7 @@ function makeClipEl(c) {
 let extraWidth = 0;   // room a drag past the end needs
 function layoutTimeline() {
   const sc = scroller();
-  const end = Math.max(dur(), ...visibleClips().map(c => c.end));
+  const end = Math.max(dur(), ...laneThings().map(c => c.end));
   const width = Math.max(sc.clientWidth, PAD + end * S.px + 240 + extraWidth);
   content().style.width = width + 'px';
   layoutClips();
@@ -674,7 +892,7 @@ function layoutTimeline() {
   drawVisible();
 }
 function layoutClips() {
-  for (const c of visibleClips()) {
+  for (const c of laneThings()) {
     const el = S.els.get(c.id);
     if (!el) continue;
     const g = geom(c);
@@ -883,6 +1101,7 @@ function updateTime() {
   $('#tc-now').textContent = fmtFrames(S.t);
   $('#playhead').style.left = (PAD + S.t * S.px) + 'px';
   renderTools();
+  markWord();
 }
 /** The clips a split at the playhead would cut: the selected ones, or the main track's. */
 function cutTargets() {
@@ -926,7 +1145,7 @@ function renderSelection() {
   renderDetails();
   drawOverlay();
 }
-function selectedClips() { return visibleClips().filter(c => S.sel.has(c.id)).sort(byStart); }
+function selectedClips() { return laneThings().filter(c => S.sel.has(c.id)).sort(byStart); }
 
 /* Property changes: coalesced so a dragged slider sends its latest value, and merged into one undo
    step per drag (the key changes when the drag ends). */
@@ -956,14 +1175,15 @@ const controls = [];   // {el, read: clip → value, write?(el, v)}
 function renderProps() {
   const box = $('#props'), sel = selectedClips();
   const one = sel.length === 1 ? sel[0] : null;
-  const sig = one ? `${one.id}:${one.kind}:${isMain(one)}:${hasSound(one)}` : `n${sel.length}`;
-  $('#props-title').textContent = one ? ({ text: 'Text', audio: 'Sound', image: 'Picture' }[one.kind] || (isMain(one) ? 'Clip' : 'Overlay')) : sel.length ? `${sel.length} clips` : 'Project';
+  const sig = one ? `${one.id}:${one.kind}:${isCap(one) || isMain(one)}:${!isCap(one) && hasSound(one)}` : `n${sel.length}`;
+  $('#props-title').textContent = one ? ({ text: 'Text', audio: 'Sound', image: 'Picture', caption: 'Caption' }[one.kind] || (isMain(one) ? 'Clip' : 'Overlay')) : sel.length ? `${sel.length} clips` : 'Project';
   if (sig === propsSig) { syncProps(one); return; }
   propsSig = sig;
   box.innerHTML = '';
   controls.length = 0;
   if (!one) return;
   const ids = [one.id];
+  if (isCap(one)) { captionControls(box, one); syncProps(one); return; }
   // a section named like the panel needs no heading of its own
   const section = title => {
     const s = document.createElement('section');
@@ -1004,6 +1224,32 @@ function renderProps() {
     s.appendChild(slider('Speed', ids, 'speed', { min: 10, max: 400, step: 5, unit: '%', read: c => c.props.speed, live: false }));
   }
   syncProps(one);
+}
+/** A caption's words and times (its look is the Captions tab's, for all of them). */
+function captionControls(box, c) {
+  const ta = document.createElement('textarea');
+  ta.id = 'prop-caption';
+  ta.setAttribute('aria-label', 'Caption');
+  ta.addEventListener('keydown', e => e.stopPropagation());
+  ta.addEventListener('change', () => edit('set_caption_text', { id: c.id, text: ta.value }));
+  controls.push({ el: ta, read: x => x.text });
+  box.appendChild(ta);
+  const times = document.createElement('div');
+  times.className = 'prop';
+  times.innerHTML = '<span>From, to</span><input type="number" step="0.1" title="Starts at, seconds"><input type="number" step="0.1" title="Ends at, seconds">';
+  const [a, b] = times.querySelectorAll('input');
+  a.style.gridColumn = '2';
+  const send = () => { if (Number.isFinite(+a.value) && Number.isFinite(+b.value)) edit('retime_caption', { id: c.id, start: +a.value, end: +b.value }); };
+  a.addEventListener('change', send);
+  b.addEventListener('change', send);
+  a.dataset.dp = b.dataset.dp = '2';
+  controls.push({ el: a, read: x => x.start }, { el: b, read: x => x.end });
+  box.appendChild(times);
+  box.appendChild(buttons([
+    ['Go to it', 'Move the playhead to this caption', () => { seek(c.start); scrollToTime(c.start); }],
+    ['Delete', 'Delete this caption', () => edit('delete_captions', { ids: [c.id] })],
+    ['Captions tab', 'Change how all the captions look', () => showTab('captions')],
+  ]));
 }
 function syncProps(one) {
   if (!one) return;
@@ -1145,7 +1391,10 @@ function renderDetails() {
   let rows;
   const sel = selectedClips();
   if (!has()) rows = [['Project', projectName()], ['Clips', 'None yet']];
-  else if (sel.length === 1) {
+  else if (sel.length === 1 && isCap(sel[0])) {
+    const c = sel[0];
+    rows = [['Caption', `${tcShort(c.start)} – ${tcShort(c.end)}`], ['Length', fmtLen(c.end - c.start)], ['Speaker', c.speaker || '—']];
+  } else if (sel.length === 1) {
     const c = sel[0], m = mediaOf(c.item);
     rows = [
       ['Clip', c.kind === 'text' ? 'Text' : c.name],
@@ -1166,6 +1415,7 @@ function renderDetails() {
       ['Frame rate', `${+S.tl.fps.toFixed(3)} fps`],
       ['Length', fmtFrames(dur())],
       ['Clips', String(mainClips().length)],
+      ['Captions', S.tl.captions.exists ? String(S.tl.captions.items.length) : 'None'],
       ['Saved in', S.tl.project.path || 'Not saved yet'],
     ];
   }
@@ -1195,7 +1445,10 @@ async function splitKeep(keep) {
 }
 async function deleteSelection() {
   if (!S.sel.size) { toast('Select a clip to delete'); return; }
-  await edit('delete_clips', () => ({ clips: [...S.sel] }));
+  const caps = new Set(capClips().map(c => c.id));
+  const c = [...S.sel].filter(id => caps.has(id)), v = [...S.sel].filter(id => !caps.has(id));
+  if (c.length) await edit('delete_captions', { ids: c });
+  if (v.length) await edit('delete_clips', { clips: v });
 }
 const undo = () => edit('undo');
 const redo = () => edit('redo');
@@ -1304,7 +1557,7 @@ function clipPointerDown(c, el, e) {
   e.stopPropagation();
   e.preventDefault();
   const handle = e.target.closest('.handle');
-  if (handle) { startTrim(c, handle.classList.contains('in') ? 'in' : 'out', e); return; }
+  if (handle) { (isCap(c) ? captionTrim : startTrim)(c, handle.classList.contains('in') ? 'in' : 'out', e); return; }
   const add = e.ctrlKey || e.metaKey || e.shiftKey;
   const wasSelected = S.sel.has(c.id);
   if (add) {
@@ -1318,7 +1571,9 @@ function clipPointerDown(c, el, e) {
     // a plain click on a clip in a group selects just that clip
     if (!started && wasSelected && S.sel.size > 1) select([c.id]);
   };
-  if (isMain(c)) reorderDrag(c, el, e, after); else laneDrag(c, el, e, after);
+  if (isCap(c)) captionDrag(c, el, e, after);
+  else if (isMain(c)) reorderDrag(c, el, e, after);
+  else laneDrag(c, el, e, after);
 }
 function reorderDrag(c, el, e, after) {
   const x0 = e.clientX;
@@ -1420,6 +1675,54 @@ function laneDrag(c, el, e, after) {
     drawVisible();
     after(started);
     if (started && !cancelled && (lane !== c.track || Math.abs(start - c.start) > 1e-6)) edit('move_clip', { clip: c.id, lane, seconds: start });
+  });
+}
+
+/* Captions: dragged along their lane (they then belong to the words there) or trimmed; they
+   never cover one another */
+function captionRoom(c) {
+  const others = capClips().filter(o => o.id !== c.id);
+  return {
+    prev: Math.max(0, ...others.filter(o => o.end <= c.start + 1e-6).map(o => o.end)),
+    next: Math.min(Infinity, ...others.filter(o => o.start >= c.end - 1e-6).map(o => o.start)),
+  };
+}
+function captionDrag(c, el, e, after) {
+  const x0 = e.clientX, len = c.end - c.start, grab = timeAt(e.clientX) - c.start;
+  const { prev, next } = captionRoom(c);
+  const targets = [S.t, ...cuts(), ...visibleClips().flatMap(o => [o.start, o.end])];
+  let started = false, start = c.start;
+  follow(e, ev => {
+    if (!started) { if (Math.abs(ev.clientX - x0) < 5) return; started = true; el.classList.add('dragging'); }
+    start = timeAt(ev.clientX) - grab;
+    const a = nearest(start, ev, targets), b = nearest(start + len, ev, targets);
+    if (a !== null && (b === null || Math.abs(a - start) <= Math.abs(b - start - len))) { start = a; showSnap(a); }
+    else if (b !== null) { start = b - len; showSnap(b); } else hideSnap();
+    start = snapFrame(clamp(start, prev, Math.max(prev, next - len)));
+    S.geom.set(c.id, { ...c, start, end: start + len });
+    layoutClips();
+  }, cancelled => {
+    el.classList.remove('dragging');
+    S.geom.clear();
+    layoutClips();
+    after(started);
+    if (started && !cancelled && Math.abs(start - c.start) > 1e-6) edit('retime_caption', { id: c.id, start, end: start + len });
+  });
+}
+function captionTrim(c, edge, e) {
+  if (!S.sel.has(c.id)) select([c.id]);
+  const f = frameStep(), x0 = e.clientX, { prev, next } = captionRoom(c);
+  const targets = [S.t, ...cuts(), ...visibleClips().flatMap(o => [o.start, o.end])];
+  let a = c.start, b = c.end;
+  follow(e, ev => {
+    const t = snapFrame(snapTo((edge === 'in' ? c.start : c.end) + (ev.clientX - x0) / S.px, ev, targets));
+    if (edge === 'in') a = clamp(t, prev, c.end - f); else b = clamp(t, c.start + f, next);
+    S.geom.set(c.id, { ...c, start: a, end: b });
+    layoutClips();
+  }, cancelled => {
+    S.geom.clear();
+    layoutClips();
+    if (!cancelled && (a !== c.start || b !== c.end)) edit('retime_caption', { id: c.id, start: a, end: b });
   });
 }
 
@@ -1661,6 +1964,21 @@ click('#import-audio-btn', importSound);
 click('#tab-media', () => showTab('media'));
 click('#tab-audio', () => showTab('audio'));
 click('#tab-text', () => showTab('text'));
+click('#tab-captions', () => showTab('captions'));
+click('#cap-go', autoCaptions);
+click('#cap-cancel', () => invoke('cancel_captions'));
+click('#cap-fillers', removeFillers);
+click('#cap-pauses', removePauses);
+click('#cap-srt', saveSubtitles);
+$('#cap-on').addEventListener('change', e => edit('set_captions_on', { on: e.target.checked }));
+$('#cap-model').addEventListener('change', e => { try { localStorage.setItem('clipcut.model', e.target.value); } catch (_) {} capNote(); });
+$('#cap-lang').addEventListener('change', e => { try { localStorage.setItem('clipcut.lang', e.target.value); } catch (_) {} });
+listen('caption-progress', e => {
+  const p = e.payload || {};
+  $('#cap-bar').style.width = (100 * (p.fraction || 0)).toFixed(1) + '%';
+  $('#cap-status').textContent = `${Math.floor(100 * (p.fraction || 0))}% · ${p.status || ''}`;
+});
+wireTranscript();
 click('#play-btn', toggle);
 click('#export-btn', exportClip);
 click('#new-btn', newProject);
@@ -1704,6 +2022,8 @@ scroller().addEventListener('wheel', e => {
 
 document.addEventListener('keydown', e => {
   if (e.target.closest('input, textarea, select') || document.querySelector('dialog[open]') || S.dragging) return;
+  // words selected in the transcript: Delete cuts them out of the video
+  if (W.sel && !$('#panel-captions').hidden && (e.key === 'Delete' || e.key === 'Backspace')) { e.preventDefault(); if (!e.repeat) cutSelectedWords(); return; }
   const mod = e.ctrlKey || e.metaKey, k = e.key.toLowerCase();
   const key = (cond, fn) => { if (cond) { e.preventDefault(); fn(); return true; } return false; };
   if (mod) {

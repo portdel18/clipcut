@@ -994,10 +994,12 @@ dependencies = [
 name = "clipcut-core"
 version = "0.8.0"
 dependencies = [
+ "filmcraft-edit",
  "filmcraft-engine",
  "filmcraft-media",
  "filmcraft-project",
  "filmcraft-render",
+ "filmcraft-speech",
  "filmcraft-testkit",
  "filmcraft-time",
  "serde",

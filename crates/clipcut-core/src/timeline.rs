@@ -79,6 +79,8 @@ pub struct TimelineView {
     pub clips: Vec<ClipView>,
     /// Every track, top to bottom of their kind: video `V1`, `V2`…, then audio `A1`, `A2`….
     pub lanes: Vec<LaneView>,
+    /// The caption track (`C1`) and how much of the main track's speech has a transcript.
+    pub captions: crate::captions::CaptionsView,
     pub media: Vec<MediaView>,
     pub can_undo: bool,
     pub can_redo: bool,
@@ -189,6 +191,7 @@ impl Studio {
             height,
             clips,
             lanes,
+            captions: self.captions_view(),
             media: media.into_iter().map(|(_, m)| m).collect(),
             can_undo: s.history.can_undo(),
             can_redo: s.history.can_redo(),
@@ -239,7 +242,7 @@ impl Studio {
     /// Puts a media item on the main track at position `index` (0 = first; past the end appends).
     /// One undo step.
     pub fn insert_item(&mut self, item: u64, index: usize) -> Result<()> {
-        self.group("Add Clip", |s| {
+        self.group_follow("Add Clip", None, |s| {
             let before = s.main_order()?;
             s.append_item(item)?;
             let mut order = s.main_order()?;
@@ -362,7 +365,7 @@ impl Studio {
             .active_sequence()
             .map(|q| q.video_tracks.first().into_iter().chain(q.audio_tracks.first()).flat_map(|t| t.items.iter().map(|i| i.id.0)).collect())
             .unwrap_or_default();
-        self.group(label, |st| {
+        self.group_follow(label, None, |st| {
             st.unlock_lanes()?;
             st.session
                 .edit_group(label, |s| {
@@ -412,7 +415,7 @@ impl Studio {
         }
         // the main track closes up; clips on lanes leave their place empty, as in CapCut
         let (main, lanes): (Vec<u64>, Vec<u64>) = clips.iter().partition(|c| self.on_main(**c));
-        self.group("Delete", |s| {
+        self.group_follow("Delete", None, |s| {
             s.unlock_lanes()?;
             if !lanes.is_empty() {
                 s.session.execute("edit.clear", json!({"clips": lanes})).map_err(engine)?;
@@ -438,7 +441,7 @@ impl Studio {
         }
         // the main track ripples; a lane clip's edge just moves
         let mode = if self.on_main(clip) { "ripple" } else { "regular" };
-        self.group("Trim", |s| {
+        self.group_follow("Trim", None, |s| {
             s.unlock_lanes()?;
             let r = s
                 .session
@@ -456,7 +459,7 @@ impl Studio {
         let from = order.iter().position(|c| *c == clip).ok_or_else(|| Error::Invalid("only clips on the main track can be reordered".into()))?;
         let id = order.remove(from);
         order.insert(to.min(order.len()), id);
-        self.pack(&order, "Reorder")
+        self.group_follow("Reorder", None, |s| s.pack(&order, "Reorder"))
     }
 
     /// Main-track clip ids in timeline order.

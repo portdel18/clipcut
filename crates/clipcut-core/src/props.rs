@@ -178,7 +178,8 @@ impl Studio {
             return Err(Error::Invalid("nothing to change".into()));
         }
         let label = props.as_object().and_then(|o| o.keys().next()).map(|k| label_for(k)).unwrap_or("Change");
-        self.group_merge(label, merge, |s| s.apply_props(clips, props))
+        // speed moves the main track, and the captions follow it
+        self.group_follow(label, merge, |s| s.apply_props(clips, props))
     }
 
     /// [`Studio::set_props`] without its own undo step (inside another edit).

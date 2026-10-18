@@ -6,10 +6,10 @@ pure-Rust editing engine (its own H.264, HEVC, ProRes, DNxHR, VP9, AV1, AAC and 
 frame timing, colour, audio mixing and export), and will bring in
 [Clip Studio](https://github.com/portdel18/clip-stu)'s news graphics.
 
-> **Status: Phase 1b, lanes and text.** A magnetic main track you split, trim, reorder and
-> ripple-delete; lanes above it for overlays and text and below it for music and voiceover; a
-> Properties panel for position, scale, volume, fades, speed and text style; vertical and square
-> canvases. Captions come next (1c). See [the roadmap](#roadmap).
+> **Status: Phase 1c, captions.** A magnetic main track you split, trim, reorder and
+> ripple-delete; lanes for overlays, text, music and voiceover; a Properties panel; vertical and
+> square canvases; and auto-captions from the speech (on this computer) that follow every cut, with
+> transcript cutting, filler-word and pause removal, and subtitle files. See [the roadmap](#roadmap).
 
 ## Install on Windows
 
@@ -61,6 +61,20 @@ Shorts, 1:1 or 4:5; clips are refitted to the new shape.
 | `↑` `↓` | The previous or next cut; `Home` / `End`: the start or the end |
 | `Ctrl`+wheel, `Ctrl+=` / `Ctrl+-`, `Ctrl+0` | Zoom the timeline at the pointer, in and out, fit it all |
 
+**Captions.** The **Captions** tab's **Auto captions** listens to the main track's speech and lays
+it out as short captions on a lane at the top. The speech model (Whisper, from OpenAI, run by the
+engine in pure Rust) downloads once, 150 MB to 970 MB by the accuracy you pick, into ClipCut's
+data folder, and runs on this computer: nothing is uploaded. Captions follow the speech: cut, trim,
+reorder or speed up the clips and each caption moves with its words, loses the words that were cut,
+and goes when all of them have. Pick a look (Clean, Box, Yellow, Big, Top, Serif), edit a caption's
+words or times in Properties (or drag it on its lane), and **Save subtitles** writes an `.srt` or
+`.vtt`. Shown captions are burnt into exports.
+
+**Cutting by the words.** The Captions tab's transcript is the main track's speech: click a word to
+go to it, drag across words (or Shift+click) and press `Delete` to cut them out of the video.
+**Remove filler words** cuts um, uh and the like; **Shorten pauses** trims every pause over half a
+second. The main track closes up each time, and the captions follow.
+
 **Projects save themselves.** The first edit gives the project a folder, `Documents\ClipCut\<first
 clip's name>`, and every change after that is saved a moment later. ClipCut reopens the last project
 when it starts. **New** (`Ctrl+N`) starts another, **Open** (`Ctrl+O`) picks a saved one.
@@ -73,7 +87,7 @@ Cancel.
 | Phase | What it adds |
 |---|---|
 | **0. Prove it** (done) | Open, play with sound, scrub, export; the Windows installer from CI |
-| **1. Editor v1** (1a cutting: done; 1b lanes, text, sound, properties: this; 1c captions next) | Split, trim, ripple delete, a magnetic main track plus overlay, text and audio lanes, speed, transitions, vertical and horizontal canvases, undo, autosave. First workflows: cutting down interviews and captioned explainers (auto-captions with styles, transcript cutting) |
+| **1. Editor v1** (1a cutting, 1b lanes and properties: done; 1c captions: this; transitions next) | Split, trim, ripple delete, a magnetic main track plus overlay, text and audio lanes, speed, transitions, vertical and horizontal canvases, undo, autosave. First workflows: cutting down interviews and captioned explainers (auto-captions with styles, transcript cutting) |
 | **2. Clip Studio inside** | A Graphics tab with Clip Studio's tools (lower thirds, map zoom, numbers, timelines, underline); graphics become clips you can reopen and edit; TikTok, Reels and Shorts overlays in the preview |
 | **3. Pro panels** | Keyframes, colour, the audio mixer, scopes and precise trimming, from the engine |
 | **4. CapCut extras** | Caption styles, text animations, templates, beat markers, music ducking, quick social exports |
@@ -84,7 +98,7 @@ Cancel.
 | Layer | Where | What |
 |---|---|---|
 | Engine | `crates/*` (from FilmCraft) | Decoding, the timeline model, rendering, effects, audio mixing, export |
-| Façade | `crates/clipcut-core` | The engine operations the app calls: the magnetic main track and the lanes around it (`timeline.rs`, `lanes.rs`), clip properties, canvas and waveforms (`props.rs`), each edit one undo step; projects, preview frames and thumbnails, playback audio, export jobs |
+| Façade | `crates/clipcut-core` | The engine operations the app calls: the magnetic main track and the lanes around it (`timeline.rs`, `lanes.rs`), clip properties, canvas and waveforms (`props.rs`), captions and transcript cutting (`captions.rs`), each edit one undo step; projects, preview frames and thumbnails, playback audio, export jobs |
 | App | `apps/clipcut` | A [Tauri](https://tauri.app) window: Rust commands in `src/`, the interface in `ui/` (HTML, CSS and JavaScript, no build step) |
 
 The sound card is the playback clock; the interface shows the frame the engine renders at that time.
@@ -100,6 +114,8 @@ librsvg2-dev libasound2-dev libxdo-dev libssl-dev`.
 cargo test -p clipcut-core                         # the façade, against a clip ffmpeg generates
 cargo run -p clipcut -- a.mp4 b.mp4                # the app, starting a project with these clips
 cargo run -p clipcut -- --self-test in.mp4 out.mp4 report.json   # open, preview, sound, export; no window
+cargo run -p clipcut -- --caption-test speech.mp4 models/ whisper-tiny report.json out.srt   # real-speech captions
+CLIPCUT_TEST_TRANSCRIPT=words.json cargo run -p clipcut -- clip.mp4   # the Captions tab without a model
 cd apps/clipcut && npx @tauri-apps/cli@2 build     # the installer (target/release/bundle/)
 ```
 
