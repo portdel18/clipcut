@@ -62,6 +62,17 @@ fn float(e: Option<&EffectInstance>, id: &str) -> Option<f64> {
         _ => None,
     }
 }
+/// A parameter's value at media time `at`: its keyframes' value there when it is animated.
+fn value_at(e: Option<&EffectInstance>, id: &str, at: Tick) -> Option<ParamValue> {
+    let p = e?.param(id)?;
+    Some(if p.is_animated() { p.value_at(at) } else { p.value.clone() })
+}
+fn float_at(e: Option<&EffectInstance>, id: &str, at: Tick) -> Option<f64> {
+    match value_at(e, id, at)? {
+        ParamValue::Float(v) if v.is_finite() => Some(v),
+        _ => None,
+    }
+}
 fn boolean(e: Option<&EffectInstance>, id: &str) -> bool {
     matches!(e.and_then(|e| e.param(id)).map(|p| &p.value), Some(ParamValue::Bool(true)))
 }
@@ -85,11 +96,17 @@ fn effect<'a>(i: &'a TrackItem, id: &str) -> Option<&'a EffectInstance> {
     i.effects.iter().find(|e| e.effect == id)
 }
 
-/// `video`, `image`, `text` or `audio`, and the clip's properties.
+/// `video`, `image`, `text` or `audio`, and the clip's properties (animated ones as they are at
+/// the clip's start).
 pub(crate) fn clip_props(s: &filmcraft_engine::Session, q: &Sequence, track: &Track, i: &TrackItem) -> (&'static str, ClipProps) {
+    clip_props_at(s, q, track, i, i.source_in)
+}
+
+/// [`clip_props`] with animated properties as they are at media time `at`.
+pub(crate) fn clip_props_at(s: &filmcraft_engine::Session, q: &Sequence, track: &Track, i: &TrackItem, at: Tick) -> (&'static str, ClipProps) {
     let mut p = ClipProps { speed: (i.speed.abs() * 100.0 * 100.0).round() / 100.0, ..Default::default() };
     if track.kind == TrackKind::Audio {
-        p.volume_db = Some(float(effect(i, "volume"), "level").unwrap_or(0.0));
+        p.volume_db = Some(float_at(effect(i, "volume"), "level", at).unwrap_or(0.0));
         for t in &track.transitions {
             if t.to == Some(i.id) && t.from.is_none() {
                 p.fade_in = t.duration.seconds();
@@ -107,14 +124,14 @@ pub(crate) fn clip_props(s: &filmcraft_engine::Session, q: &Sequence, track: &Tr
     };
     let motion = effect(i, "motion");
     let (w, h) = (f64::from(q.settings.width), f64::from(q.settings.height));
-    let (x, y) = match motion.and_then(|e| e.param("position")).map(|p| &p.value) {
+    let (x, y) = match value_at(motion, "position", at).as_ref() {
         Some(ParamValue::Vec2(v)) => (if v.x.is_finite() { v.x } else { w / 2.0 }, if v.y.is_finite() { v.y } else { h / 2.0 }),
         _ => (w / 2.0, h / 2.0),
     };
     (p.x, p.y) = (Some(x), Some(y));
-    p.scale = Some(float(motion, "scale").unwrap_or(100.0));
-    p.rotation = Some(float(motion, "rotation").unwrap_or(0.0));
-    p.opacity = Some(float(effect(i, "opacity"), "opacity").unwrap_or(100.0));
+    p.scale = Some(float_at(motion, "scale", at).unwrap_or(100.0));
+    p.rotation = Some(float_at(motion, "rotation", at).unwrap_or(0.0));
+    p.opacity = Some(float_at(effect(i, "opacity"), "opacity", at).unwrap_or(100.0));
     if kind == "text" {
         let l = effect(i, filmcraft_project::graphic::TEXT_LAYER);
         let style = text(l, "font_style").to_ascii_lowercase();
@@ -177,7 +194,7 @@ impl Studio {
         if !props.is_object() {
             return Err(Error::Invalid("nothing to change".into()));
         }
-        let label = props.as_object().and_then(|o| o.keys().next()).map(|k| label_for(k)).unwrap_or("Change");
+        let label = props.as_object().and_then(|o| o.keys().find(|k| *k != "at")).map(|k| label_for(k)).unwrap_or("Change");
         // speed moves the main track, and the captions follow it
         self.group_follow(label, merge, |s| s.apply_props(clips, props))
     }
@@ -185,6 +202,17 @@ impl Studio {
     /// [`Studio::set_props`] without its own undo step (inside another edit).
     pub(crate) fn apply_props(&mut self, clips: &[u64], p: &Value) -> Result<()> {
         let fps = self.fps()?;
+        // `at` (seconds): where an animated property gets its keyframe (a still one just changes)
+        let at = match num(p, "at")? {
+            Some(sec) => Some(self.frame_tick(sec)?),
+            None => None,
+        };
+        let timed = |mut v: Value| {
+            if let Some(t) = at {
+                v["time"] = json!(t.0);
+            }
+            v
+        };
         for &clip in clips {
             let q = self.session.active_sequence().ok_or(Error::NothingOpen)?;
             let (track, item) =
@@ -201,7 +229,7 @@ impl Studio {
             if let Some(db) = num(p, "volumeDb")? {
                 for c in &sound {
                     self.session
-                        .execute("effects.setParam", json!({"clip": c, "effect": "volume", "param": "level", "value": db.clamp(-60.0, 15.0)}))
+                        .execute("effects.setParam", timed(json!({"clip": c, "effect": "volume", "param": "level", "value": db.clamp(-60.0, 15.0)})))
                         .map_err(engine)?;
                 }
             }
@@ -228,15 +256,18 @@ impl Studio {
                 let q = self.session.active_sequence().ok_or(Error::NothingOpen)?;
                 let (_, now) = q.find_item(ClipId(clip)).map(|(t, i)| (t, i.clone())).ok_or(Error::NothingOpen)?;
                 let tr = q.track(track).ok_or(Error::NothingOpen)?;
-                let (_, cur) = clip_props(&self.session, q, tr, &now);
+                let mt = at.map_or(now.source_in, |t| now.source_time_at(t.clamp(now.start, now.end())));
+                let (_, cur) = clip_props_at(&self.session, q, tr, &now, mt);
                 let v = [x.or(cur.x).unwrap_or(0.0), y.or(cur.y).unwrap_or(0.0)];
-                self.session.execute("effects.setParam", json!({"clip": clip, "effect": "motion", "param": "position", "value": v})).map_err(engine)?;
+                self.session.execute("effects.setParam", timed(json!({"clip": clip, "effect": "motion", "param": "position", "value": v}))).map_err(engine)?;
             }
             for (key, eff, param, lo, hi) in
                 [("scale", "motion", "scale", 1.0, 2000.0), ("rotation", "motion", "rotation", -3600.0, 3600.0), ("opacity", "opacity", "opacity", 0.0, 100.0)]
             {
                 if let Some(v) = num(p, key)? {
-                    self.session.execute("effects.setParam", json!({"clip": clip, "effect": eff, "param": param, "value": v.clamp(lo, hi)})).map_err(engine)?;
+                    self.session
+                        .execute("effects.setParam", timed(json!({"clip": clip, "effect": eff, "param": param, "value": v.clamp(lo, hi)})))
+                        .map_err(engine)?;
                 }
             }
             let q = self.session.active_sequence().ok_or(Error::NothingOpen)?;
