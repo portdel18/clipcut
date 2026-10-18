@@ -55,6 +55,10 @@ pub struct LaneView {
     /// False when the lane's picture is hidden or its sound muted.
     pub on: bool,
     pub clips: usize,
+    /// Sound lanes: the mixer's volume (dB), pan (−100…100) and solo.
+    pub volume_db: f64,
+    pub pan: f64,
+    pub solo: bool,
 }
 
 /// A media file in the project (the Media panel).
@@ -85,6 +89,8 @@ pub struct TimelineView {
     pub lanes: Vec<LaneView>,
     /// The caption track (`C1`) and how much of the main track's speech has a transcript.
     pub captions: crate::captions::CaptionsView,
+    /// The Mix's settings.
+    pub mix: crate::mixer::MixView,
     /// The transitions on the main track's cuts.
     pub transitions: Vec<crate::transitions::TransitionView>,
     pub media: Vec<MediaView>,
@@ -148,7 +154,15 @@ impl Studio {
             for (prefix, tracks) in [("V", &q.video_tracks), ("A", &q.audio_tracks)] {
                 for (n, t) in tracks.iter().enumerate() {
                     let on = if prefix == "V" { t.enabled } else { !t.muted };
-                    lanes.push(LaneView { id: format!("{prefix}{}", n + 1), kind: if prefix == "V" { "video" } else { "audio" }, on, clips: t.items.len() });
+                    lanes.push(LaneView {
+                        id: format!("{prefix}{}", n + 1),
+                        kind: if prefix == "V" { "video" } else { "audio" },
+                        on,
+                        clips: t.items.len(),
+                        volume_db: t.volume_db,
+                        pan: t.pan,
+                        solo: t.solo,
+                    });
                     for i in &t.items {
                         let (kind, props) = clip_props(s, q, t, i);
                         clips.push(ClipView {
@@ -201,6 +215,7 @@ impl Studio {
             lanes,
             captions: self.captions_view(),
             transitions: self.transitions_view(),
+            mix: self.mix_view(),
             media: media.into_iter().map(|(_, m)| m).collect(),
             can_undo: s.history.can_undo(),
             can_redo: s.history.can_redo(),

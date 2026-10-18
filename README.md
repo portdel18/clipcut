@@ -55,6 +55,8 @@ Shorts, 1:1 or 4:5; clips are refitted to the new shape.
 | `Delete` | Delete the selected clips; the main track closes up, lanes keep their gaps |
 | Drag a clip | Main track: move it to another place in the order. Lanes: move it in time or to another lane |
 | Drag a selected clip's edge | Trim it; the player shows the new first or last frame |
+| `,` / `.` | A frame earlier / later (`Shift`: 10 frames): the selected cut moves (one clip grows as the other shrinks), or the selected lane clips move |
+| `Alt+,` / `Alt+.` | Slip the selected clip: the media a frame earlier / later, in the same place and length |
 | `N` | Snapping on or off (hold `Shift` while dragging to skip it once) |
 | `Ctrl+Z`, `Ctrl+Shift+Z` / `Ctrl+Y` | Undo, redo: every edit (and every slider drag) is one step |
 | Click, `Ctrl`/`Shift`+click, `Ctrl+A`, `Esc` | Select a clip, add to the selection, select all, select none |
@@ -92,6 +94,16 @@ of it is the engine's Lumetri Color, so the export matches the player.
 **Scopes.** **Scopes** at the top of the Properties panel shows the player's frame as a waveform,
 an RGB parade, a vectorscope (with the colour-bar targets) or a histogram, updated as you scrub
 and play.
+
+**Mixer.** The **Mixer** tab has a strip for the main track's sound, one for each sound lane and
+one for the Mix (everything, as exported): volume and pan, Mute and Solo, and a level meter that
+moves while the video plays (red past 0 dB, where the sound distorts). Faders change the sound as
+it plays; a fader drag is one undo step.
+
+**Precise trimming.** A clip's Properties have a **Trim** section: start or end to the playhead,
+**Slip** (other frames of the media in the same place) and, on lanes, **Move** a frame at a time. A
+selected cut has **Move cut**, a roll: one clip grows as the other shrinks, so the video keeps its
+length, linked sound, captions and transitions following.
 
 **Platform overlays.** The player's **Overlay** menu shows what TikTok, Instagram Reels or YouTube
 Shorts cover on a 9:16 video (the same drawing as Clip Studio's), or the safe zones on any shape.
@@ -134,7 +146,7 @@ Cancel.
 | **0. Prove it** (done) | Open, play with sound, scrub, export; the Windows installer from CI |
 | **1. Editor v1** (done: 1a cutting, 1b lanes and properties, 1c captions, 1d transitions) | Split, trim, ripple delete, a magnetic main track plus overlay, text and audio lanes, speed, transitions, vertical and horizontal canvases, undo, autosave. First workflows: cutting down interviews and captioned explainers (auto-captions with styles, transcript cutting) |
 | **2. Clip Studio inside** (this) | A Graphics tab with Clip Studio's tools (lower thirds, map zoom, numbers, timelines, underline); graphics become clips you can reopen and edit; TikTok, Reels and Shorts overlays in the preview |
-| **3. Pro panels** (3a keyframes: done; 3b colour and scopes: this; the mixer and precise trimming next) | Keyframes, colour, the audio mixer, scopes and precise trimming, from the engine |
+| **3. Pro panels** (3a keyframes, 3b colour and scopes: done; 3c the mixer and precise trimming: this) | Keyframes, colour, the audio mixer, scopes and precise trimming, from the engine |
 | **4. CapCut extras** | Caption styles, text animations, templates, beat markers, music ducking, quick social exports |
 | **5. Polish** | Live graphics, proxies, speed work, signed installers and updates |
 

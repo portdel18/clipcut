@@ -186,6 +186,7 @@ function apply(tl, { fit = false } = {}) {
   if (tl.project.dirty && has()) saveSoon();
   renderCaptionsPanel();
   renderTransitionsPanel();
+  renderMixer();
   filtersSoon();
 }
 
@@ -539,13 +540,14 @@ async function addText(s) {
   if (r) { const ta = $('#props textarea'); if (ta) { ta.focus(); ta.select(); } }
 }
 function showTab(id) {
-  for (const t of ['media', 'audio', 'text', 'transitions', 'filters', 'captions']) {
+  for (const t of ['media', 'audio', 'text', 'transitions', 'filters', 'mixer', 'captions']) {
     $(`#tab-${t}`).setAttribute('aria-selected', String(t === id));
     $(`#panel-${t}`).hidden = t !== id;
   }
   if (id === 'captions') openCaptionsPanel();
   if (id === 'transitions') openTransitionsPanel();
   if (id === 'filters') renderFiltersPanel();
+  if (id === 'mixer') { MX.sig = ''; renderMixer(); }
 }
 
 /* ---------- captions: auto captions, their look, cleaning up the speech, the transcript ---------- */
@@ -1118,6 +1120,159 @@ function setScopes(on) {
   $('#scopes-btn').setAttribute('aria-pressed', String(on));
   try { localStorage.setItem('clipcut.scopes', on ? $('#scope-kind').value : ''); } catch (_) {}
   if (on) drawScope();
+}
+
+/* ---------- the mixer: each sound lane's volume, pan, mute and solo, the Mix, and meters ---------- */
+const MX = { sig: '', level: new Map(), at: 0, raf: 0 };
+const METER_LO = -48, METER_HI = 6;   // dB across a meter
+// the main track's sound, and every sound lane with something on it
+const soundLanes = () => S.tl ? S.tl.lanes.filter(l => l.kind === 'audio' && (l.id === 'A1' || l.clips > 0)) : [];
+function laneTitle(l) {
+  if (l.id === 'A1') return ['Main track', "The clips' own sound"];
+  const names = [...new Set(S.tl.clips.filter(c => c.track === l.id).sort(byStart).map(c => c.name))];
+  return [names[0] || l.id, `Lane ${l.id}` + (names.length > 1 ? `, and ${names.length - 1} more` : '')];
+}
+/* A dragged fader sends its latest value; each drag is one undo step. Playback goes on. */
+let mxWant = null, mxBusy = false;
+async function queueMixer(lane, values, merge) {
+  if (mxWant && mxWant.merge === merge && mxWant.lane === lane) Object.assign(mxWant.values, values);
+  else { if (mxWant) await sendMixer(); mxWant = { lane, values: { ...values }, merge }; }
+  if (mxBusy) return;
+  mxBusy = true;
+  try { while (mxWant) await sendMixer(); } finally { mxBusy = false; }
+}
+async function sendMixer() {
+  const w = mxWant;
+  mxWant = null;
+  if (!w) return;
+  // not through run(): that pauses playback, and the mixer is for listening while it plays
+  const tl = await serial(() => invoke('set_mixer', w).catch(e => { toast(e, true); return null; }));
+  if (tl) apply(tl);
+}
+const mixerOf = lane => lane === 'Mix' ? S.tl.mix : S.tl.lanes.find(l => l.id === lane);
+function mixerSlider(lane, key, label, min, max, step, neutral, unit) {
+  const row = document.createElement('label');
+  row.className = 'prop';
+  row.innerHTML = `<span title="Double-click to reset">${label}</span><input type="range" min="${min}" max="${max}" step="${step}"><input type="number" step="${step}" title="${unit}">`;
+  const [range, num] = row.querySelectorAll('input');
+  range.id = `mx-${lane}-${key}`;
+  let k = nextKey(`mx${key}`);
+  const send = (v, merge) => { num.value = v; queueMixer(lane, { [key]: +v }, merge); };
+  range.addEventListener('input', () => send(range.value, k));
+  range.addEventListener('change', () => { k = nextKey(`mx${key}`); range.blur(); });
+  num.addEventListener('change', () => { if (Number.isFinite(+num.value)) { const v = clamp(+num.value, min, max); range.value = v; send(v, null); } });
+  row.firstChild.addEventListener('dblclick', e => { e.preventDefault(); range.value = neutral; send(neutral, null); });
+  return row;
+}
+function renderMixer() {
+  if ($('#panel-mixer').hidden) return;
+  const box = $('#mixer');
+  if (!has()) { box.innerHTML = '<p class="hint">Add a video first: its sound, and the sound lanes under it, show up here.</p>'; MX.sig = ''; return; }
+  const strips = soundLanes().map(l => [l.id, ...laneTitle(l)]).concat([['Mix', 'Mix', 'Everything you hear, as it is exported']]);
+  const sig = strips.map(s => s.join('|')).join('/');
+  if (sig !== MX.sig) {
+    MX.sig = sig;
+    box.innerHTML = '';
+    for (const [lane, title, sub] of strips) {
+      const st = document.createElement('div');
+      st.className = 'strip' + (lane === 'Mix' ? ' mix' : '');
+      st.dataset.lane = lane;
+      st.innerHTML = '<div class="strip-head"><div><b></b><small></small></div></div><canvas class="meter" width="240" height="14" aria-hidden="true"></canvas>';
+      st.querySelector('b').textContent = title;
+      st.querySelector('small').textContent = sub;
+      st.querySelector('small').title = sub;
+      if (lane !== 'Mix') {
+        const head = st.querySelector('.strip-head');
+        for (const [key, letter, name] of [['muted', 'M', 'Mute'], ['solo', 'S', 'Solo']]) {
+          const b = document.createElement('button');
+          b.className = 'btn ms';
+          b.id = `mx-${lane}-${key}`;
+          b.textContent = letter;
+          b.title = `${name} ${lane === 'A1' ? "the main track's sound" : 'this lane'}`;
+          b.setAttribute('aria-label', b.title);
+          b.addEventListener('click', () => {
+            const l = mixerOf(lane);
+            queueMixer(lane, { [key]: key === 'muted' ? l.on : !l.solo }, null);
+          });
+          head.appendChild(b);
+        }
+      }
+      st.appendChild(mixerSlider(lane, 'volumeDb', 'Volume', -60, 12, 0.5, 0, 'dB'));
+      if (lane !== 'Mix') st.appendChild(mixerSlider(lane, 'pan', 'Pan', -100, 100, 1, 0, 'left −100 … right 100'));
+      box.appendChild(st);
+    }
+  }
+  for (const st of box.children) {
+    const lane = st.dataset.lane, l = mixerOf(lane);
+    if (!l) continue;
+    for (const inp of st.querySelectorAll('input')) {
+      if (inp === document.activeElement && inp.type === 'number') continue;
+      const key = inp.closest('.prop').querySelector('input[type="range"]').id.endsWith('pan') ? 'pan' : 'volumeDb';
+      inp.value = +(+l[key]).toFixed(1);
+    }
+    const m = st.querySelector('[id$="-muted"]'), so = st.querySelector('[id$="-solo"]');
+    if (m) m.setAttribute('aria-pressed', String(!l.on));
+    if (so) so.setAttribute('aria-pressed', String(!!l.solo));
+    // a lane that can't be heard because others are soloed looks quieter
+    const anySolo = soundLanes().some(x => x.solo);
+    st.classList.toggle('silent', lane !== 'Mix' && (!l.on || (anySolo && !l.solo)));
+  }
+  drawMeters();
+}
+/** New peaks (`[{lane, left, right}]`) into the meters; they fall back at 24 dB a second. */
+function takeLevels(levels) {
+  const now = performance.now(), fall = (now - (MX.at || now)) / 1000 * 24;
+  MX.at = now;
+  const db = v => v > 0 ? 20 * Math.log10(v) : -Infinity;
+  for (const [lane, v] of MX.level) MX.level.set(lane, { left: v.left - fall, right: v.right - fall, hold: v.hold, holdAt: v.holdAt });
+  for (const l of levels) {
+    const was = MX.level.get(l.lane) || { left: -Infinity, right: -Infinity, hold: -Infinity, holdAt: 0 };
+    const left = Math.max(was.left, db(l.left)), right = Math.max(was.right, db(l.right));
+    const top = Math.max(left, right);
+    const hold = top >= was.hold || now - was.holdAt > 1500 ? top : was.hold;
+    MX.level.set(l.lane, { left, right, hold, holdAt: hold === top ? now : was.holdAt });
+  }
+  drawMeters();
+}
+function drawMeters() {
+  for (const cv of document.querySelectorAll('#mixer .meter')) {
+    const g = cv.getContext('2d'), w = cv.width, h = cv.height;
+    const v = MX.level.get(cv.parentElement.dataset.lane);
+    const x = db => clamp((db - METER_LO) / (METER_HI - METER_LO), 0, 1) * w;
+    g.fillStyle = '#18181c';
+    g.fillRect(0, 0, w, h);
+    // green up to −12 dB, amber to 0, red past it
+    const bar = (db, y, bh) => {
+      const end = x(db);
+      for (const [from, to, col] of [[METER_LO, -12, '#4fc46a'], [-12, 0, '#f4c443'], [0, METER_HI, '#ff5a4f']]) {
+        const a = x(from), b = Math.min(end, x(to));
+        if (b > a) { g.fillStyle = col; g.fillRect(a, y, b - a, bh); }
+      }
+    };
+    const bh = (h - 3) / 2;
+    if (v) { bar(v.left, 1, bh); bar(v.right, 2 + bh, bh); }
+    g.fillStyle = 'rgba(255,255,255,.18)';
+    for (const db of [-36, -24, -12, -6, 0]) g.fillRect(Math.round(x(db)), 0, 1, h);
+    if (v && v.hold > METER_LO) { g.fillStyle = v.hold > 0 ? '#ff5a4f' : '#e8e6ea'; g.fillRect(Math.round(x(v.hold)) - 1, 0, 2, h); }
+  }
+}
+/** While playing with the Mixer open: the levels since the last look. */
+let metersBusy = false;
+async function pollMeters() {
+  if (metersBusy || $('#panel-mixer').hidden) return;
+  metersBusy = true;
+  try { takeLevels(await invoke('meters')); } catch (_) { /* no levels this time */ } finally { metersBusy = false; }
+}
+/** Stopped: the meters fall to nothing. */
+function settleMeters() {
+  cancelAnimationFrame(MX.raf);
+  const step = () => {
+    if (S.playing) return;
+    takeLevels([]);
+    if ([...MX.level.values()].some(v => Math.max(v.left, v.right) > METER_LO)) MX.raf = requestAnimationFrame(step);
+    else { MX.level.clear(); drawMeters(); }
+  };
+  MX.raf = requestAnimationFrame(step);
 }
 
 /* ---------- keyframes: an animated clip's properties as they are at the playhead ---------- */
@@ -1700,6 +1855,67 @@ async function flushProps() {
   }
 }
 
+/* ---------- precise trimming: edges to the playhead, slips, nudges, moving a cut ---------- */
+const hasMedia = c => c && c.kind !== 'text' && c.kind !== 'image' && !isCap(c);
+/** Clip `c`'s start or end to the playhead. */
+function trimToPlayhead(c, edgeIn) {
+  return edit('trim_to', () => ({ clip: c.id, edgeIn, seconds: S.t }));
+}
+/** The selected clip shows media `n` frames later (earlier when negative), in the same place. */
+async function slipSel(n) {
+  const c = selectedClips().length === 1 ? selectedClips()[0] : null;
+  if (!hasMedia(c)) { toast('Select one video or sound clip to slip it.'); return; }
+  await edit('slip', { clip: c.id, frames: n });
+}
+/** The selected lane clips `n` frames later (earlier when negative). */
+async function nudgeSel(n) {
+  const sel = selectedClips().filter(c => !isCap(c));
+  if (!sel.length) { toast('Select a clip to move it a frame at a time.'); return; }
+  await edit('nudge', { clips: sel.map(c => c.id), frames: n });
+}
+/** The cut after main-track clip `from`, `n` frames later (earlier when negative). */
+async function rollCut(from, n) {
+  await edit('roll', { from, frames: n });
+}
+const NUDGE = '(, and . ; with Shift, 10 frames)';
+function trimControls(s, c) {
+  s.appendChild(buttons([
+    ['Start to playhead', 'Trim the start of the clip to the playhead', () => trimToPlayhead(c, true)],
+    ['End to playhead', 'Trim the end of the clip to the playhead', () => trimToPlayhead(c, false)],
+  ]));
+  if (hasMedia(c)) {
+    const row = document.createElement('div');
+    row.className = 'prop wide';
+    row.innerHTML = '<span title="Other frames of the media, in the same place and length">Slip</span>';
+    row.appendChild(buttons([
+      ['◀ 1 frame', 'Show the media a frame earlier (Alt+,)', () => slipSel(-1)],
+      ['1 frame ▶', 'Show the media a frame later (Alt+.)', () => slipSel(1)],
+    ]));
+    s.appendChild(row);
+  }
+  if (!isMain(c)) {
+    const row = document.createElement('div');
+    row.className = 'prop wide';
+    row.innerHTML = '<span>Move</span>';
+    row.appendChild(buttons([
+      ['◀ 1 frame', `Move the clip a frame earlier ${NUDGE}`, () => nudgeSel(-1)],
+      ['1 frame ▶', `Move the clip a frame later ${NUDGE}`, () => nudgeSel(1)],
+    ]));
+    s.appendChild(row);
+  }
+}
+/** Moving the selected cut: one clip grows as the other shrinks. */
+function rollControls(box, from) {
+  const row = document.createElement('div');
+  row.className = 'prop wide';
+  row.innerHTML = '<span title="One clip grows as the other shrinks, so the video keeps its length">Move cut</span>';
+  row.appendChild(buttons([
+    ['◀ 1 frame', `Move the cut a frame earlier ${NUDGE}`, () => rollCut(from, -1)],
+    ['1 frame ▶', `Move the cut a frame later ${NUDGE}`, () => rollCut(from, 1)],
+  ]));
+  box.appendChild(row);
+}
+
 let propsSig = '';
 const controls = [];   // {el, read: clip → value, write?(el, v)}
 function renderProps() {
@@ -1712,6 +1928,7 @@ function renderProps() {
     box.innerHTML = '';
     controls.length = 0;
     transitionControls(box, t);
+    rollControls(box, S.cut);
     syncTransition();
     return;
   }
@@ -1761,6 +1978,7 @@ function renderProps() {
     }
   }
   if (visual(one) || hasSound(one)) keyframeControls(section('Keyframes'), one);
+  trimControls(section('Trim'), one);
   if (pictureClip(one)) adjustControls(box, ids);
   if (one.kind !== 'text' && one.kind !== 'image') {
     const s = section('Speed');
@@ -2419,11 +2637,13 @@ async function play() {
     const st = await invoke('playback');
     if (!S.playing) return;
     S.t = st.seconds;
-    $('#sound-note').textContent = st.sound ? '' : 'No audio device: playing without sound';
+    $('#sound-note').textContent = st.sound ? '' : 'No sound device';
+    $('#sound-note').title = st.sound ? '' : 'There is no sound device to play on, so the video plays without sound. Plug in headphones or speakers, then press Play again.';
     updateTime();
     followPlayhead();
     showFrame(S.t);
-    if (!st.playing) { S.playing = false; setPlayIcon(); drawOverlay(); return; }
+    pollMeters();
+    if (!st.playing) { S.playing = false; setPlayIcon(); drawOverlay(); settleMeters(); return; }
     raf = requestAnimationFrame(loop);
   };
   raf = requestAnimationFrame(loop);
@@ -2432,6 +2652,7 @@ async function pause() {
   stopLoop();
   S.playing = false;
   setPlayIcon();
+  settleMeters();
   try {
     const st = await invoke('pause');
     S.t = clampT(st.seconds);
@@ -2530,6 +2751,7 @@ click('#tab-captions', () => showTab('captions'));
 click('#tab-transitions', () => showTab('transitions'));
 click('#tab-graphics', () => openGraphics());
 click('#tab-filters', () => showTab('filters'));
+click('#tab-mixer', () => showTab('mixer'));
 click('#scopes-btn', () => setScopes(!SC.on));
 click('#scopes-close', () => setScopes(false));
 $('#scope-kind').addEventListener('change', () => { setScopes(true); $('#scope-kind').blur(); });
@@ -2617,6 +2839,13 @@ document.addEventListener('keydown', e => {
       || key(k === '0', () => fitZoom());
     return;
   }
+  // , and . : a frame at a time (Shift: 10) — the selected cut moves, Alt slips the clip, else lane clips move
+  if ((e.code === 'Comma' || e.code === 'Period') && has()) {
+    e.preventDefault();
+    const n = (e.code === 'Comma' ? -1 : 1) * (e.shiftKey ? 10 : 1);
+    if (e.altKey) slipSel(n); else if (S.cut != null) rollCut(S.cut, n); else nudgeSel(n);
+    return;
+  }
   if (e.altKey) return;
   // editing keys act once per press, not again while held
   const once = !e.repeat;
@@ -2661,4 +2890,4 @@ invoke('restore').then(r => {
 });
 
 // For tests and debugging in the web inspector
-window.__clipcut = { S, apply, openGraphics, closeGraphics, selectCut, pickTransition, mainCuts, transitionEverywhere, seek, play, pause, split, splitKeep, deleteSelection, undo, redo, select, setPx, fitZoom, saveNow, addPaths, mainClips, addToLane, addText, queueProps, showTab };
+window.__clipcut = { S, apply, openGraphics, closeGraphics, selectCut, pickTransition, mainCuts, transitionEverywhere, seek, play, pause, split, splitKeep, deleteSelection, undo, redo, select, setPx, fitZoom, saveNow, addPaths, mainClips, addToLane, addText, queueProps, showTab, queueMixer, takeLevels, slipSel, nudgeSel, rollCut };

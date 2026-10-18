@@ -37,6 +37,10 @@ remote `upstream`). Read `README.md` for what it is and the roadmap.
 - The timeline UI redraws from the `TimelineView` every edit returns; edits run one at a time
   (`serial` in `app.js`). Each `Studio` edit is one undo step (`group` in `clipcut-core`'s
   `timeline.rs`): keep it that way for new edits.
+- Edits stop playback (the player plays a snapshot of the sequence), except mixer changes:
+  `set_mixer` hands the playing `Player` a new feed (`Player::update`) so faders are heard as they
+  move. Meters come from the engine's `LiveMix` in each feed (`AudioFeed::meters`); without a sound
+  device the player still mixes along the wall clock so they move.
 - Captions (`clipcut-core/src/captions.rs`) follow the main track's speech: every caption's cue id
   holds its media anchor (`cc:<item>:<from>:<to>`), and main-track edits go through `group_follow`,
   which re-places them afterwards (and puts the main track's transitions back on their cuts,
