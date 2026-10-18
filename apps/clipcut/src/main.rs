@@ -370,6 +370,7 @@ fn main() {
             editing::pick_clips,
             editing::add_clips,
             editing::append_media,
+            editing::start_with_sound,
             editing::insert_media,
             editing::split,
             editing::split_keep,

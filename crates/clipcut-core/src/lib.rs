@@ -19,6 +19,7 @@ mod exporting;
 mod graphics;
 mod keyframes;
 mod lanes;
+mod media_check;
 mod mixer;
 mod preview;
 mod props;

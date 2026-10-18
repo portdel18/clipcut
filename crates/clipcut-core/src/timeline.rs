@@ -79,6 +79,9 @@ pub struct MediaView {
     pub height: u32,
     /// A proxy (a small copy for smooth playback) is attached.
     pub proxy: bool,
+    /// Why the engine can't show its picture, in the user's words (it shows the "unreadable"
+    /// slate instead; the sound still plays). See [`Studio::check_picture`].
+    pub unreadable: Option<String>,
 }
 
 /// Everything the timeline and Media panel draw, after any change.
@@ -219,6 +222,12 @@ impl Studio {
                         width: w,
                         height: h,
                         proxy: m.proxy.is_some(),
+                        unreadable: self
+                            .session
+                            .media
+                            .offline_status(it.id)
+                            .filter(|st| st.reason == filmcraft_render::offline::OfflineReason::Unreadable)
+                            .map(|st| crate::media_check::plain_reason(&st.error)),
                     },
                 ))
             })
@@ -270,7 +279,7 @@ impl Studio {
     pub fn append_item(&mut self, item: u64) -> Result<()> {
         let it = self.session.project.item(ItemId(item)).ok_or_else(|| Error::Invalid("that media is no longer in the project".into()))?;
         if !it.has_video() {
-            return Err(Error::Invalid(format!("{} has no picture. Sound and music tracks arrive in the next update.", it.name)));
+            return Err(Error::Invalid(format!("{} has no picture, so it can't go on the main track: sound goes on a lane below it", it.name)));
         }
         if self.session.active_sequence().is_none() {
             let name = self.session.project.item(ItemId(item)).map(|i| i.name.clone()).unwrap_or_else(|| "Sequence".into());

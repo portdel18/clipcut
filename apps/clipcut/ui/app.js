@@ -455,7 +455,8 @@ async function importSound() {
   let paths;
   try { paths = await invoke('pick_clips'); } catch (e) { toast(e, true); return; }
   if (!paths || !paths.length) return;
-  if (!has()) { toast('Add a video first: music and voiceovers go under it.'); return; }
+  // an empty project starts with the sound (pictures and titles go over it)
+  if (!has()) { await addPaths(paths); return; }
   const r = await run('import_media', { paths });
   if (!r) return;
   apply(r.timeline);
@@ -469,7 +470,7 @@ const mediaThumbs = new Map();   // item → canvas
 function renderMedia() {
   const media = S.tl.media;
   renderProxies();
-  const sig = JSON.stringify(media.map(m => [m.item, m.name, m.duration, m.proxy]));
+  const sig = JSON.stringify(media.map(m => [m.item, m.name, m.duration, m.proxy, m.unreadable]));
   if (sig === mediaSig) return;
   mediaSig = sig;
   const list = $('#media-list'), sounds = $('#audio-list');
@@ -486,6 +487,7 @@ function renderMedia() {
       + '<div class="meta"><span></span><span class="dur"></span></div>';
     card.querySelector('.meta span').textContent = m.name;
     if (m.proxy) { const b = document.createElement('span'); b.className = 'proxy-tag'; b.textContent = 'Proxy'; b.title = 'Has a small copy for smooth playback'; card.appendChild(b); }
+    if (m.unreadable) { const b = document.createElement('span'); b.className = 'proxy-tag bad'; b.textContent = 'No picture'; b.title = m.unreadable; card.title = `${m.path}\n${m.unreadable}`; card.appendChild(b); }
     card.querySelector('.dur').textContent = fmtLen(m.duration);
     const add = card.querySelector('.add');
     add.title = video ? 'Add to the end of the main track' : 'Add below the main track, at the playhead';
@@ -544,7 +546,7 @@ async function makeProxies() {
 }
 
 function addSoundAtPlayhead(item) {
-  if (!has()) { toast('Add a video first: music and voiceovers go under it.'); return; }
+  if (!has()) { edit('start_with_sound', { item }); return; }
   addToLane(item, S.t);
 }
 async function paintMediaThumb(m, c) {
@@ -3013,7 +3015,7 @@ function startMediaDrag(m, e) {
     else if (drop.kind === 'lane') addToLane(m.item, drop.t);
     // nothing on the timeline yet: a video dropped anywhere on it starts the sequence
     else if (!sound) appendMedia(m.item);
-    else toast('Add a video first: music and voiceovers go under it.');
+    else edit('start_with_sound', { item: m.item });
   });
 }
 

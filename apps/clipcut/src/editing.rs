@@ -103,9 +103,11 @@ pub async fn add_clips(paths: Vec<String>, seconds: Option<f64>, app: tauri::Sta
         {
             let mut s = lock(&studio);
             for p in &paths {
-                if let Err(e) = s.add_file(p, seconds.unwrap_or(0.0)) {
-                    let name = Path::new(p).file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_else(|| p.clone());
-                    errors.push(format!("{name}: {e}"));
+                let name = Path::new(p).file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_else(|| p.clone());
+                match s.add_file(p, seconds.unwrap_or(0.0)) {
+                    // added, but its picture shows the unreadable slate: say why now
+                    Ok(item) => errors.extend(s.check_picture(item).map(|why| format!("{name}: {why}"))),
+                    Err(e) => errors.push(format!("{name}: {e}")),
                 }
             }
         }
@@ -118,6 +120,12 @@ pub async fn add_clips(paths: Vec<String>, seconds: Option<f64>, app: tauri::Sta
 pub struct AddResult {
     timeline: TimelineView,
     errors: Vec<String>,
+}
+
+/// A sound-only file into an empty project: the project starts with it on a sound lane.
+#[tauri::command]
+pub async fn start_with_sound(item: u64, app: tauri::State<'_, App>) -> Result<TimelineView, String> {
+    edit(&app, move |s| s.start_with_sound(item).map(|_| ())).await
 }
 
 #[tauri::command]
