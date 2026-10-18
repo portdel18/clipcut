@@ -631,3 +631,33 @@ pub async fn set_ducking(clips: Vec<u64>, on: bool, reduce_db: f64, app: tauri::
     })
     .await
 }
+
+/// Beats found in a sound clip: the timeline, how many and the tempo.
+#[derive(serde::Serialize)]
+pub struct Beats {
+    timeline: TimelineView,
+    count: usize,
+    bpm: f64,
+}
+
+#[tauri::command]
+pub async fn mark_beats(clip: u64, app: tauri::State<'_, App>) -> Result<Beats, String> {
+    let (studio, player) = (app.studio.clone(), app.player.clone());
+    blocking(move || {
+        lock(&player).stop();
+        let mut s = lock(&studio);
+        let (count, bpm) = s.mark_beats(clip).map_err(|e| e.to_string())?;
+        Ok(Beats { timeline: s.timeline(), count, bpm })
+    })
+    .await
+}
+
+#[tauri::command]
+pub async fn clear_beats(clip: u64, app: tauri::State<'_, App>) -> Result<TimelineView, String> {
+    edit(&app, move |s| s.clear_beats(clip)).await
+}
+
+#[tauri::command]
+pub async fn toggle_beat(clip: u64, seconds: f64, app: tauri::State<'_, App>) -> Result<TimelineView, String> {
+    edit(&app, move |s| s.toggle_beat(clip, seconds).map(|_| ())).await
+}

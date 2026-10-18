@@ -43,6 +43,8 @@ pub struct ClipView {
     pub graphic: Option<String>,
     /// Its keyframed properties.
     pub keys: Vec<crate::keyframes::KeyTrack>,
+    /// Sound clips: their beat markers, timeline seconds.
+    pub beats: Vec<f64>,
 }
 
 /// A track as a lane of the timeline: `V1` and `A1` are the main track's picture and sound.
@@ -180,6 +182,7 @@ impl Studio {
                             props,
                             graphic: if prefix == "V" { self.graphic_tool(i.item) } else { None },
                             keys: crate::keyframes::keys_of(q, t, i),
+                            beats: crate::beats::beats_of(i),
                         });
                     }
                 }
