@@ -33,7 +33,8 @@ remote `upstream`). Read `README.md` for what it is and the roadmap.
   `timeline.rs`): keep it that way for new edits.
 - Captions (`clipcut-core/src/captions.rs`) follow the main track's speech: every caption's cue id
   holds its media anchor (`cc:<item>:<from>:<to>`), and main-track edits go through `group_follow`,
-  which re-places them afterwards. A new edit that moves main-track clips must use `group_follow`.
+  which re-places them afterwards (and puts the main track's transitions back on their cuts,
+  `transitions.rs`). A new edit that moves main-track clips must use `group_follow`.
   Whisper models can't be downloaded from this sandbox (Hugging Face is blocked): test with
   `Studio::hear` / `CLIPCUT_TEST_TRANSCRIPT`; the Windows CI step runs the real model on real speech.
 - Disk is tight here: `rm -rf target/debug/incremental` when a build fails with "no space left".

@@ -81,6 +81,8 @@ pub struct TimelineView {
     pub lanes: Vec<LaneView>,
     /// The caption track (`C1`) and how much of the main track's speech has a transcript.
     pub captions: crate::captions::CaptionsView,
+    /// The transitions on the main track's cuts.
+    pub transitions: Vec<crate::transitions::TransitionView>,
     pub media: Vec<MediaView>,
     pub can_undo: bool,
     pub can_redo: bool,
@@ -192,6 +194,7 @@ impl Studio {
             clips,
             lanes,
             captions: self.captions_view(),
+            transitions: self.transitions_view(),
             media: media.into_iter().map(|(_, m)| m).collect(),
             can_undo: s.history.can_undo(),
             can_redo: s.history.can_redo(),
@@ -333,7 +336,8 @@ impl Studio {
         if targets.is_empty() {
             return Err(Error::Invalid("move the playhead inside a clip to split it".into()));
         }
-        self.group("Split", |st| {
+        // a cut inside a transition's clip moves it to the piece at the cut
+        self.group_follow("Split", None, |st| {
             st.session
                 .edit_group("Split", |s| {
                     for c in &targets {

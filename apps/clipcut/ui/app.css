@@ -113,6 +113,22 @@ select:disabled { opacity: .5; }
 .text-style:hover { border-color: var(--accent); }
 .text-style span { padding: 0 6px; border-radius: 3px; }
 
+/* Transitions tab, and transitions on the main track */
+#tr-target { margin: 0 0 12px; }
+.tr-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; margin-bottom: 12px; }
+.tr-tile { display: grid; gap: 4px; padding: 0 0 6px; border-radius: 8px; border: 1px solid var(--line); background: var(--panel-2); cursor: pointer; overflow: hidden; color: var(--muted); font-size: 12px; font-weight: 600; }
+.tr-tile canvas { width: 100%; aspect-ratio: 16 / 9; display: block; background: var(--well); }
+.tr-tile:hover { border-color: var(--faint); color: var(--text); }
+.tr-tile[aria-pressed="true"] { border-color: var(--accent); color: var(--accent); }
+.cut { position: absolute; top: 50%; z-index: 4; width: 18px; height: 18px; margin: -9px 0 0 -9px; padding: 0; display: grid; place-items: center; border: 0; border-radius: 4px; background: rgba(255, 255, 255, .88); color: #17161a; cursor: pointer; opacity: 0; transition: opacity .1s; }
+.cut svg { width: 12px; height: 12px; }
+.track:hover .cut, .cut.has, .cut.sel { opacity: 1; }
+.cut.has { background: #fff; }
+.cut.sel { background: var(--accent); color: var(--accent-ink); }
+.track.dragging-now .cut, .track.dragging-now .tr-span { display: none; }
+.tr-span { position: absolute; top: 0; bottom: 14px; z-index: 3; pointer-events: none; border-radius: 4px; background: repeating-linear-gradient(135deg, rgba(255, 255, 255, .22) 0 4px, rgba(255, 255, 255, .06) 4px 8px); border: 1px solid rgba(255, 255, 255, .5); }
+.tr-span.sel { border-color: var(--accent); background: repeating-linear-gradient(135deg, rgba(244, 196, 67, .35) 0 4px, rgba(244, 196, 67, .1) 4px 8px); }
+
 /* Captions tab */
 .cap-make, .cap-tools { display: grid; gap: 10px; }
 .cap-tools { margin-top: 18px; }
