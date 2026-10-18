@@ -1537,6 +1537,16 @@ function makeClipEl(c) {
     }
     el.appendChild(kfs);
   }
+  if (c.beats && c.beats.length && c.end > c.start) {
+    const row = document.createElement('div');
+    row.className = 'beats';
+    for (const t of c.beats) {
+      const d = document.createElement('i');
+      d.style.left = ((t - c.start) / (c.end - c.start) * 100) + '%';
+      row.appendChild(d);
+    }
+    el.appendChild(row);
+  }
   el.addEventListener('pointerdown', e => clipPointerDown(c, el, e));
   return el;
 }
@@ -1941,6 +1951,24 @@ function duckingControls(s, ids) {
   s.appendChild(again);
 }
 
+/** Beats: marked on music, shown on the clip, snapped to. */
+function beatControls(s, ids) {
+  const row = document.createElement('div');
+  row.className = 'prop wide lead';
+  row.innerHTML = '<span>Beats</span>';
+  const snd = () => { const c = clipById(ids[0]); return c && (soundOf(c) || c); };
+  row.appendChild(buttons([
+    ['Mark beats', 'Find the beats of this music and mark them on the clip (things then snap to them)', async () => {
+      const r = await run('mark_beats', { clip: ids[0] });
+      if (!r) return;
+      apply(r.timeline);
+      toast(`${r.count} beats marked, ${Math.round(r.bpm)} a minute`);
+    }],
+    ['Beat at playhead', 'Add a beat at the playhead, or take away the one there', () => edit('toggle_beat', () => ({ clip: ids[0], seconds: S.t }))],
+    ['Clear', 'Take every beat off this clip', () => { const c = snd(); if (c && c.beats.length) edit('clear_beats', { clip: ids[0] }); }],
+  ]));
+  s.appendChild(row);
+}
 /* ---------- precise trimming: edges to the playhead, slips, nudges, moving a cut ---------- */
 const hasMedia = c => c && c.kind !== 'text' && c.kind !== 'image' && !isCap(c);
 /** Clip `c`'s start or end to the playhead. */
@@ -2063,6 +2091,7 @@ function renderProps() {
       s.appendChild(slider('Fade in', ids, 'fadeIn', { min: 0, max: 10, step: 0.1, unit: 's', read: c => (soundOf(c) || c).props.fadeIn }));
       s.appendChild(slider('Fade out', ids, 'fadeOut', { min: 0, max: 10, step: 0.1, unit: 's', read: c => (soundOf(c) || c).props.fadeOut }));
       duckingControls(s, ids);
+      beatControls(s, ids);
     }
   }
   if (visual(one) || hasSound(one)) keyframeControls(section('Keyframes'), one);
@@ -2403,10 +2432,12 @@ function cuts() {
   for (const c of mainClips()) { set.add(+c.start.toFixed(6)); set.add(+c.end.toFixed(6)); }
   return [...set].sort((a, b) => a - b);
 }
-/** Where things can snap to: the playhead, the main track's cuts, every other clip's edges. */
+/** Where things can snap to: the playhead, the main track's cuts, every other clip's edges, beats. */
 function snapTargets(except) {
   const out = [S.t, ...cuts()];
   for (const c of visibleClips()) if (!except.has(c.id)) out.push(c.start, c.end);
+  // and the beats of music (of a picture clip's own sound too)
+  for (const c of S.tl.clips) if (c.beats && !except.has(c.id) && !except.has((visibleClips().find(v => v.link && v.link === c.link) || {}).id)) out.push(...c.beats);
   return out;
 }
 
@@ -2772,21 +2803,55 @@ function followPlayhead() {
 }
 
 /* ---------- export ---------- */
+/** Where the video goes: TikTok, YouTube… Resolves to the choice, or null when cancelled. */
+function pickExport(choices) {
+  const dlg = $('#export-pick'), box = $('#export-choices');
+  let want = 'project';
+  try { want = localStorage.getItem('clipcut.export') || want; } catch (_) {}
+  if (!choices.some(c => c.id === want)) want = choices[0].id;
+  box.innerHTML = '';
+  const note = () => { const c = choices.find(x => x.id === want); $('#export-note').textContent = (c && c.note) || ''; };
+  for (const c of choices) {
+    const b = document.createElement('button');
+    b.className = 'choice';
+    b.id = `export-${c.id}`;
+    b.setAttribute('role', 'radio');
+    b.innerHTML = '<b></b><span></span>';
+    b.firstChild.textContent = c.name;
+    b.lastChild.textContent = c.detail;
+    b.addEventListener('click', () => { want = c.id; b.focus(); for (const x of box.children) x.setAttribute('aria-checked', String(x === b)); note(); });
+    b.addEventListener('dblclick', () => $('#export-go').click());
+    b.setAttribute('aria-checked', String(c.id === want));
+    box.appendChild(b);
+  }
+  note();
+  return new Promise(done => {
+    $('#export-go').onclick = () => { try { localStorage.setItem('clipcut.export', want); } catch (_) {} dlg.close(); done(choices.find(c => c.id === want)); };
+    $('#export-pick-cancel').onclick = () => { dlg.close(); done(null); };
+    dlg.oncancel = () => done(null);
+    dlg.showModal();
+    box.querySelector('[aria-checked="true"]').focus();
+  });
+}
 async function exportClip() {
   if (!has()) return;
   if (S.playing) await pause();
   await flushSave();
+  let choices;
+  try { choices = await invoke('export_choices'); } catch (e) { toast(e, true); return; }
+  const choice = await pickExport(choices);
+  if (!choice) return;
   let path;
   try {
-    path = await invoke('pick_export_path', { name: projectName() });
+    path = await invoke('pick_export_path', { name: projectName(), ext: choice.ext });
   } catch (e) { toast(e, true); return; }
   if (!path) return;
   let job;
   try {
-    job = await invoke('export', { path });
+    job = await invoke('export_as', { path, choice: choice.id });
   } catch (e) { toast(e, true); return; }
   const dlg = $('#export-dlg');
-  $('#export-title').textContent = 'Exporting';
+  $('#export-title').textContent = `Exporting: ${choice.name}`;
   $('#export-path').textContent = path;
   $('#export-bar').style.width = '0';
   $('#export-meta').textContent = 'Starting…';
@@ -2978,4 +3043,4 @@ invoke('restore').then(r => {
 });
 
 // For tests and debugging in the web inspector
-window.__clipcut = { S, apply, openGraphics, closeGraphics, selectCut, pickTransition, mainCuts, transitionEverywhere, seek, play, pause, split, splitKeep, deleteSelection, undo, redo, select, setPx, fitZoom, saveNow, addPaths, mainClips, addToLane, addText, queueProps, showTab, queueMixer, takeLevels, slipSel, nudgeSel, rollCut, setDucking, previewAnimation };
+window.__clipcut = { S, apply, openGraphics, closeGraphics, selectCut, pickTransition, mainCuts, transitionEverywhere, seek, play, pause, split, splitKeep, deleteSelection, undo, redo, select, setPx, fitZoom, saveNow, addPaths, mainClips, addToLane, addText, queueProps, showTab, queueMixer, takeLevels, slipSel, nudgeSel, rollCut, setDucking, previewAnimation, pickExport };

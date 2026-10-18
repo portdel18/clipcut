@@ -108,17 +108,21 @@ fn seek(seconds: f64, app: tauri::State<'_, App>) {
 }
 
 #[tauri::command]
-async fn pick_export_path(name: String, handle: tauri::AppHandle) -> Result<Option<String>, String> {
+async fn pick_export_path(name: String, ext: Option<String>, handle: tauri::AppHandle) -> Result<Option<String>, String> {
     blocking(move || {
         let stem: String = name.chars().filter(|c| !"\\/:*?\"<>|".contains(*c)).collect();
+        let ext = ext.as_deref().filter(|e| matches!(*e, "mov" | "wav")).unwrap_or("mp4");
+        let (kind, title) = match ext {
+            "mov" => ("QuickTime (ProRes)", "Export the master"),
+            "wav" => ("Sound only (WAV)", "Export the sound"),
+            _ => ("MP4 video (H.264)", "Export video"),
+        };
         let f = handle
             .dialog()
             .file()
-            .set_title("Export video")
-            .set_file_name(format!("{}.mp4", if stem.trim().is_empty() { "ClipCut export" } else { stem.trim() }))
-            .add_filter("MP4 video (H.264)", &["mp4"])
-            .add_filter("QuickTime (ProRes)", &["mov"])
-            .add_filter("Sound only (WAV)", &["wav"])
+            .set_title(title)
+            .set_file_name(format!("{}.{ext}", if stem.trim().is_empty() { "ClipCut export" } else { stem.trim() }))
+            .add_filter(kind, &[ext])
             .blocking_save_file();
         Ok(f.and_then(|p| p.into_path().ok()).map(|p| p.to_string_lossy().into_owned()))
     })
@@ -128,6 +132,17 @@ async fn pick_export_path(name: String, handle: tauri::AppHandle) -> Result<Opti
 #[tauri::command]
 fn export(path: String, app: tauri::State<'_, App>) -> Result<u64, String> {
     lock(&app.studio).export(&path).map_err(|e| e.to_string())
+}
+
+/// The ways to export the video as it is now (TikTok, YouTube…).
+#[tauri::command]
+fn export_choices(app: tauri::State<'_, App>) -> Result<Vec<clipcut_core::ExportChoice>, String> {
+    lock(&app.studio).export_choices().map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn export_as(path: String, choice: String, app: tauri::State<'_, App>) -> Result<u64, String> {
+    lock(&app.studio).export_as(&path, &choice).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -270,6 +285,8 @@ fn main() {
             pick_export_path,
             export,
             export_status,
+            export_choices,
+            export_as,
             cancel_export,
             reveal,
             editing::timeline,
@@ -289,6 +306,9 @@ fn main() {
             editing::text_animations,
             editing::set_text_animation,
             editing::set_ducking,
+            editing::mark_beats,
+            editing::clear_beats,
+            editing::toggle_beat,
             editing::props_at,
             editing::toggle_keyframe,
             editing::set_easing,

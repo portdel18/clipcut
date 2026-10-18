@@ -11,9 +11,11 @@
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
 
 mod animations;
+mod beats;
 mod captions;
 mod colour;
 mod ducking;
+mod exporting;
 mod graphics;
 mod keyframes;
 mod lanes;
@@ -37,6 +39,7 @@ pub use animations::{ANIMATIONS_IN, ANIMATIONS_OUT, AnimView, TextAnimations, te
 pub use captions::{CaptionStyleView, CaptionView, CaptionsView, ModelView, TranscribeJob, WordView, caption_presets, download_model, speech_models};
 pub use colour::{ADJUST, ColourView, looks};
 pub use ducking::DUCK_DB;
+pub use exporting::ExportChoice;
 pub use graphics::{GRAPHIC_FILE, GRAPHIC_SOUND, read_graphic};
 pub use keyframes::{ANIMATABLE, KeyTrack};
 pub use mixer::{Level, Meters, MixView};

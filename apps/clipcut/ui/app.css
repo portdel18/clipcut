@@ -319,3 +319,16 @@ select:disabled { opacity: .5; }
 /* a row whose label sits by the first line of what follows it (the top bar has `.top`) */
 .prop.lead { align-items: start; }
 .prop.lead > span:first-child { padding-top: 4px; }
+
+/* beats on a sound clip */
+.clip .beats { position: absolute; left: 0; right: 0; bottom: 3px; height: 6px; pointer-events: none; }
+.clip .beats i { position: absolute; top: 0; width: 5px; height: 5px; margin-left: -2.5px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 0 1px rgba(0, 0, 0, .5); }
+
+/* the Export dialog's choices */
+.dlg.wide { width: min(560px, calc(100vw - 32px)); }
+.choices { display: grid; gap: 6px; }
+.choice { display: grid; gap: 2px; text-align: left; padding: 9px 12px; border-radius: 8px; border: 1px solid var(--line); background: var(--panel-2); color: var(--text); cursor: pointer; }
+.choice span { color: var(--muted); font-family: var(--mono); font-size: 12px; }
+.choice[aria-checked="true"] { border-color: var(--accent); }
+.choice[aria-checked="true"] b { color: var(--accent); }
+#export-note { min-height: 1.4em; font-family: var(--ui); }

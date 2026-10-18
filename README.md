@@ -104,6 +104,16 @@ They stay on the clip's ends when it is trimmed, and follow new words when the t
 set) wherever the main track or another lane has sound under it, with short fades. The dips are
 volume keyframes on the music; **Update** finds the speech again after you move or trim clips.
 
+**Beats.** A music clip's Properties can **Mark beats**: the engine's beat tracker finds them
+and they show as dots along the clip, and clip edges and the playhead snap to them. **Beat at
+playhead** adds one by hand (or takes away the one there); **Clear** removes them. They move with
+the clip.
+
+**Export choices.** **Export** asks where the video goes: as the project is, TikTok / Reels / Shorts
+(1080 × 1920), YouTube (1080p or 4K, in the video's shape), a small file to send, a ProRes master,
+or the sound alone, each with its size and roughly how big the file will be. A 16:9 video for
+TikTok gets a note to change Ratio to 9:16 first.
+
 **Mixer.** The **Mixer** tab has a strip for the main track's sound, one for each sound lane and
 one for the Mix (everything, as exported): volume and pan, Mute and Solo, and a level meter that
 moves while the video plays (red past 0 dB, where the sound distorts). Faders change the sound as
@@ -145,8 +155,8 @@ second. The main track closes up each time, and the captions follow.
 clip's name>`, and every change after that is saved a moment later. ClipCut reopens the last project
 when it starts. **New** (`Ctrl+N`) starts another, **Open** (`Ctrl+O`) picks a saved one.
 
-**Export** (`Ctrl+E`) saves an H.264 MP4 (or ProRes `.mov`, or a `.wav` of the sound) with progress and
-Cancel.
+**Export** (`Ctrl+E`) asks where the video goes (see Export above), then saves an H.264 MP4 (a
+ProRes `.mov` for the master, a `.wav` for the sound) with progress and Cancel.
 
 ## Roadmap
 
@@ -156,7 +166,7 @@ Cancel.
 | **1. Editor v1** (done: 1a cutting, 1b lanes and properties, 1c captions, 1d transitions) | Split, trim, ripple delete, a magnetic main track plus overlay, text and audio lanes, speed, transitions, vertical and horizontal canvases, undo, autosave. First workflows: cutting down interviews and captioned explainers (auto-captions with styles, transcript cutting) |
 | **2. Clip Studio inside** (this) | A Graphics tab with Clip Studio's tools (lower thirds, map zoom, numbers, timelines, underline); graphics become clips you can reopen and edit; TikTok, Reels and Shorts overlays in the preview |
 | **3. Pro panels** (done: 3a keyframes, 3b colour and scopes, 3c the mixer and precise trimming) | Keyframes, colour, the audio mixer, scopes and precise trimming, from the engine |
-| **4. CapCut extras** (4a text animations and ducking: this; beat markers and quick social exports, then templates, next) | Caption styles, text animations, templates, beat markers, music ducking, quick social exports |
+| **4. CapCut extras** (4a text animations and ducking, 4b beats and quick exports: this; templates next) | Caption styles, text animations, templates, beat markers, music ducking, quick social exports |
 | **5. Polish** | Live graphics, proxies, speed work, signed installers and updates |
 
 ## How it is built
@@ -164,7 +174,7 @@ Cancel.
 | Layer | Where | What |
 |---|---|---|
 | Engine | `crates/*` (from FilmCraft) | Decoding, the timeline model, rendering, effects, audio mixing, export |
-| Façade | `crates/clipcut-core` | The engine operations the app calls: the magnetic main track and the lanes around it (`timeline.rs`, `lanes.rs`), clip properties, canvas and waveforms (`props.rs`), captions and transcript cutting (`captions.rs`), transitions (`transitions.rs`), graphics from the Graphics tab (`graphics.rs`), keyframes (`keyframes.rs`), colour and scopes (`colour.rs`, `scopes.rs`), the mixer and precise trimming (`mixer.rs`, `trimming.rs`), text animations (`animations.rs`) and ducking (`ducking.rs`), each edit one undo step; projects, preview frames and thumbnails, playback audio, export jobs |
+| Façade | `crates/clipcut-core` | The engine operations the app calls: the magnetic main track and the lanes around it (`timeline.rs`, `lanes.rs`), clip properties, canvas and waveforms (`props.rs`), captions and transcript cutting (`captions.rs`), transitions (`transitions.rs`), graphics from the Graphics tab (`graphics.rs`), keyframes (`keyframes.rs`), colour and scopes (`colour.rs`, `scopes.rs`), the mixer and precise trimming (`mixer.rs`, `trimming.rs`), text animations (`animations.rs`), ducking (`ducking.rs`), beats (`beats.rs`) and quick exports (`exporting.rs`), each edit one undo step; projects, preview frames and thumbnails, playback audio, export jobs |
 | App | `apps/clipcut` | A [Tauri](https://tauri.app) window: Rust commands in `src/`, the interface in `ui/` (HTML, CSS and JavaScript, no build step) |
 
 The sound card is the playback clock; the interface shows the frame the engine renders at that time.
