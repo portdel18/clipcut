@@ -186,6 +186,7 @@ function apply(tl, { fit = false } = {}) {
   if (tl.project.dirty && has()) saveSoon();
   renderCaptionsPanel();
   renderTransitionsPanel();
+  filtersSoon();
 }
 
 /* ---------- preview ---------- */
@@ -219,6 +220,7 @@ async function show(req) {
     const img = toImage(buf);
     if (c.width !== img.width || c.height !== img.height) { c.width = img.width; c.height = img.height; }
     c.getContext('2d').putImageData(img, 0, 0);
+    if (req.item == null) drawScope();
   } catch (e) {
     if (req.item == null) toast(e, true);
   } finally {
@@ -537,12 +539,13 @@ async function addText(s) {
   if (r) { const ta = $('#props textarea'); if (ta) { ta.focus(); ta.select(); } }
 }
 function showTab(id) {
-  for (const t of ['media', 'audio', 'text', 'transitions', 'captions']) {
+  for (const t of ['media', 'audio', 'text', 'transitions', 'filters', 'captions']) {
     $(`#tab-${t}`).setAttribute('aria-selected', String(t === id));
     $(`#panel-${t}`).hidden = t !== id;
   }
   if (id === 'captions') openCaptionsPanel();
   if (id === 'transitions') openTransitionsPanel();
+  if (id === 'filters') renderFiltersPanel();
 }
 
 /* ---------- captions: auto captions, their look, cleaning up the speech, the transcript ---------- */
@@ -969,6 +972,152 @@ function transitionControls(box, t) {
     ['Apply to every cut', `Put ${t.name} on every cut`, transitionEverywhere],
     ['Change', 'Pick another in the Transitions tab', () => showTab('transitions')],
   ]));
+}
+
+/* ---------- colour: Adjust in Properties, the Filters tab, the scopes ---------- */
+// name, label, range, step, neutral (clipcut-core's colour::ADJUST)
+const ADJ = [
+  ['exposure', 'Exposure', -5, 5, 0.05, 0], ['contrast', 'Contrast', -100, 100, 1, 0], ['highlights', 'Highlights', -100, 100, 1, 0],
+  ['shadows', 'Shadows', -100, 100, 1, 0], ['whites', 'Whites', -100, 100, 1, 0], ['blacks', 'Blacks', -100, 100, 1, 0],
+  ['temperature', 'Temperature', -100, 100, 1, 0], ['tint', 'Tint', -100, 100, 1, 0], ['saturation', 'Saturation', 0, 200, 1, 100],
+  ['vibrance', 'Vibrance', -100, 100, 1, 0], ['fade', 'Fade', 0, 100, 1, 0], ['sharpen', 'Sharpen', -100, 100, 1, 0], ['vignette', 'Vignette', -5, 5, 0.05, 0],
+];
+/* A dragged adjustment sends its latest value; each drag is one undo step */
+let colWant = null, colBusy = false;
+async function queueColour(ids, values, merge) {
+  if (colWant && colWant.merge === merge && String(colWant.clips) === String(ids)) Object.assign(colWant.values, values);
+  else colWant = { clips: ids, values: { ...values }, merge };
+  if (colBusy) return;
+  colBusy = true;
+  try {
+    while (colWant) {
+      const w = colWant;
+      colWant = null;
+      await edit('set_colour', w);
+    }
+  } finally {
+    colBusy = false;
+  }
+}
+/** The Adjust section: every adjustment, Reset and Apply to all clips. Folds away. */
+function adjustControls(box, ids) {
+  const d = document.createElement('details');
+  d.className = 'adjust';
+  let open = false;
+  try { open = localStorage.getItem('clipcut.adjust') === 'open'; } catch (_) {}
+  d.open = open;
+  d.innerHTML = '<summary>Adjust</summary>';
+  d.addEventListener('toggle', () => { try { localStorage.setItem('clipcut.adjust', d.open ? 'open' : ''); } catch (_) {} });
+  for (const [key, label, min, max, step, neutral] of ADJ) {
+    const row = document.createElement('label');
+    row.className = 'prop';
+    row.innerHTML = `<span title="Double-click to reset">${label}</span><input type="range" min="${min}" max="${max}" step="${step}"><input type="number" step="${step}">`;
+    const [range, num] = row.querySelectorAll('input');
+    range.id = `adj-${key}`;
+    num.dataset.dp = step < 1 ? '2' : '0';
+    let k = nextKey(key);
+    const read = c => (c.props.colour ? c.props.colour.values[key] : neutral);
+    const send = (v, merge) => { num.value = v; queueColour(ids, { [key]: +v }, merge); };
+    range.addEventListener('input', () => send(range.value, k));
+    range.addEventListener('change', () => { k = nextKey(key); range.blur(); });
+    num.addEventListener('change', () => { if (Number.isFinite(+num.value)) { range.value = num.value; send(+num.value, null); } });
+    row.firstChild.addEventListener('dblclick', e => { e.preventDefault(); range.value = neutral; send(neutral, null); });
+    controls.push({ el: range, read }, { el: num, read });
+    d.appendChild(row);
+  }
+  d.appendChild(buttons([
+    ['Reset', 'Take every adjustment and filter off this clip', () => edit('reset_colour', { clips: ids })],
+    ['Apply to all clips', "Give every clip on the main track this clip's colour", async () => {
+      const tl = await edit('colour_everywhere', { clip: ids[0] });
+      if (tl) toast("Every clip on the main track has this clip's colour");
+    }],
+  ]));
+  box.appendChild(d);
+}
+
+/* The Filters tab: the clip's picture under each of the engine's looks */
+const FL = { looks: null, sig: '', timer: 0 };
+const pictureClip = c => c && !isCap(c) && c.track[0] === 'V' && c.kind !== 'text';
+/** The clip a filter goes on: the selected picture clip, else the main-track clip under the playhead. */
+function filterTarget() {
+  const sel = selectedClips();
+  if (sel.length === 1) return pictureClip(sel[0]) ? sel[0] : null;
+  return mainClips().find(c => S.t >= c.start && S.t < c.end) || null;
+}
+function filtersSoon() { clearTimeout(FL.timer); FL.timer = setTimeout(renderFiltersPanel, 150); }
+async function renderFiltersPanel() {
+  if ($('#panel-filters').hidden || !S.tl) return;
+  if (!FL.looks) { try { FL.looks = await invoke('looks'); } catch (e) { toast(e, true); return; } }
+  const c = filterTarget(), grid = $('#fl-grid');
+  const col = c && c.props.colour;
+  $('#fl-target').textContent = !has() ? 'Add a video first.' : !c ? 'Select a picture clip to give it a filter.'
+    : col && col.look ? `${c.name} has ${col.look}. Pick another, or None to take it off.` : `Pick a filter for ${c.name}.`;
+  $('#fl-strength-row').hidden = !(col && col.look);
+  if (col) { $('#fl-strength').value = col.intensity; $('#fl-strength-n').value = Math.round(col.intensity); }
+  if (!c) { grid.innerHTML = ''; FL.sig = ''; return; }
+  const names = ['None', ...FL.looks];
+  const sig = `${c.id}:${Math.round(S.t * 10)}:${c.start}:${c.sourceIn}`;
+  if (sig !== FL.sig || grid.children.length !== names.length) {
+    FL.sig = sig;
+    let buf;
+    try { buf = await invoke('look_previews', { clip: c.id, seconds: S.t, width: 160 }); } catch (e) { return; }
+    const dv = new DataView(buf), n = dv.getUint32(0, true);
+    let at = 4;
+    grid.innerHTML = '';
+    for (let i = 0; i < n && i < names.length; i++) {
+      const w = dv.getUint32(at, true), h = dv.getUint32(at + 4, true);
+      const img = new ImageData(new Uint8ClampedArray(buf, at + 8, w * h * 4), w, h);
+      at += 8 + w * h * 4;
+      const b = document.createElement('button');
+      b.className = 'tr-tile';
+      b.dataset.look = i === 0 ? '' : names[i];
+      b.title = i === 0 ? 'No filter' : `Give the clip ${names[i]}`;
+      b.innerHTML = '<canvas></canvas><span></span>';
+      b.querySelector('span').textContent = names[i];
+      const cv = b.querySelector('canvas');
+      cv.width = w; cv.height = h;
+      cv.getContext('2d').putImageData(img, 0, 0);
+      b.addEventListener('click', () => {
+        const t = filterTarget();
+        if (!t) return;
+        edit('set_look', { clips: [t.id], look: b.dataset.look || null, intensity: +$('#fl-strength').value || 100 });
+      });
+      grid.appendChild(b);
+    }
+  }
+  for (const b of grid.children) b.setAttribute('aria-pressed', String((b.dataset.look || null) === ((col && col.look) || null)));
+}
+let flKey = 'strength:0';   // a new key each drag (nextKey is defined further down)
+function sendStrength(v, merge) {
+  const t = filterTarget();
+  const col = t && t.props.colour;
+  if (!col || !col.look) return;
+  $('#fl-strength-n').value = Math.round(v);
+  edit('set_look', { clips: [t.id], look: col.look, intensity: +v, merge });
+}
+
+/* Scopes of the frame in the player, above Properties */
+const SC = { on: false, busy: false, want: false };
+async function drawScope() {
+  if (!SC.on || !has()) return;
+  if (SC.busy) { SC.want = true; return; }
+  SC.busy = true;
+  try {
+    const img = toImage(await invoke('scope', { seconds: S.t, kind: $('#scope-kind').value }));
+    const c = $('#scope-canvas');
+    if (c.width !== img.width || c.height !== img.height) { c.width = img.width; c.height = img.height; }
+    c.getContext('2d').putImageData(img, 0, 0);
+  } catch (_) { /* nothing to measure */ } finally {
+    SC.busy = false;
+    if (SC.want) { SC.want = false; drawScope(); }
+  }
+}
+function setScopes(on) {
+  SC.on = on;
+  $('#scopes').hidden = !on;
+  $('#scopes-btn').setAttribute('aria-pressed', String(on));
+  try { localStorage.setItem('clipcut.scopes', on ? $('#scope-kind').value : ''); } catch (_) {}
+  if (on) drawScope();
 }
 
 /* ---------- keyframes: an animated clip's properties as they are at the playhead ---------- */
@@ -1469,6 +1618,7 @@ function updateTime() {
   renderTools();
   markWord();
   if (!S.playing && LIVE.t !== S.t) { refreshLive(); syncKfButtons(); }
+  if (!S.playing && !$('#panel-filters').hidden) filtersSoon();
 }
 /** The diamonds follow the playhead before props_at answers. */
 function syncKfButtons() {
@@ -1566,7 +1716,7 @@ function renderProps() {
     return;
   }
   const one = sel.length === 1 ? sel[0] : null;
-  const sig = one ? `${one.id}:${one.kind}:${isCap(one) || isMain(one)}:${!isCap(one) && hasSound(one)}:${keyTimes(one).length > 0}` : `n${sel.length}`;
+  const sig = one ? `${one.id}:${one.kind}:${isCap(one) || isMain(one)}:${!isCap(one) && hasSound(one)}:${keyTimes(one).length > 0}:${pictureClip(one)}` : `n${sel.length}`;
   $('#props-title').textContent = one ? (one.graphic ? 'Graphic' : { text: 'Text', audio: 'Sound', image: 'Picture', caption: 'Caption' }[one.kind] || (isMain(one) ? 'Clip' : 'Overlay')) : sel.length ? `${sel.length} clips` : 'Project';
   if (sig === propsSig) { syncProps(one); return; }
   propsSig = sig;
@@ -1611,6 +1761,7 @@ function renderProps() {
     }
   }
   if (visual(one) || hasSound(one)) keyframeControls(section('Keyframes'), one);
+  if (pictureClip(one)) adjustControls(box, ids);
   if (one.kind !== 'text' && one.kind !== 'image') {
     const s = section('Speed');
     const presets = [50, 100, 150, 200, 300];
@@ -2378,6 +2529,14 @@ click('#tab-text', () => showTab('text'));
 click('#tab-captions', () => showTab('captions'));
 click('#tab-transitions', () => showTab('transitions'));
 click('#tab-graphics', () => openGraphics());
+click('#tab-filters', () => showTab('filters'));
+click('#scopes-btn', () => setScopes(!SC.on));
+click('#scopes-close', () => setScopes(false));
+$('#scope-kind').addEventListener('change', () => { setScopes(true); $('#scope-kind').blur(); });
+try { const k = localStorage.getItem('clipcut.scopes'); if (k) { $('#scope-kind').value = k; setScopes(true); } } catch (_) {}
+$('#fl-strength').addEventListener('input', e => sendStrength(e.target.value, flKey));
+$('#fl-strength').addEventListener('change', e => { flKey = nextKey('strength'); e.target.blur(); });
+$('#fl-strength-n').addEventListener('change', e => { if (Number.isFinite(+e.target.value)) { $('#fl-strength').value = e.target.value; sendStrength(+e.target.value, null); } });
 click('#graphics-back', closeGraphics);
 $('#guide').value = guideKind;
 $('#guide').addEventListener('change', e => { guideKind = e.target.value; try { localStorage.setItem('clipcut.guide', guideKind); } catch (_) {} drawOverlay(); e.target.blur(); });

@@ -31,6 +31,8 @@
         <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 6h14M12 6v13M8 19h8"/></svg><span>Text</span></button>
       <button class="rail-tab" role="tab" id="tab-transitions" aria-selected="false">
         <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 6l9 6-9 6zM21 6l-9 6 9 6z"/></svg><span>Transitions</span></button>
+      <button class="rail-tab" role="tab" id="tab-filters" aria-selected="false">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="9" cy="10" r="5"/><circle cx="15" cy="10" r="5"/><circle cx="12" cy="15" r="5"/></svg><span>Filters</span></button>
       <button class="rail-tab" role="tab" id="tab-captions" aria-selected="false">
         <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="6" width="18" height="12" rx="2"/><path d="M7 14h4M13 14h4M7 11h10"/></svg><span>Captions</span></button>
       <button class="rail-tab" role="tab" id="tab-graphics" aria-selected="false" title="Lower thirds, maps, numbers, timelines and more, made with Clip Studio">
@@ -101,6 +103,13 @@
       <button class="btn wide" id="tr-all" title="Put the selected transition (or Mix) on every cut">Apply to every cut</button>
       <p class="hint">Transitions play over the cut, half in each clip, so the video keeps its length. Where a clip has no footage past its edge, its first or last frame holds.</p>
     </section>
+    <section class="panel" id="panel-filters" role="tabpanel" aria-labelledby="tab-filters" hidden>
+      <h2>Filters</h2>
+      <p class="hint" id="fl-target">Select a clip to give it a filter.</p>
+      <div class="tr-grid" id="fl-grid"></div>
+      <label class="prop wide" id="fl-strength-row"><span>Strength</span><input type="range" id="fl-strength" min="0" max="200" step="1" value="100"><input type="number" id="fl-strength-n" step="1" title="%" value="100"></label>
+      <p class="hint">Exposure, contrast, white balance and more are in the clip's Properties, under Adjust.</p>
+    </section>
     <section class="panel" id="panel-text" role="tabpanel" aria-labelledby="tab-text" hidden>
       <h2>Text</h2>
       <div class="text-styles" id="text-styles"></div>
@@ -146,6 +155,19 @@
   </main>
 
   <aside class="details" aria-label="Properties">
+    <button class="btn small" id="scopes-btn" title="Waveform, RGB parade, vectorscope and histogram of the frame in the player" aria-pressed="false">Scopes</button>
+    <section class="scopes" id="scopes" hidden>
+      <div class="scopes-bar">
+        <select id="scope-kind" aria-label="Scope">
+          <option value="waveform">Waveform</option>
+          <option value="parade">RGB parade</option>
+          <option value="vectorscope">Vectorscope</option>
+          <option value="histogram">Histogram</option>
+        </select>
+        <button class="tool" id="scopes-close" title="Hide the scopes" aria-label="Hide the scopes">×</button>
+      </div>
+      <canvas id="scope-canvas"></canvas>
+    </section>
     <h2 id="props-title">Project</h2>
     <div class="props" id="props"></div>
     <dl id="details"></dl>
