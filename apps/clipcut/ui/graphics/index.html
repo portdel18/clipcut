@@ -1,0 +1,2023 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Clip Studio</title>
+<meta name="description" content="Browser tools for news-style video clips: animated underlines, map zooms and routes, split-screen layouts, and document scroll-and-zoom highlights.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<!-- Interface fonts -->
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow:wght@400;500;600;700&family=Barlow+Condensed:wght@500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<!-- Fonts for the clips themselves (one link each so a single failure can't break the rest) -->
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@400;700;900&display=swap">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Merriweather:wght@400;700;900&display=swap">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Libre+Caslon+Text:wght@400;700&display=swap">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Source+Serif+4:wght@400;700;900&display=swap">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=DM+Serif+Display&display=swap">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Libre+Franklin:wght@400;600;700;900&display=swap">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;700;900&display=swap">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;700;900&display=swap">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;700;900&display=swap">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Montserrat:wght@400;700;900&display=swap">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Roboto+Condensed:wght@400;700&display=swap">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Oswald:wght@400;700&display=swap">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bebas+Neue&display=swap">
+<link rel="stylesheet" href="lib/maplibre-gl/dist/maplibre-gl.css">
+<link rel="stylesheet" href="css/styles.css">
+</head>
+<body>
+<div class="app">
+  <header class="topbar">
+    <div class="brand"><span class="tally" aria-hidden="true"></span><span>Clip Studio</span></div>
+    <nav class="tabs" role="tablist" aria-label="Tools">
+      <button class="tab" role="tab" id="tab-ul" aria-controls="tool-ul" aria-selected="true">Underline</button>
+      <button class="tab" role="tab" id="tab-mp" aria-controls="tool-mp" aria-selected="false">Map Zoom</button>
+      <button class="tab" role="tab" id="tab-sp" aria-controls="tool-sp" aria-selected="false">Split Screen</button>
+      <button class="tab" role="tab" id="tab-sz" aria-controls="tool-sz" aria-selected="false">Scroll Zoom</button>
+      <button class="tab" role="tab" id="tab-tl" aria-controls="tool-tl" aria-selected="false">Timeline</button>
+      <button class="tab" role="tab" id="tab-nm" aria-controls="tool-nm" aria-selected="false">Numbers</button>
+      <button class="tab" role="tab" id="tab-au" aria-controls="tool-au" aria-selected="false">Audiogram</button>
+      <button class="tab" role="tab" id="tab-as" aria-controls="tool-lt" aria-selected="false">Create Assets</button>
+    </nav>
+    <div class="spacer"></div>
+    <button class="ghost" id="layout-edit" aria-pressed="false">Edit layout</button>
+    <button class="ghost" id="open-help">Setup &amp; help</button>
+  </header>
+  <nav class="subtabs" id="subtabs-as" role="tablist" aria-label="Create Assets" hidden>
+    <button class="subtab" role="tab" id="tab-lt" aria-controls="tool-lt" aria-selected="false">Lower Thirds</button>
+    <button class="subtab" role="tab" id="tab-th" aria-controls="tool-th" aria-selected="false">Thumbnails</button>
+  </nav>
+  <div class="layout-bar" id="layout-bar" role="region" aria-label="Edit layout" hidden>
+    <div class="lb-row">
+      <span class="lb-title">Editing layout</span>
+      <p class="lb-hint">Drag tabs and sections to move them, or use the arrows. Untick a tab or press a section’s eye to hide it. Changes save as you go; press Done when you’re finished.</p>
+      <button class="btn primary lb-done" id="layout-done" type="button">Done</button>
+    </div>
+    <div class="lb-row">
+      <span class="lbl">Tabs</span>
+      <div class="lb-tabs" id="layout-tabs"></div>
+    </div>
+    <div class="lb-row">
+      <label class="lbl" for="layout-saved">Saved layouts</label>
+      <select id="layout-saved"></select>
+      <button class="btn small" id="layout-del" type="button" disabled>Delete</button>
+      <input type="text" id="layout-name" maxlength="40" placeholder="e.g. Morning desk" aria-label="Name for this layout">
+      <button class="btn small" id="layout-save" type="button">Save layout</button>
+      <span class="lb-sep" aria-hidden="true"></span>
+      <button class="btn small" id="layout-reset" type="button">Reset to standard</button>
+      <button class="btn small" id="layout-export" type="button">Export</button>
+      <button class="btn small" id="layout-import" type="button">Import</button>
+      <input type="file" id="layout-file" accept=".json,application/json" hidden>
+    </div>
+  </div>
+  <div class="banner" id="env-banner" hidden></div>
+
+  <!-- ===================== UNDERLINE TOOL ===================== -->
+  <section class="tool" id="tool-ul" role="tabpanel" aria-labelledby="tab-ul">
+    <aside class="rack" aria-label="Underline settings">
+      <details class="sec">
+        <summary>Presets</summary>
+        <div class="sec-body" data-presets="ul"></div>
+      </details>
+
+      <details class="sec" open>
+        <summary>Source</summary>
+        <div class="sec-body">
+          <div class="seg" role="radiogroup" aria-label="What to underline">
+            <label><input type="radio" name="ul-src" value="paste"><span>Paste text</span></label>
+            <label><input type="radio" name="ul-src" value="link"><span>Article link</span></label>
+            <label><input type="radio" name="ul-src" value="shot"><span>Screenshot</span></label>
+          </div>
+          <div class="field" id="ul-paste-pane">
+            <div class="lbl"><label for="ul-text">Headline, passage, or quote</label><span class="tag" id="ul-sample-tag">Sample</span></div>
+            <textarea id="ul-text" rows="4" spellcheck="true"></textarea>
+          </div>
+          <div class="field" id="ul-link-pane" hidden>
+            <label class="lbl" for="ul-url">Article URL</label>
+            <div class="row-inline">
+              <input type="url" id="ul-url" placeholder="https://…" autocomplete="off">
+              <button class="btn" id="ul-fetch">Get text</button>
+            </div>
+            <p class="status" id="ul-fetch-status" role="status"></p>
+            <div class="article-list" id="ul-article"></div>
+            <p class="hint">Pages are read through the free r.jina.ai reader. Paywalled or bot-blocking sites may not load; if so, copy the text and paste it instead.</p>
+          </div>
+          <div class="field shot-only" id="ul-shot-pane">
+            <div class="drop" id="ul-drop">
+              <div class="btn-row" style="width:100%">
+                <button class="btn primary" id="ul-shot-pick">Choose screenshot</button>
+                <button class="btn" id="ul-shot-edit" aria-pressed="false">Draw boxes</button>
+              </div>
+              <span class="fname" id="ul-shot-name">No screenshot yet. You can also drop an image here or paste one (Ctrl/Cmd+V).</span>
+              <input type="file" id="ul-shot-file" accept="image/*" hidden>
+            </div>
+            <p class="hint">With <strong>Draw boxes</strong> on, drag across the words on the preview. Each box becomes one mark, drawn in order.</p>
+            <label class="check"><input type="checkbox" id="ul-shot-join"> Next box continues the last mark (for phrases that wrap)</label>
+            <ul class="spans" id="ul-marks" aria-label="Marks, in drawing order"></ul>
+            <div class="btn-row"><button class="btn small" id="ul-marks-clear">Clear boxes</button></div>
+            <p class="hint">Screenshots stay in this page only; reopening the file needs a fresh upload.</p>
+          </div>
+          <div class="field text-only">
+            <label class="lbl" for="ul-source">Source line <span class="tag">optional</span></label>
+            <input type="text" id="ul-source" placeholder="Outlet · Date">
+          </div>
+          <div class="field text-only">
+            <label class="check"><input type="checkbox" id="ul-quote"> Quote card: big quote mark and speaker</label>
+          </div>
+          <div class="field text-only" id="ul-quote-f">
+            <div class="row2">
+              <input type="text" id="ul-qname" placeholder="Speaker name" aria-label="Speaker name">
+              <input type="text" id="ul-qtitle" placeholder="Title or role" aria-label="Speaker title">
+            </div>
+            <div class="headshot">
+              <img id="ul-headshot-img" alt="" hidden>
+              <button class="btn small" id="ul-headshot-pick">Add headshot</button>
+              <button class="btn small" id="ul-headshot-clear" hidden>Remove</button>
+              <input type="file" id="ul-headshot-file" accept="image/*" hidden>
+            </div>
+          </div>
+        </div>
+      </details>
+
+      <details class="sec" open>
+        <summary>Marks</summary>
+        <div class="sec-body">
+          <div class="field text-only">
+            <div class="lbl"><span>Tap or drag across words</span><button class="btn small" id="ul-clear">Clear all</button></div>
+            <div class="words" id="ul-words" aria-label="Words in your text. Tap to underline."></div>
+          </div>
+          <div class="field text-only">
+            <label class="lbl" for="ul-find">Or mark an exact phrase</label>
+            <div class="row-inline">
+              <input type="text" id="ul-find" placeholder="e.g. $2.4 billion">
+              <button class="btn" id="ul-find-add">Add</button>
+            </div>
+          </div>
+          <ul class="spans text-only" id="ul-spans" aria-label="Underlines, in drawing order"></ul>
+          <div class="field">
+            <span class="lbl">Style</span>
+            <div class="seg" role="radiogroup" aria-label="Mark style">
+              <label><input type="radio" name="ul-style" value="underline"><span>Underline</span></label>
+              <label><input type="radio" name="ul-style" value="marker"><span>Hand-drawn</span></label>
+              <label><input type="radio" name="ul-style" value="highlight"><span>Highlight</span></label>
+              <label><input type="radio" name="ul-style" value="circle"><span>Circle</span></label>
+              <label><input type="radio" name="ul-style" value="strike"><span>Strike</span></label>
+            </div>
+          </div>
+          <div class="field">
+            <label class="lbl" for="ul-color">Mark color</label>
+            <div class="color"><input type="color" id="ul-color"><input type="text" id="ul-color-hex" maxlength="7" spellcheck="false" aria-label="Mark color hex"></div>
+            <div class="swatches" data-target="ul-color"></div>
+          </div>
+          <div class="field" id="ul-thick-f">
+            <label class="lbl" for="ul-thick">Line thickness</label>
+            <div class="range"><input type="range" id="ul-thick" min="2" max="40" step="1"><output for="ul-thick"></output></div>
+          </div>
+          <div class="field" id="ul-offset-f">
+            <label class="lbl" for="ul-offset">Distance below text</label>
+            <div class="range"><input type="range" id="ul-offset" min="-10" max="50" step="1"><output for="ul-offset"></output></div>
+          </div>
+          <div class="field text-only" id="ul-hlh-f">
+            <label class="lbl" for="ul-hlh">Highlight height</label>
+            <div class="range"><input type="range" id="ul-hlh" min="20" max="115" step="1"><output for="ul-hlh"></output></div>
+          </div>
+          <div class="field" id="ul-hlo-f">
+            <label class="lbl" for="ul-hlo">Highlight opacity</label>
+            <div class="range"><input type="range" id="ul-hlo" min="0.2" max="1" step="0.05"><output for="ul-hlo"></output></div>
+          </div>
+          <div class="field text-only" id="ul-hltext-f">
+            <label class="check"><input type="checkbox" id="ul-hltext-on"> Change text color inside highlight</label>
+            <div class="color" id="ul-hltext-c"><input type="color" id="ul-hltext"><input type="text" id="ul-hltext-hex" maxlength="7" spellcheck="false" aria-label="Highlighted text color hex"></div>
+          </div>
+        </div>
+      </details>
+
+      <details class="sec" open>
+        <summary>Look</summary>
+        <div class="sec-body">
+          <div class="field">
+            <label class="lbl" for="ul-bg">Background</label>
+            <div class="color"><input type="color" id="ul-bg"><input type="text" id="ul-bg-hex" maxlength="7" spellcheck="false" aria-label="Background hex"></div>
+            <label class="check"><input type="checkbox" id="ul-transparent"> Transparent background (PNG frames)</label>
+          </div>
+          <div class="field">
+            <span class="lbl">Background image <span class="tag">optional</span></span>
+            <div class="btn-row">
+              <button class="btn small" id="ul-bgimg-pick">Choose image</button>
+              <button class="btn small" id="ul-bgimg-clear" hidden>Remove</button>
+            </div>
+            <span class="fname" id="ul-bgimg-name"></span>
+            <input type="file" id="ul-bgimg-file" accept="image/*" hidden>
+          </div>
+          <div class="group" id="ul-bgimg-f" hidden>
+            <div class="field">
+              <span class="lbl">Use the image</span>
+              <div class="seg" role="radiogroup" aria-label="How the background image is used">
+                <label><input type="radio" name="ul-bgfit" value="fill"><span>Fill the frame</span></label>
+                <label><input type="radio" name="ul-bgfit" value="grid"><span>Grid repeat</span></label>
+              </div>
+            </div>
+            <div class="group" id="ul-bggrid-f">
+              <div class="field">
+                <span class="lbl">Grid layout</span>
+                <div class="seg" role="radiogroup" aria-label="Grid layout">
+                  <label><input type="radio" name="ul-bggrid" value="even"><span>Even</span></label>
+                  <label><input type="radio" name="ul-bggrid" value="brick"><span>Brick</span></label>
+                  <label><input type="radio" name="ul-bggrid" value="checker"><span>Checker</span></label>
+                  <label><input type="radio" name="ul-bggrid" value="tilted"><span>Tilted</span></label>
+                </div>
+              </div>
+              <div class="row2">
+                <div class="field">
+                  <label class="lbl" for="ul-bgcols">Columns</label>
+                  <div class="range"><input type="range" id="ul-bgcols" min="1" max="8" step="1"><output for="ul-bgcols"></output></div>
+                </div>
+                <div class="field">
+                  <label class="lbl" for="ul-bggap">Gap</label>
+                  <div class="range"><input type="range" id="ul-bggap" min="0" max="40" step="1"><output for="ul-bggap"></output></div>
+                </div>
+              </div>
+            </div>
+            <div class="row2">
+              <div class="field">
+                <label class="lbl" for="ul-bgdim">Tint with background color</label>
+                <div class="range"><input type="range" id="ul-bgdim" min="0" max="0.9" step="0.05"><output for="ul-bgdim"></output></div>
+              </div>
+              <div class="field">
+                <label class="lbl" for="ul-bgblur">Blur</label>
+                <div class="range"><input type="range" id="ul-bgblur" min="0" max="20" step="1"><output for="ul-bgblur"></output></div>
+              </div>
+            </div>
+            <label class="check"><input type="checkbox" id="ul-bgdrift"> Slow drift (the grid slides; a full-frame image pushes in)</label>
+            <p class="hint">The tint keeps the text readable. The gaps show the background color.</p>
+          </div>
+          <div class="row2 text-only">
+            <div class="field">
+              <label class="lbl" for="ul-fg">Text</label>
+              <div class="color"><input type="color" id="ul-fg"><input type="text" id="ul-fg-hex" maxlength="7" spellcheck="false" aria-label="Text color hex"></div>
+            </div>
+            <div class="field">
+              <label class="lbl" for="ul-srccolor">Source and speaker</label>
+              <div class="color"><input type="color" id="ul-srccolor"><input type="text" id="ul-srccolor-hex" maxlength="7" spellcheck="false" aria-label="Source line color hex"></div>
+            </div>
+          </div>
+          <div class="field">
+            <label class="check"><input type="checkbox" id="ul-card"> <span class="text-only">Put text on an article card</span><span class="shot-only">Rounded corners and shadow</span></label>
+            <div class="color text-only" id="ul-cardcolor-f"><input type="color" id="ul-cardcolor" aria-label="Card color"><input type="text" id="ul-cardcolor-hex" maxlength="7" spellcheck="false" aria-label="Card color hex"></div>
+          </div>
+          <div class="field shot-only">
+            <span class="lbl">Screenshot fit</span>
+            <div class="seg" role="radiogroup" aria-label="Screenshot fit">
+              <label><input type="radio" name="ul-shotfit" value="contain"><span>Whole image</span></label>
+              <label><input type="radio" name="ul-shotfit" value="width"><span>Fill the width</span></label>
+            </div>
+          </div>
+          <div class="field text-only">
+            <label class="lbl" for="ul-font">Font</label>
+            <div class="row2">
+              <select id="ul-font"></select>
+              <select id="ul-weight" aria-label="Weight">
+                <option value="400">Regular</option>
+                <option value="700">Bold</option>
+                <option value="900">Black</option>
+              </select>
+            </div>
+            <div class="row-inline">
+              <input type="text" id="ul-customfont" placeholder="Or type an installed font name" aria-label="Installed font name">
+              <button class="btn" id="ul-upload">Upload font</button>
+              <input type="file" id="ul-fontfile" accept=".ttf,.otf,.woff,.woff2" hidden>
+            </div>
+          </div>
+          <div class="field text-only">
+            <label class="lbl" for="ul-size">Text size</label>
+            <div class="range"><input type="range" id="ul-size" min="24" max="220" step="1"><output for="ul-size"></output></div>
+            <label class="check"><input type="checkbox" id="ul-autofit"> Shrink long text to fit the frame</label>
+          </div>
+          <div class="field text-only">
+            <label class="lbl" for="ul-srcsize">Source line size</label>
+            <div class="range"><input type="range" id="ul-srcsize" min="14" max="64" step="1"><output for="ul-srcsize"></output></div>
+            <p class="hint">A long source wraps onto a second line, and is made smaller only if it still doesn't fit.</p>
+          </div>
+          <div class="field text-only">
+            <label class="lbl" for="ul-lh">Line spacing</label>
+            <div class="range"><input type="range" id="ul-lh" min="0.9" max="1.7" step="0.01"><output for="ul-lh"></output></div>
+          </div>
+          <div class="row2 text-only">
+            <div class="field">
+              <span class="lbl">Align</span>
+              <div class="seg" role="radiogroup" aria-label="Text alignment">
+                <label><input type="radio" name="ul-align" value="left"><span>Left</span></label>
+                <label><input type="radio" name="ul-align" value="center"><span>Center</span></label>
+              </div>
+            </div>
+            <div class="field">
+              <span class="lbl">Position</span>
+              <div class="seg" role="radiogroup" aria-label="Vertical position">
+                <label><input type="radio" name="ul-valign" value="top"><span>Top</span></label>
+                <label><input type="radio" name="ul-valign" value="center"><span>Mid</span></label>
+                <label><input type="radio" name="ul-valign" value="bottom"><span>Low</span></label>
+              </div>
+            </div>
+          </div>
+        </div>
+      </details>
+
+      <details class="sec" open>
+        <summary>Timing</summary>
+        <div class="sec-body">
+          <div class="field">
+            <span class="lbl">Entrance</span>
+            <div class="seg" role="radiogroup" aria-label="Entrance">
+              <label><input type="radio" name="ul-intro" value="none"><span>Already on screen</span></label>
+              <label><input type="radio" name="ul-intro" value="fade"><span>Fade in</span></label>
+              <label><input type="radio" name="ul-intro" value="rise"><span>Rise</span></label>
+              <label><input type="radio" name="ul-intro" value="words"><span>Word by word</span></label>
+            </div>
+          </div>
+          <div class="field" id="ul-wordgap-f">
+            <label class="lbl" for="ul-wordgap">Time between words</label>
+            <div class="range"><input type="range" id="ul-wordgap" min="0.03" max="0.5" step="0.01"><output for="ul-wordgap"></output></div>
+          </div>
+          <div class="field">
+            <label class="lbl" for="ul-draw">Draw time per mark</label>
+            <div class="range"><input type="range" id="ul-draw" min="0.15" max="4" step="0.05"><output for="ul-draw"></output></div>
+            <label class="check"><input type="checkbox" id="ul-matchspeed"> Longer phrases take longer (same pen speed)</label>
+          </div>
+          <div class="row2">
+            <div class="field">
+              <label class="lbl" for="ul-delay">Start delay</label>
+              <div class="range"><input type="range" id="ul-delay" min="0" max="4" step="0.05"><output for="ul-delay"></output></div>
+            </div>
+            <div class="field">
+              <label class="lbl" for="ul-gap">Gap between</label>
+              <div class="range"><input type="range" id="ul-gap" min="0" max="3" step="0.05"><output for="ul-gap"></output></div>
+            </div>
+          </div>
+          <div class="field">
+            <label class="lbl" for="ul-hold">Hold at end</label>
+            <div class="range"><input type="range" id="ul-hold" min="0" max="8" step="0.1"><output for="ul-hold"></output></div>
+          </div>
+          <div class="field">
+            <span class="lbl">Order</span>
+            <div class="seg" role="radiogroup" aria-label="Order">
+              <label><input type="radio" name="ul-order" value="sequence"><span>One after another</span></label>
+              <label><input type="radio" name="ul-order" value="together"><span>All at once</span></label>
+            </div>
+          </div>
+          <div class="field">
+            <span class="lbl">Pen motion</span>
+            <div class="seg" role="radiogroup" aria-label="Easing">
+              <label><input type="radio" name="ul-ease" value="smooth"><span>Smooth</span></label>
+              <label><input type="radio" name="ul-ease" value="snappy"><span>Snappy</span></label>
+              <label><input type="radio" name="ul-ease" value="linear"><span>Steady</span></label>
+            </div>
+          </div>
+        </div>
+      </details>
+
+      <details class="sec" open>
+        <summary>Camera</summary>
+        <div class="sec-body">
+          <div class="seg" role="radiogroup" aria-label="Camera move">
+            <label><input type="radio" name="ul-camera" value="still"><span>Still</span></label>
+            <label><input type="radio" name="ul-camera" value="push"><span>Slow push-in</span></label>
+            <label><input type="radio" name="ul-camera" value="follow"><span>Zoom to each mark</span></label>
+          </div>
+          <div class="field" id="ul-push-f">
+            <label class="lbl" for="ul-push">Push-in amount</label>
+            <div class="range"><input type="range" id="ul-push" min="1" max="25" step="1"><output for="ul-push"></output></div>
+          </div>
+          <div class="field" id="ul-follow-f">
+            <label class="lbl" for="ul-followmax">Closest zoom</label>
+            <div class="range"><input type="range" id="ul-followmax" min="1.1" max="4" step="0.1"><output for="ul-followmax"></output></div>
+            <label class="check"><input type="checkbox" id="ul-followreturn"> Pull back to the full view at the end</label>
+          </div>
+        </div>
+      </details>
+
+      <details class="sec" open>
+        <summary>Output</summary>
+        <div class="sec-body" data-output="ul"></div>
+      </details>
+    </aside>
+
+    <div class="stage">
+      <div class="monitor-bar"><span id="ul-fmt"></span><span id="ul-fit"></span></div>
+      <div class="monitor" id="ul-monitor">
+        <div class="viewer" id="ul-viewer">
+          <canvas id="ul-canvas" aria-label="Underline animation preview"></canvas>
+          <canvas class="overlay" id="ul-guides" aria-hidden="true"></canvas>
+        </div>
+      </div>
+      <div class="track" id="ul-track" aria-hidden="true"></div>
+      <div class="transport" data-player="ul"></div>
+    </div>
+  </section>
+
+  <!-- ===================== MAP ZOOM TOOL ===================== -->
+  <section class="tool" id="tool-mp" role="tabpanel" aria-labelledby="tab-mp" hidden>
+    <aside class="rack" aria-label="Map settings">
+      <details class="sec">
+        <summary>Presets</summary>
+        <div class="sec-body" data-presets="mp"></div>
+      </details>
+
+      <details class="sec" open>
+        <summary>Location</summary>
+        <div class="sec-body">
+          <div class="seg" role="radiogroup" aria-label="Map mode">
+            <label><input type="radio" name="mp-mode" value="place"><span>Zoom to a place</span></label>
+            <label><input type="radio" name="mp-mode" value="route"><span>Route A → B</span></label>
+            <label><input type="radio" name="mp-mode" value="area"><span>Outline an area</span></label>
+          </div>
+
+          <div class="field area-only">
+            <label class="lbl" for="mp-akind">Area</label>
+            <select id="mp-akind">
+              <option value="state">State</option>
+              <option value="county">County</option>
+              <option value="place">City or town</option>
+              <option value="cd">Congressional district</option>
+              <option value="sldu">State Senate district</option>
+              <option value="sldl">State House district</option>
+              <option value="radius">Radius around a point</option>
+            </select>
+            <div class="row2" id="mp-arad-f">
+              <div class="field">
+                <label class="lbl" for="mp-arad">Radius</label>
+                <div class="range"><input type="range" id="mp-arad" min="0.5" max="200" step="0.5"><output for="mp-arad"></output></div>
+              </div>
+              <div class="field">
+                <span class="lbl">Unit</span>
+                <div class="seg" role="radiogroup" aria-label="Radius unit">
+                  <label><input type="radio" name="mp-aunit" value="mi"><span>Miles</span></label>
+                  <label><input type="radio" name="mp-aunit" value="km"><span>Kilometers</span></label>
+                </div>
+              </div>
+            </div>
+            <label class="lbl" for="mp-aq">Name, or an address inside it</label>
+            <div class="row-inline">
+              <input type="text" id="mp-aq" autocomplete="off" spellcheck="false">
+              <button class="btn primary" id="mp-ago" title="Replace the areas in this clip">Outline</button>
+              <button class="btn" id="mp-aadd" title="Add to the areas in this clip (Shift+Enter)">Add</button>
+            </div>
+            <p class="status" id="mp-astatus" role="status"></p>
+            <p class="hint">Type a name (Texas · Travis County, TX · Austin, TX · TX-35 · TX SD 14) or any address to outline the area it's in. <strong>Add</strong> puts several areas in one clip. Lines come from the US Census Bureau.</p>
+          </div>
+          <div class="field area-only">
+            <span class="lbl">In this clip</span>
+            <p class="hint" id="mp-aempty">No areas yet.</p>
+            <ul class="area-list" id="mp-alist" aria-label="Areas in this clip, in drawing order"></ul>
+            <div class="field" id="mp-aorder-f">
+              <div class="seg" role="radiogroup" aria-label="Drawing order">
+                <label><input type="radio" name="mp-aorder" value="seq"><span>One after another</span></label>
+                <label><input type="radio" name="mp-aorder" value="together"><span>All at once</span></label>
+              </div>
+            </div>
+          </div>
+
+          <div class="field place-only">
+            <div class="lbl"><label for="mp-query">Google Maps link, coordinates, or address</label><span class="tag" id="mp-sample-tag">Sample</span></div>
+            <div class="row-inline">
+              <input type="text" id="mp-query" placeholder="Paste a link, 40.7484, -73.9857, or an address" autocomplete="off" role="combobox" aria-autocomplete="list" aria-expanded="false" aria-controls="mp-query-list">
+              <button class="btn primary" id="mp-find">Find</button>
+            </div>
+            <p class="status" id="mp-status" role="status"></p>
+            <ul class="suggest" id="mp-query-list" role="listbox" aria-label="Matching places" hidden></ul>
+            <p class="hint">Start typing a place or street address to see matches. Use ↑ ↓ and Enter, or click one, to zoom there.</p>
+          </div>
+          <div class="loc-card place-only">
+            <strong id="mp-loc-name"></strong>
+            <span class="coords" id="mp-loc-coords"></span>
+            <span class="via" id="mp-loc-via"></span>
+          </div>
+          <div class="btn-row place-only">
+            <button class="btn small" id="mp-pin-center">Move pin to map center</button>
+            <button class="btn small" id="mp-use-view">Use this view as end shot</button>
+            <button class="btn small" id="mp-reset-view" hidden>Reset end shot</button>
+          </div>
+          <p class="hint place-only">Pause, then drag, scroll, or right-drag the preview to frame the final shot.</p>
+
+          <div class="field route-only">
+            <div class="lbl"><label for="mp-ra">From</label><span class="tag" id="mp-route-sample">Sample</span></div>
+            <input type="text" id="mp-ra" placeholder="Link, coordinates, or address" autocomplete="off" role="combobox" aria-autocomplete="list" aria-expanded="false" aria-controls="mp-ra-list">
+            <ul class="suggest" id="mp-ra-list" role="listbox" aria-label="Matching places for From" hidden></ul>
+            <div id="mp-rstops" class="group"></div>
+            <div class="btn-row"><button class="btn small" id="mp-rstop-add" type="button">Add a stop</button></div>
+            <label class="lbl" for="mp-rb">To</label>
+            <input type="text" id="mp-rb" placeholder="Link, coordinates, or address" autocomplete="off" role="combobox" aria-autocomplete="list" aria-expanded="false" aria-controls="mp-rb-list">
+            <ul class="suggest" id="mp-rb-list" role="listbox" aria-label="Matching places for To" hidden></ul>
+            <button class="btn primary" id="mp-route-go">Build route</button>
+            <p class="status" id="mp-route-status" role="status"></p>
+          </div>
+          <div class="loc-card route-only">
+            <strong id="mp-route-name"></strong>
+            <span class="coords" id="mp-route-dist"></span>
+          </div>
+          <div class="field route-only">
+            <span class="lbl">Path</span>
+            <div class="seg" role="radiogroup" aria-label="Route path">
+              <label><input type="radio" name="mp-rpath" value="arc"><span>Arc</span></label>
+              <label><input type="radio" name="mp-rpath" value="great"><span>Flight path</span></label>
+              <label><input type="radio" name="mp-rpath" value="roads"><span>Roads (driving)</span></label>
+            </div>
+          </div>
+          <div class="field route-only" id="mp-bend-f">
+            <label class="lbl" for="mp-bend">Arc curve</label>
+            <div class="range"><input type="range" id="mp-bend" min="0" max="0.5" step="0.01"><output for="mp-bend"></output></div>
+          </div>
+        </div>
+      </details>
+
+      <details class="sec" open>
+        <summary>Imagery &amp; 3D</summary>
+        <div class="sec-body">
+          <div class="field">
+            <label class="lbl" for="mp-source">Map imagery</label>
+            <select id="mp-source">
+              <optgroup label="Free, no key">
+                <option value="esri-sat">Satellite (Esri)</option>
+                <option value="esri-hybrid">Satellite with roads and labels (Esri)</option>
+                <option value="streets">Streets (OpenFreeMap)</option>
+              </optgroup>
+              <optgroup label="Google (your API key)">
+                <option value="google-sat">Google satellite</option>
+                <option value="google-hybrid">Google hybrid</option>
+                <option value="google-road">Google roadmap</option>
+              </optgroup>
+            </select>
+          </div>
+          <div class="field" id="mp-gkey-f">
+            <label class="lbl" for="mp-gkey">Google Maps API key</label>
+            <div class="row-inline">
+              <input type="password" id="mp-gkey" placeholder="AIza…" autocomplete="off" spellcheck="false">
+              <button class="btn" id="mp-gkey-test">Save &amp; test</button>
+            </div>
+            <p class="status" id="mp-gkey-status" role="status"></p>
+            <p class="hint">Stored only in this browser. <a href="#" id="mp-help-link">How to get a key</a>. Google limits video use of its map tiles; read Setup &amp; help before publishing.</p>
+          </div>
+          <div class="field">
+            <span class="lbl">Projection</span>
+            <div class="seg" role="radiogroup" aria-label="Projection">
+              <label><input type="radio" name="mp-proj" value="globe"><span>Globe (from space)</span></label>
+              <label><input type="radio" name="mp-proj" value="flat"><span>Flat map</span></label>
+            </div>
+            <label class="check"><input type="checkbox" id="mp-stars"> Stars behind the globe</label>
+          </div>
+          <div class="field">
+            <label class="check"><input type="checkbox" id="mp-terrain"> 3D terrain (mountains and valleys)</label>
+            <div class="range" id="mp-exag-f"><input type="range" id="mp-exag" min="1" max="3" step="0.1" aria-label="Terrain height"><output for="mp-exag"></output></div>
+          </div>
+          <div class="field">
+            <label class="check"><input type="checkbox" id="mp-buildings"> 3D buildings</label>
+            <div class="color" id="mp-bcolor-f"><input type="color" id="mp-bcolor" aria-label="Building color"><input type="text" id="mp-bcolor-hex" maxlength="7" spellcheck="false" aria-label="Building color hex"></div>
+          </div>
+          <p class="hint">3D shows once the camera tilts. Raise <strong>Tilt at end</strong> under Camera to 45–60°. Buildings appear from about zoom 14 in.</p>
+          <p class="hint" id="mp-credit"></p>
+        </div>
+      </details>
+
+      <details class="sec" open>
+        <summary>Camera</summary>
+        <div class="sec-body">
+          <label class="check route-only"><input type="checkbox" id="mp-flyin"> Fly in from space before the line draws</label>
+          <div class="field" id="mp-z0-f">
+            <label class="lbl" for="mp-z0">Start zoom <span id="mp-z0-name"></span></label>
+            <div class="range"><input type="range" id="mp-z0" min="0.5" max="14" step="0.1"><output for="mp-z0"></output></div>
+          </div>
+          <div class="field place-only">
+            <label class="lbl" for="mp-z1">End zoom <span id="mp-z1-name"></span></label>
+            <div class="range"><input type="range" id="mp-z1" min="3" max="21" step="0.1"><output for="mp-z1"></output></div>
+          </div>
+          <div class="field" id="mp-spin-f">
+            <label class="lbl" for="mp-spin">Globe spin on the way in</label>
+            <div class="range"><input type="range" id="mp-spin" min="-180" max="180" step="1"><output for="mp-spin"></output></div>
+          </div>
+          <div class="field route-only">
+            <span class="lbl">While the line draws</span>
+            <div class="seg" role="radiogroup" aria-label="Route camera">
+              <label><input type="radio" name="mp-rcam" value="fit"><span>Show whole route</span></label>
+              <label><input type="radio" name="mp-rcam" value="follow"><span>Follow the line</span></label>
+            </div>
+          </div>
+          <div class="field route-only" id="mp-rzoom-f">
+            <label class="lbl" for="mp-rzoom">Follow zoom <span id="mp-rzoom-name"></span></label>
+            <div class="range"><input type="range" id="mp-rzoom" min="4" max="17" step="0.1"><output for="mp-rzoom"></output></div>
+          </div>
+          <div class="row2">
+            <div class="field">
+              <label class="lbl" for="mp-rotate">Rotate</label>
+              <div class="range"><input type="range" id="mp-rotate" min="-180" max="180" step="1"><output for="mp-rotate"></output></div>
+            </div>
+            <div class="field">
+              <label class="lbl" for="mp-pitch">Tilt at end</label>
+              <div class="range"><input type="range" id="mp-pitch" min="0" max="65" step="1"><output for="mp-pitch"></output></div>
+            </div>
+          </div>
+          <div class="field" id="mp-dur-f">
+            <label class="lbl" for="mp-dur"><span class="place-only">Zoom time</span><span class="route-only">Fly-in time</span><span class="area-only">Fly-in time</span></label>
+            <div class="range"><input type="range" id="mp-dur" min="1" max="20" step="0.1"><output for="mp-dur"></output></div>
+          </div>
+          <div class="field route-only">
+            <label class="lbl" for="mp-rdraw">Line draw time</label>
+            <div class="range"><input type="range" id="mp-rdraw" min="1" max="20" step="0.1"><output for="mp-rdraw"></output></div>
+          </div>
+          <div class="field route-only">
+            <label class="lbl" for="mp-rpause">Pause at each stop <span class="tag">routes with stops</span></label>
+            <div class="range"><input type="range" id="mp-rpause" min="0" max="3" step="0.1"><output for="mp-rpause"></output></div>
+          </div>
+          <div class="row2">
+            <div class="field">
+              <label class="lbl" for="mp-delay">Hold at start</label>
+              <div class="range"><input type="range" id="mp-delay" min="0" max="4" step="0.1"><output for="mp-delay"></output></div>
+            </div>
+            <div class="field">
+              <label class="lbl" for="mp-hold">Hold at end</label>
+              <div class="range"><input type="range" id="mp-hold" min="0" max="8" step="0.1"><output for="mp-hold"></output></div>
+            </div>
+          </div>
+          <div class="field">
+            <span class="lbl">Motion</span>
+            <div class="seg" role="radiogroup" aria-label="Zoom easing">
+              <label><input type="radio" name="mp-ease" value="smooth"><span>Smooth</span></label>
+              <label><input type="radio" name="mp-ease" value="glide"><span>Fast, then settle</span></label>
+              <label><input type="radio" name="mp-ease" value="linear"><span>Steady</span></label>
+            </div>
+          </div>
+        </div>
+      </details>
+
+      <details class="sec route-only" open>
+        <summary>Route line</summary>
+        <div class="sec-body">
+          <div class="field">
+            <label class="lbl" for="mp-lcolor">Line color</label>
+            <div class="color"><input type="color" id="mp-lcolor"><input type="text" id="mp-lcolor-hex" maxlength="7" spellcheck="false" aria-label="Line color hex"></div>
+            <div class="swatches" data-target="mp-lcolor"></div>
+          </div>
+          <div class="field">
+            <label class="lbl" for="mp-lwidth">Line width</label>
+            <div class="range"><input type="range" id="mp-lwidth" min="1" max="14" step="0.5"><output for="mp-lwidth"></output></div>
+          </div>
+          <label class="check"><input type="checkbox" id="mp-lglow"> Glow</label>
+          <label class="check"><input type="checkbox" id="mp-ldash"> Dashed</label>
+          <div class="field">
+            <span class="lbl">Moving icon</span>
+            <div class="seg" role="radiogroup" aria-label="Moving icon">
+              <label><input type="radio" name="mp-ricon" value="plane"><span>Plane</span></label>
+              <label><input type="radio" name="mp-ricon" value="arrow"><span>Arrow</span></label>
+              <label><input type="radio" name="mp-ricon" value="dot"><span>Dot</span></label>
+              <label><input type="radio" name="mp-ricon" value="none"><span>None</span></label>
+            </div>
+          </div>
+        </div>
+      </details>
+
+      <details class="sec area-only" open>
+        <summary>Outline</summary>
+        <div class="sec-body">
+          <div class="field">
+            <label class="lbl" for="mp-acolor">Line color <span class="tag">first area; set others in the list</span></label>
+            <div class="color"><input type="color" id="mp-acolor"><input type="text" id="mp-acolor-hex" maxlength="7" spellcheck="false" aria-label="Outline color hex"></div>
+            <div class="swatches" data-target="mp-acolor"></div>
+          </div>
+          <div class="row2">
+            <div class="field">
+              <label class="lbl" for="mp-awidth">Line width</label>
+              <div class="range"><input type="range" id="mp-awidth" min="1" max="12" step="0.5"><output for="mp-awidth"></output></div>
+            </div>
+            <div class="field">
+              <label class="lbl" for="mp-adraw">Draw time</label>
+              <div class="range"><input type="range" id="mp-adraw" min="0.3" max="6" step="0.1"><output for="mp-adraw"></output></div>
+            </div>
+          </div>
+          <div class="row2">
+            <div class="field">
+              <label class="lbl" for="mp-afill">Tint inside</label>
+              <div class="range"><input type="range" id="mp-afill" min="0" max="0.6" step="0.02"><output for="mp-afill"></output></div>
+            </div>
+            <div class="field">
+              <label class="lbl" for="mp-adim">Dim outside</label>
+              <div class="range"><input type="range" id="mp-adim" min="0" max="0.85" step="0.05"><output for="mp-adim"></output></div>
+            </div>
+          </div>
+          <div class="field">
+            <label class="lbl" for="mp-alabel">Lower-third title</label>
+            <input type="text" id="mp-alabel" placeholder="Area name">
+            <p class="hint">Each area's label on the map is edited in the list above. Clear a label to hide it, for example where two labels overlap.</p>
+          </div>
+        </div>
+      </details>
+
+      <details class="sec" open>
+        <summary>Marker &amp; label</summary>
+        <div class="sec-body">
+          <div class="field not-area">
+            <span class="lbl"><span class="place-only">Marker</span><span class="route-only">Marker at the destination</span></span>
+            <div class="seg" role="radiogroup" aria-label="Marker">
+              <label><input type="radio" name="mp-marker" value="pin"><span>Pin drop</span></label>
+              <label><input type="radio" name="mp-marker" value="pulse"><span>Pulse</span></label>
+              <label><input type="radio" name="mp-marker" value="target"><span>Target ring</span></label>
+              <label><input type="radio" name="mp-marker" value="none"><span>None</span></label>
+            </div>
+          </div>
+          <div class="field not-area">
+            <label class="lbl" for="mp-mcolor">Marker color</label>
+            <div class="color"><input type="color" id="mp-mcolor"><input type="text" id="mp-mcolor-hex" maxlength="7" spellcheck="false" aria-label="Marker color hex"></div>
+            <div class="swatches" data-target="mp-mcolor"></div>
+          </div>
+          <div class="field place-only">
+            <label class="lbl" for="mp-label">Label text</label>
+            <input type="text" id="mp-label" placeholder="Place name">
+          </div>
+          <div class="row2 route-only">
+            <div class="field">
+              <label class="lbl" for="mp-rla">From label</label>
+              <input type="text" id="mp-rla" placeholder="Start">
+            </div>
+            <div class="field">
+              <label class="lbl" for="mp-rlb">To label</label>
+              <input type="text" id="mp-rlb" placeholder="Destination">
+            </div>
+          </div>
+          <div class="field route-only">
+            <label class="lbl" for="mp-rtitle">Lower-third title</label>
+            <input type="text" id="mp-rtitle" placeholder="New York → London">
+          </div>
+          <div class="field">
+            <span class="lbl">Label style</span>
+            <div class="seg" role="radiogroup" aria-label="Label style">
+              <label><input type="radio" name="mp-lstyle" value="pill"><span>On the map</span></label>
+              <label><input type="radio" name="mp-lstyle" value="lower"><span>Lower third</span></label>
+              <label><input type="radio" name="mp-lstyle" value="off"><span>Off</span></label>
+            </div>
+          </div>
+          <div class="row2">
+            <div class="field">
+              <label class="lbl" for="mp-lbg">Label fill</label>
+              <div class="color"><input type="color" id="mp-lbg"><input type="text" id="mp-lbg-hex" maxlength="7" spellcheck="false" aria-label="Label fill hex"></div>
+            </div>
+            <div class="field">
+              <label class="lbl" for="mp-lfg">Label text</label>
+              <div class="color"><input type="color" id="mp-lfg"><input type="text" id="mp-lfg-hex" maxlength="7" spellcheck="false" aria-label="Label text hex"></div>
+            </div>
+          </div>
+          <label class="check"><input type="checkbox" id="mp-coords"> Lower third shows coordinates, route distance, or the kind of area</label>
+          <label class="check"><input type="checkbox" id="mp-vignette"> Darken the edges (vignette)</label>
+        </div>
+      </details>
+
+      <details class="sec" open>
+        <summary>Output</summary>
+        <div class="sec-body" data-output="mp"></div>
+      </details>
+    </aside>
+
+    <div class="stage">
+      <div class="monitor-bar"><span id="mp-fmt"></span><span id="mp-tiles"></span></div>
+      <div class="monitor" id="mp-monitor">
+        <div class="viewer space" id="mp-viewer">
+          <canvas id="mp-stars-c" aria-hidden="true"></canvas>
+          <div class="mapbox" id="mp-map" aria-label="Map preview"></div>
+          <canvas class="overlay" id="mp-overlay" aria-hidden="true"></canvas>
+          <div class="viewer-msg" id="mp-msg" role="status" hidden></div>
+        </div>
+      </div>
+      <div class="track" id="mp-track" aria-hidden="true"></div>
+      <div class="transport" data-player="mp"></div>
+    </div>
+  </section>
+
+  <!-- ===================== SPLIT SCREEN TOOL ===================== -->
+  <section class="tool" id="tool-sp" role="tabpanel" aria-labelledby="tab-sp" hidden>
+    <aside class="rack" aria-label="Split screen settings">
+      <details class="sec">
+        <summary>Presets</summary>
+        <div class="sec-body" data-presets="sp"></div>
+      </details>
+
+      <details class="sec" open>
+        <summary>Layout</summary>
+        <div class="sec-body">
+          <div class="field">
+            <span class="lbl">Frame</span>
+            <div class="seg" role="radiogroup" aria-label="Frame">
+              <label><input type="radio" name="sp-orient" value="16:9"><span>16:9 horizontal</span></label>
+              <label><input type="radio" name="sp-orient" value="9:16"><span>9:16 vertical</span></label>
+            </div>
+          </div>
+          <div class="field">
+            <span class="lbl">Panels <span class="tag">4 in 16:9 uses the grid</span></span>
+            <div class="seg" role="radiogroup" aria-label="Number of panels">
+              <label><input type="radio" name="sp-count" value="1"><span>1</span></label>
+              <label><input type="radio" name="sp-count" value="2"><span>2</span></label>
+              <label><input type="radio" name="sp-count" value="3"><span>3</span></label>
+              <label id="sp-count-4"><input type="radio" name="sp-count" value="4"><span>4</span></label>
+            </div>
+          </div>
+          <div class="field" id="sp-layout-f">
+            <span class="lbl">Arrangement <span class="tag">grid uses 4 panels, wipe uses 2</span></span>
+            <div class="seg" role="radiogroup" aria-label="Panel arrangement">
+              <label><input type="radio" name="sp-layout" value="stack"><span id="sp-layout-stack">Stacked rows</span></label>
+              <label><input type="radio" name="sp-layout" value="grid"><span>2 × 2 grid</span></label>
+              <label><input type="radio" name="sp-layout" value="wipe"><span>Before / after wipe</span></label>
+            </div>
+          </div>
+          <div class="group" id="sp-wipe-f">
+            <p class="hint">Panel 1 is the before, panel 2 the after. Both fill the frame; the divider sweeps across to reveal panel 2.</p>
+            <div class="row2">
+              <div class="field">
+                <span class="lbl">Wipe</span>
+                <div class="seg" role="radiogroup" aria-label="Wipe ending">
+                  <label><input type="radio" name="sp-wipemode" value="compare"><span>Stop halfway</span></label>
+                  <label><input type="radio" name="sp-wipemode" value="reveal"><span>Reveal all</span></label>
+                </div>
+              </div>
+              <div class="field">
+                <span class="lbl">Direction</span>
+                <div class="seg" role="radiogroup" aria-label="Wipe direction">
+                  <label><input type="radio" name="sp-wipedir" value="lr"><span>Across</span></label>
+                  <label><input type="radio" name="sp-wipedir" value="tb"><span>Down</span></label>
+                </div>
+              </div>
+            </div>
+            <div class="row2">
+              <div class="field">
+                <label class="lbl" for="sp-wipehold">Hold before wipe</label>
+                <div class="range"><input type="range" id="sp-wipehold" min="0" max="5" step="0.1"><output for="sp-wipehold"></output></div>
+              </div>
+              <div class="field">
+                <label class="lbl" for="sp-wipedur">Wipe time</label>
+                <div class="range"><input type="range" id="sp-wipedur" min="0.4" max="5" step="0.1"><output for="sp-wipedur"></output></div>
+              </div>
+            </div>
+            <div class="row2">
+              <div class="field">
+                <label class="lbl" for="sp-wipecolor">Divider</label>
+                <div class="color"><input type="color" id="sp-wipecolor"><input type="text" id="sp-wipecolor-hex" maxlength="7" spellcheck="false" aria-label="Divider color hex"></div>
+              </div>
+              <label class="check"><input type="checkbox" id="sp-wipehandle"> Slider handle</label>
+            </div>
+          </div>
+          <div class="btn-row">
+            <button class="btn primary" id="sp-pick-all">Add videos or images</button>
+            <input type="file" id="sp-file-all" accept="video/*,image/*" multiple hidden>
+          </div>
+          <p class="hint">Pick several files at once to fill the panels in order, or drop files straight onto a panel in the preview. Drag inside a panel to reposition it; scroll to zoom.</p>
+          <div class="row2">
+            <div class="field">
+              <label class="lbl" for="sp-gap">Gap</label>
+              <div class="range"><input type="range" id="sp-gap" min="0" max="60" step="1"><output for="sp-gap"></output></div>
+            </div>
+            <div class="field">
+              <label class="lbl" for="sp-margin">Outer margin</label>
+              <div class="range"><input type="range" id="sp-margin" min="0" max="120" step="1"><output for="sp-margin"></output></div>
+            </div>
+          </div>
+          <div class="field">
+            <label class="lbl" for="sp-radius">Rounded corners</label>
+            <div class="range"><input type="range" id="sp-radius" min="0" max="60" step="1"><output for="sp-radius"></output></div>
+          </div>
+          <div class="row2">
+            <div class="field">
+              <label class="lbl" for="sp-bg">Background and gaps</label>
+              <div class="color"><input type="color" id="sp-bg"><input type="text" id="sp-bg-hex" maxlength="7" spellcheck="false" aria-label="Background hex"></div>
+            </div>
+            <div class="field">
+              <label class="lbl" for="sp-panelbg">Empty panel</label>
+              <div class="color"><input type="color" id="sp-panelbg"><input type="text" id="sp-panelbg-hex" maxlength="7" spellcheck="false" aria-label="Panel color hex"></div>
+            </div>
+          </div>
+        </div>
+      </details>
+
+      <details class="sec" open>
+        <summary>Panels</summary>
+        <div class="sec-body">
+          <div class="panels" id="sp-panels"></div>
+        </div>
+      </details>
+
+      <details class="sec" open>
+        <summary>Animation</summary>
+        <div class="sec-body">
+          <div class="field">
+            <span class="lbl">Panels come in</span>
+            <div class="seg" role="radiogroup" aria-label="Entrance">
+              <label><input type="radio" name="sp-entrance" value="none"><span>All at once</span></label>
+              <label><input type="radio" name="sp-entrance" value="fade"><span>Fade</span></label>
+              <label><input type="radio" name="sp-entrance" value="slide"><span>Slide</span></label>
+              <label><input type="radio" name="sp-entrance" value="pop"><span>Pop</span></label>
+              <label><input type="radio" name="sp-entrance" value="wipe"><span>Wipe</span></label>
+            </div>
+          </div>
+          <div class="row2">
+            <div class="field">
+              <label class="lbl" for="sp-stagger">Between panels</label>
+              <div class="range"><input type="range" id="sp-stagger" min="0" max="2" step="0.05"><output for="sp-stagger"></output></div>
+            </div>
+            <div class="field">
+              <label class="lbl" for="sp-entdur">Entrance length</label>
+              <div class="range"><input type="range" id="sp-entdur" min="0.1" max="2" step="0.05"><output for="sp-entdur"></output></div>
+            </div>
+          </div>
+          <div class="field">
+            <label class="lbl" for="sp-delay">Start delay</label>
+            <div class="range"><input type="range" id="sp-delay" min="0" max="3" step="0.05"><output for="sp-delay"></output></div>
+          </div>
+          <div class="field">
+            <label class="lbl" for="sp-motion">Motion strength <span class="tag">set motion per panel</span></label>
+            <div class="range"><input type="range" id="sp-motion" min="0" max="40" step="1"><output for="sp-motion"></output></div>
+          </div>
+          <label class="check"><input type="checkbox" id="sp-spotlight"> Spotlight each panel in turn (dims the others)</label>
+          <div class="field" id="sp-spot-f">
+            <label class="check"><input type="checkbox" id="sp-spotmatch"> Spotlight lasts as long as each video</label>
+            <div class="field" id="sp-spotdur-f">
+              <label class="lbl" for="sp-spotdur">Spotlight length</label>
+              <div class="range"><input type="range" id="sp-spotdur" min="0.5" max="15" step="0.1"><output for="sp-spotdur"></output></div>
+            </div>
+            <label class="check"><input type="checkbox" id="sp-spotplay"> Only the spotlighted video plays; the others hold still</label>
+            <label class="lbl" for="sp-spotcolor">Spotlight outline</label>
+            <div class="color"><input type="color" id="sp-spotcolor"><input type="text" id="sp-spotcolor-hex" maxlength="7" spellcheck="false" aria-label="Spotlight color hex"></div>
+          </div>
+        </div>
+      </details>
+
+      <details class="sec" open>
+        <summary>Labels</summary>
+        <div class="sec-body">
+          <label class="check"><input type="checkbox" id="sp-badges"> Number each panel</label>
+          <div class="row2">
+            <div class="field">
+              <span class="lbl">Position</span>
+              <div class="seg" role="radiogroup" aria-label="Label position">
+                <label><input type="radio" name="sp-lpos" value="top"><span>Top</span></label>
+                <label><input type="radio" name="sp-lpos" value="bottom"><span>Bottom</span></label>
+              </div>
+            </div>
+            <div class="field">
+              <span class="lbl">Style</span>
+              <div class="seg" role="radiogroup" aria-label="Label style">
+                <label><input type="radio" name="sp-lstyle" value="pill"><span>Pill</span></label>
+                <label><input type="radio" name="sp-lstyle" value="bar"><span>Bar</span></label>
+              </div>
+            </div>
+          </div>
+          <div class="field">
+            <label class="lbl" for="sp-lsize">Label size</label>
+            <div class="range"><input type="range" id="sp-lsize" min="16" max="70" step="1"><output for="sp-lsize"></output></div>
+          </div>
+          <div class="row2">
+            <div class="field">
+              <label class="lbl" for="sp-lbg">Label fill</label>
+              <div class="color"><input type="color" id="sp-lbg"><input type="text" id="sp-lbg-hex" maxlength="7" spellcheck="false" aria-label="Label fill hex"></div>
+            </div>
+            <div class="field">
+              <label class="lbl" for="sp-lfg">Label text</label>
+              <div class="color"><input type="color" id="sp-lfg"><input type="text" id="sp-lfg-hex" maxlength="7" spellcheck="false" aria-label="Label text hex"></div>
+            </div>
+          </div>
+          <p class="hint">Type each panel's label under Panels. In 9:16, keep labels out of the bottom fifth, where TikTok and Reels put captions; turn on Safe zones to check.</p>
+        </div>
+      </details>
+
+      <details class="sec" open>
+        <summary>Length &amp; sound</summary>
+        <div class="sec-body">
+          <label class="check"><input type="checkbox" id="sp-autodur"> Set the length from the videos</label>
+          <div class="field" id="sp-dur-f">
+            <label class="lbl" for="sp-dur">Length</label>
+            <div class="range"><input type="range" id="sp-dur" min="1" max="60" step="0.5"><output for="sp-dur"></output></div>
+          </div>
+          <div class="field">
+            <label class="lbl" for="sp-sound">Sound</label>
+            <select id="sp-sound">
+              <option value="one">One panel's sound</option>
+              <option value="mix">All panels mixed</option>
+              <option value="spot">Follow the spotlight</option>
+              <option value="none">No sound</option>
+            </select>
+          </div>
+          <div class="field" id="sp-soundpanel-f">
+            <label class="lbl" for="sp-soundpanel">Sound from</label>
+            <select id="sp-soundpanel"></select>
+          </div>
+          <p class="hint">Each video's own volume is under Panels. MP4 renders include the sound; PNG frames come with it as audio.wav.</p>
+        </div>
+      </details>
+
+      <details class="sec" open>
+        <summary>Output</summary>
+        <div class="sec-body" data-output="sp"></div>
+      </details>
+    </aside>
+
+    <div class="stage">
+      <div class="monitor-bar"><span id="sp-fmt"></span><span id="sp-note"></span></div>
+      <div class="monitor" id="sp-monitor">
+        <div class="viewer" id="sp-viewer">
+          <canvas id="sp-canvas" aria-label="Split screen preview. Drop files on a panel."></canvas>
+          <canvas class="overlay" id="sp-guides" aria-hidden="true"></canvas>
+        </div>
+      </div>
+      <div class="track" id="sp-track" aria-hidden="true"></div>
+      <div class="transport" data-player="sp"></div>
+    </div>
+  </section>
+
+  <!-- ===================== SCROLL ZOOM TOOL ===================== -->
+  <section class="tool" id="tool-sz" role="tabpanel" aria-labelledby="tab-sz" hidden>
+    <aside class="rack" aria-label="Scroll zoom settings">
+      <details class="sec">
+        <summary>Presets</summary>
+        <div class="sec-body" data-presets="sz"></div>
+      </details>
+
+      <details class="sec" open>
+        <summary>Document</summary>
+        <div class="sec-body">
+          <div class="drop" id="sz-drop">
+            <div class="btn-row" style="width:100%">
+              <button class="btn primary" id="sz-pick">Open PDF or images</button>
+            </div>
+            <span class="fname"><span class="tag" id="sz-sample-tag">Sample</span> <span id="sz-docname"></span></span>
+            <input type="file" id="sz-file" accept="application/pdf,.pdf,image/*" multiple hidden>
+          </div>
+          <p class="status" id="sz-doc-status" role="status"></p>
+          <p class="hint">Full-page screenshots work well too. Several images become pages in the order you pick them. You can also drop files on the preview or paste an image (Ctrl/Cmd+V). Files stay in this page only.</p>
+          <div class="field">
+            <label class="lbl" for="sz-label">Source label <span class="tag">optional</span></label>
+            <input type="text" id="sz-label" placeholder="e.g. H.R. 1234 · Section 6" maxlength="80">
+          </div>
+        </div>
+      </details>
+
+      <details class="sec" open>
+        <summary>Highlights</summary>
+        <div class="sec-body">
+          <div class="field">
+            <label class="lbl" for="sz-find">Find words to highlight</label>
+            <div class="row-inline">
+              <input type="text" id="sz-find" placeholder="e.g. within ten years" autocomplete="off">
+              <button class="btn" id="sz-find-add">Add</button>
+            </div>
+            <p class="status" id="sz-find-status" role="status"></p>
+            <p class="hint">Works on PDFs with text. Scans, photos, and PDFs whose letters were saved as shapes are read by text recognition: slower, and the first time it downloads about 6 MB.</p>
+          </div>
+          <div class="field">
+            <span class="lbl">Or draw boxes on the preview</span>
+            <div class="btn-row">
+              <button class="btn" id="sz-edit" aria-pressed="false">Draw boxes</button>
+              <button class="btn small" id="sz-fitw">Fit width</button>
+              <button class="btn small" id="sz-zout" aria-label="Zoom out">−</button>
+              <button class="btn small" id="sz-zin" aria-label="Zoom in">+</button>
+            </div>
+            <div class="row-inline">
+              <label class="lbl" for="sz-goto" style="flex:none">Go to page</label>
+              <input type="number" id="sz-goto" min="1" value="1" class="num">
+            </div>
+            <label class="check"><input type="checkbox" id="sz-join"> Next box joins the last highlight (for lines that wrap)</label>
+          </div>
+          <ul class="spans" id="sz-marks" aria-label="Highlights, in order"></ul>
+          <div class="btn-row"><button class="btn small" id="sz-marks-clear">Clear all highlights</button></div>
+          <p class="hint">The clip scrolls to each highlight in this order, zooms in, and marks it. Click one in the list to see it.</p>
+        </div>
+      </details>
+
+      <details class="sec" open>
+        <summary>Look</summary>
+        <div class="sec-body">
+          <div class="field">
+            <span class="lbl">Style</span>
+            <div class="seg" role="radiogroup" aria-label="Highlight style">
+              <label><input type="radio" name="sz-style" value="highlight"><span>Highlighter</span></label>
+              <label><input type="radio" name="sz-style" value="underline"><span>Underline</span></label>
+              <label><input type="radio" name="sz-style" value="box"><span>Box</span></label>
+              <label><input type="radio" name="sz-style" value="none"><span>Dim only</span></label>
+            </div>
+          </div>
+          <div class="field">
+            <label class="lbl" for="sz-color">Highlight color</label>
+            <div class="color"><input type="color" id="sz-color"><input type="text" id="sz-color-hex" maxlength="7" spellcheck="false" aria-label="Highlight color hex"></div>
+            <div class="swatches" data-target="sz-color"></div>
+          </div>
+          <div class="field" id="sz-opacity-f">
+            <label class="lbl" for="sz-opacity">Highlighter strength</label>
+            <div class="range"><input type="range" id="sz-opacity" min="0.2" max="1" step="0.05"><output for="sz-opacity"></output></div>
+          </div>
+          <div class="field" id="sz-thick-f">
+            <label class="lbl" for="sz-thick">Line thickness</label>
+            <div class="range"><input type="range" id="sz-thick" min="2" max="20" step="1"><output for="sz-thick"></output></div>
+          </div>
+          <div class="field">
+            <label class="lbl" for="sz-dim">Dim the rest of the page</label>
+            <div class="range"><input type="range" id="sz-dim" min="0" max="0.85" step="0.05"><output for="sz-dim"></output></div>
+          </div>
+          <div class="field">
+            <label class="lbl" for="sz-bg">Background</label>
+            <div class="color"><input type="color" id="sz-bg"><input type="text" id="sz-bg-hex" maxlength="7" spellcheck="false" aria-label="Background hex"></div>
+          </div>
+          <label class="check"><input type="checkbox" id="sz-shadow"> Page shadow</label>
+          <label class="check"><input type="checkbox" id="sz-counter"> Page counter while scrolling</label>
+        </div>
+      </details>
+
+      <details class="sec" open>
+        <summary>Motion</summary>
+        <div class="sec-body">
+          <div class="row2">
+            <div class="field">
+              <label class="lbl" for="sz-pagesize">Page size</label>
+              <div class="range"><input type="range" id="sz-pagesize" min="50" max="100" step="1"><output for="sz-pagesize"></output></div>
+            </div>
+            <div class="field">
+              <label class="lbl" for="sz-zoom">Zoom on highlight</label>
+              <div class="range"><input type="range" id="sz-zoom" min="1" max="5" step="0.1"><output for="sz-zoom"></output></div>
+            </div>
+          </div>
+          <div class="field">
+            <span class="lbl">Scroll feel</span>
+            <div class="seg" role="radiogroup" aria-label="Scroll feel">
+              <label><input type="radio" name="sz-sease" value="whip"><span>Fast flip</span></label>
+              <label><input type="radio" name="sz-sease" value="smooth"><span>Smooth</span></label>
+              <label><input type="radio" name="sz-sease" value="gentle"><span>Gentle</span></label>
+            </div>
+          </div>
+          <div class="row2">
+            <div class="field">
+              <label class="lbl" for="sz-scroll">Scroll time</label>
+              <div class="range"><input type="range" id="sz-scroll" min="0.4" max="6" step="0.1"><output for="sz-scroll"></output></div>
+            </div>
+            <div class="field">
+              <label class="lbl" for="sz-blur">Motion blur</label>
+              <div class="range"><input type="range" id="sz-blur" min="0" max="1" step="0.05"><output for="sz-blur"></output></div>
+            </div>
+          </div>
+          <div class="row2">
+            <div class="field">
+              <label class="lbl" for="sz-zoomdur">Zoom time</label>
+              <div class="range"><input type="range" id="sz-zoomdur" min="0.2" max="3" step="0.1"><output for="sz-zoomdur"></output></div>
+            </div>
+            <div class="field">
+              <label class="lbl" for="sz-drawdur">Highlight time</label>
+              <div class="range"><input type="range" id="sz-drawdur" min="0.1" max="3" step="0.05"><output for="sz-drawdur"></output></div>
+            </div>
+          </div>
+          <div class="row2">
+            <div class="field">
+              <label class="lbl" for="sz-starthold">Hold at start</label>
+              <div class="range"><input type="range" id="sz-starthold" min="0" max="3" step="0.1"><output for="sz-starthold"></output></div>
+            </div>
+            <div class="field">
+              <label class="lbl" for="sz-hold">Hold on each</label>
+              <div class="range"><input type="range" id="sz-hold" min="0" max="6" step="0.1"><output for="sz-hold"></output></div>
+            </div>
+          </div>
+          <label class="check"><input type="checkbox" id="sz-endout"> Zoom back out at the end</label>
+        </div>
+      </details>
+
+      <details class="sec" open>
+        <summary>Output</summary>
+        <div class="sec-body" data-output="sz"></div>
+      </details>
+    </aside>
+
+    <div class="stage">
+      <div class="monitor-bar"><span id="sz-fmt"></span><span id="sz-note"></span></div>
+      <div class="monitor" id="sz-monitor">
+        <div class="viewer" id="sz-viewer">
+          <canvas id="sz-canvas" aria-label="Scroll zoom preview. With Draw boxes on, drag over words to highlight them."></canvas>
+          <canvas class="overlay" id="sz-guides" aria-hidden="true"></canvas>
+        </div>
+      </div>
+      <div class="track" id="sz-track" aria-hidden="true"></div>
+      <div class="transport" data-player="sz"></div>
+    </div>
+  </section>
+
+  <!-- ===================== TIMELINE TOOL ===================== -->
+  <section class="tool" id="tool-tl" role="tabpanel" aria-labelledby="tab-tl" hidden>
+    <aside class="rack" aria-label="Timeline settings">
+      <details class="sec">
+        <summary>Presets</summary>
+        <div class="sec-body" data-presets="tl"></div>
+      </details>
+
+      <details class="sec" open>
+        <summary>Events</summary>
+        <div class="sec-body">
+          <div class="field">
+            <label class="lbl" for="tl-heading">Heading <span class="tag">optional</span></label>
+            <input type="text" id="tl-heading" placeholder="e.g. How the bill became law" maxlength="90">
+          </div>
+          <div class="field">
+            <div class="lbl"><label for="tl-text">One event per line: Date | Title | Detail</label><span class="tag" id="tl-sample-tag">Sample</span></div>
+            <textarea id="tl-text" rows="7" spellcheck="true"></textarea>
+            <div class="btn-row"><button class="btn small" id="tl-sample-clear" type="button">Clear and start fresh</button></div>
+          </div>
+          <p class="hint">Detail is optional. Rows copied from a spreadsheet (Date, Title, Detail columns) paste straight in.</p>
+          <div class="field">
+            <span class="lbl">Photos <span class="tag">optional</span></span>
+            <ul class="photo-list" id="tl-photos" aria-label="Photo for each event"></ul>
+          </div>
+        </div>
+      </details>
+
+      <details class="sec" open>
+        <summary>Layout</summary>
+        <div class="sec-body">
+          <div class="field">
+            <span class="lbl">Direction</span>
+            <div class="seg" role="radiogroup" aria-label="Timeline direction">
+              <label><input type="radio" name="tl-dir" value="auto"><span>Fit the frame</span></label>
+              <label><input type="radio" name="tl-dir" value="across"><span>Across</span></label>
+              <label><input type="radio" name="tl-dir" value="down"><span>Down</span></label>
+            </div>
+          </div>
+          <label class="check"><input type="checkbox" id="tl-bydate"> Space events by date (across only)</label>
+          <p class="status" id="tl-bydate-note"></p>
+          <label class="check"><input type="checkbox" id="tl-cards"> Put each event on a card</label>
+          <label class="check"><input type="checkbox" id="tl-dimpast"> Dim events already shown</label>
+          <label class="check"><input type="checkbox" id="tl-endoverview"> Show the whole timeline at the end</label>
+        </div>
+      </details>
+
+      <details class="sec" open>
+        <summary>Look</summary>
+        <div class="sec-body">
+          <div class="row2">
+            <div class="field"><label class="lbl" for="tl-bg">Background</label>
+              <div class="color"><input type="color" id="tl-bg"><input type="text" id="tl-bg-hex" maxlength="7" spellcheck="false" aria-label="Background hex"></div></div>
+            <div class="field"><label class="lbl" for="tl-accent">Dates and dots</label>
+              <div class="color"><input type="color" id="tl-accent"><input type="text" id="tl-accent-hex" maxlength="7" spellcheck="false" aria-label="Accent hex"></div></div>
+          </div>
+          <div class="row2">
+            <div class="field"><label class="lbl" for="tl-line">Line</label>
+              <div class="color"><input type="color" id="tl-line"><input type="text" id="tl-line-hex" maxlength="7" spellcheck="false" aria-label="Line color hex"></div></div>
+            <div class="field"><label class="lbl" for="tl-cardbg">Cards</label>
+              <div class="color"><input type="color" id="tl-cardbg"><input type="text" id="tl-cardbg-hex" maxlength="7" spellcheck="false" aria-label="Card color hex"></div></div>
+          </div>
+          <div class="row2">
+            <div class="field"><label class="lbl" for="tl-fg">Titles</label>
+              <div class="color"><input type="color" id="tl-fg"><input type="text" id="tl-fg-hex" maxlength="7" spellcheck="false" aria-label="Title color hex"></div></div>
+            <div class="field"><label class="lbl" for="tl-muted">Details</label>
+              <div class="color"><input type="color" id="tl-muted"><input type="text" id="tl-muted-hex" maxlength="7" spellcheck="false" aria-label="Detail color hex"></div></div>
+          </div>
+          <div class="row2">
+            <div class="field"><label class="lbl" for="tl-font">Font</label>
+              <select id="tl-font">
+                <option value="Libre Franklin">Libre Franklin</option>
+                <option value="Inter">Inter</option>
+                <option value="Source Serif 4">Source Serif 4</option>
+                <option value="Oswald">Oswald</option>
+              </select></div>
+            <div class="field"><label class="lbl" for="tl-size">Title size</label>
+              <div class="range"><input type="range" id="tl-size" min="28" max="80" step="1"><output for="tl-size"></output></div></div>
+          </div>
+        </div>
+      </details>
+
+      <details class="sec" open>
+        <summary>Timing</summary>
+        <div class="sec-body">
+          <div class="row2">
+            <div class="field"><label class="lbl" for="tl-intro">Line draws in</label>
+              <div class="range"><input type="range" id="tl-intro" min="0.2" max="3" step="0.1"><output for="tl-intro"></output></div></div>
+            <div class="field"><label class="lbl" for="tl-move">Move between events</label>
+              <div class="range"><input type="range" id="tl-move" min="0.3" max="3" step="0.1"><output for="tl-move"></output></div></div>
+          </div>
+          <div class="row2">
+            <div class="field"><label class="lbl" for="tl-hold">Hold on each</label>
+              <div class="range"><input type="range" id="tl-hold" min="0.3" max="6" step="0.1"><output for="tl-hold"></output></div></div>
+            <div class="field"><label class="lbl" for="tl-endhold">Hold at end</label>
+              <div class="range"><input type="range" id="tl-endhold" min="0.5" max="6" step="0.1"><output for="tl-endhold"></output></div></div>
+          </div>
+        </div>
+      </details>
+
+      <details class="sec" open>
+        <summary>Output</summary>
+        <div class="sec-body" data-output="tl"></div>
+      </details>
+    </aside>
+
+    <div class="stage">
+      <div class="monitor-bar"><span id="tl-fmt"></span><span></span></div>
+      <div class="monitor" id="tl-monitor">
+        <div class="viewer" id="tl-viewer">
+          <canvas id="tl-canvas" aria-label="Timeline preview"></canvas>
+          <canvas class="overlay" id="tl-guides" aria-hidden="true"></canvas>
+        </div>
+      </div>
+      <div class="track" id="tl-track" aria-hidden="true"></div>
+      <div class="transport" data-player="tl"></div>
+    </div>
+  </section>
+
+  <!-- ===================== NUMBERS TOOL ===================== -->
+  <section class="tool" id="tool-nm" role="tabpanel" aria-labelledby="tab-nm" hidden>
+    <aside class="rack" aria-label="Numbers settings">
+      <details class="sec">
+        <summary>Presets</summary>
+        <div class="sec-body" data-presets="nm"></div>
+      </details>
+
+      <details class="sec" open>
+        <summary>Chart</summary>
+        <div class="sec-body">
+          <div class="field">
+            <span class="lbl">Type</span>
+            <div class="seg" role="radiogroup" aria-label="Chart type">
+              <label><input type="radio" name="nm-kind" value="counter"><span>Counter</span></label>
+              <label><input type="radio" name="nm-kind" value="bars"><span>Bars</span></label>
+              <label><input type="radio" name="nm-kind" value="line"><span>Line</span></label>
+              <label><input type="radio" name="nm-kind" value="ring"><span>Ring</span></label>
+            </div>
+            <p class="hint" id="nm-uses"></p>
+          </div>
+          <div class="field">
+            <label class="lbl" for="nm-title">Title</label>
+            <input type="text" id="nm-title" maxlength="90" placeholder="e.g. Lead pipes still in use">
+          </div>
+          <div class="field">
+            <div class="lbl"><label for="nm-data">One row per line: Label | Value</label><span class="tag" id="nm-sample-tag">Sample</span></div>
+            <textarea id="nm-data" rows="6" spellcheck="false"></textarea>
+            <p class="status" id="nm-data-note"></p>
+            <div class="btn-row"><button class="btn small" id="nm-clear" type="button">Clear and start fresh</button></div>
+          </div>
+          <p class="hint">Values keep how you type them: <code>$2.4 billion</code>, <code>1,040,000</code>, <code>63%</code>. Rows copied from a spreadsheet paste straight in.</p>
+          <div class="field">
+            <label class="lbl" for="nm-source">Source line <span class="tag">optional</span></label>
+            <input type="text" id="nm-source" maxlength="120" placeholder="e.g. Source: EPA, 2026">
+          </div>
+          <label class="check nm-bars-only"><input type="checkbox" id="nm-sort"> Sort bars from largest to smallest</label>
+          <label class="check nm-line-only"><input type="checkbox" id="nm-zero"> Start the scale at zero</label>
+        </div>
+      </details>
+
+      <details class="sec" open>
+        <summary>Look</summary>
+        <div class="sec-body">
+          <div class="row2">
+            <div class="field"><label class="lbl" for="nm-bg">Background</label>
+              <div class="color"><input type="color" id="nm-bg"><input type="text" id="nm-bg-hex" maxlength="7" spellcheck="false" aria-label="Background hex"></div></div>
+            <div class="field"><label class="lbl" for="nm-accent">Accent</label>
+              <div class="color"><input type="color" id="nm-accent"><input type="text" id="nm-accent-hex" maxlength="7" spellcheck="false" aria-label="Accent hex"></div></div>
+          </div>
+          <div class="row2">
+            <div class="field"><label class="lbl" for="nm-fg">Numbers and title</label>
+              <div class="color"><input type="color" id="nm-fg"><input type="text" id="nm-fg-hex" maxlength="7" spellcheck="false" aria-label="Text hex"></div></div>
+            <div class="field"><label class="lbl" for="nm-muted">Labels</label>
+              <div class="color"><input type="color" id="nm-muted"><input type="text" id="nm-muted-hex" maxlength="7" spellcheck="false" aria-label="Label hex"></div></div>
+          </div>
+          <div class="row2">
+            <div class="field"><label class="lbl" for="nm-barcolor">Bars and grid</label>
+              <div class="color"><input type="color" id="nm-barcolor"><input type="text" id="nm-barcolor-hex" maxlength="7" spellcheck="false" aria-label="Bar hex"></div></div>
+            <div class="field"><label class="lbl" for="nm-font">Font</label>
+              <select id="nm-font">
+                <option value="Libre Franklin">Libre Franklin</option>
+                <option value="Inter">Inter</option>
+                <option value="Oswald">Oswald</option>
+                <option value="Source Serif 4">Source Serif 4</option>
+              </select></div>
+          </div>
+        </div>
+      </details>
+
+      <details class="sec" open>
+        <summary>Timing</summary>
+        <div class="sec-body">
+          <div class="field">
+            <span class="lbl">Easing</span>
+            <div class="seg" role="radiogroup" aria-label="Easing">
+              <label><input type="radio" name="nm-ease" value="smooth"><span>Smooth</span></label>
+              <label><input type="radio" name="nm-ease" value="glide"><span>Glide</span></label>
+              <label><input type="radio" name="nm-ease" value="snappy"><span>Snappy</span></label>
+              <label><input type="radio" name="nm-ease" value="linear"><span>Even</span></label>
+            </div>
+          </div>
+          <div class="row2">
+            <div class="field"><label class="lbl" for="nm-delay">Hold at start</label>
+              <div class="range"><input type="range" id="nm-delay" min="0" max="3" step="0.1"><output for="nm-delay"></output></div></div>
+            <div class="field"><label class="lbl" for="nm-build">Build time</label>
+              <div class="range"><input type="range" id="nm-build" min="0.3" max="6" step="0.1"><output for="nm-build"></output></div></div>
+          </div>
+          <div class="row2">
+            <div class="nm-bars-only"><div class="field"><label class="lbl" for="nm-stagger">Delay between bars</label>
+              <div class="range"><input type="range" id="nm-stagger" min="0" max="0.6" step="0.02"><output for="nm-stagger"></output></div></div></div>
+            <div class="field"><label class="lbl" for="nm-hold">Hold at end</label>
+              <div class="range"><input type="range" id="nm-hold" min="0" max="6" step="0.1"><output for="nm-hold"></output></div></div>
+          </div>
+        </div>
+      </details>
+
+      <details class="sec" open>
+        <summary>Output</summary>
+        <div class="sec-body" data-output="nm"></div>
+      </details>
+    </aside>
+
+    <div class="stage">
+      <div class="monitor-bar"><span id="nm-fmt"></span><span></span></div>
+      <div class="monitor" id="nm-monitor">
+        <div class="viewer" id="nm-viewer">
+          <canvas id="nm-canvas" aria-label="Numbers preview"></canvas>
+          <canvas class="overlay" id="nm-guides" aria-hidden="true"></canvas>
+        </div>
+      </div>
+      <div class="track" id="nm-track" aria-hidden="true"></div>
+      <div class="transport" data-player="nm"></div>
+    </div>
+  </section>
+
+  <!-- ===================== LOWER THIRDS TOOL ===================== -->
+  <section class="tool" id="tool-lt" role="tabpanel" aria-labelledby="tab-lt" hidden>
+    <aside class="rack" aria-label="Lower third settings">
+      <details class="sec">
+        <summary>Presets</summary>
+        <div class="sec-body" data-presets="lt"></div>
+      </details>
+
+      <details class="sec" open>
+        <summary>Text</summary>
+        <div class="sec-body">
+          <div class="field">
+            <span class="lbl">Template</span>
+            <div class="seg" role="radiogroup" aria-label="Template">
+              <label><input type="radio" name="lt-style" value="bar"><span>Name bar</span></label>
+              <label><input type="radio" name="lt-style" value="breaking"><span>Breaking</span></label>
+              <label><input type="radio" name="lt-style" value="location"><span>Location</span></label>
+              <label><input type="radio" name="lt-style" value="minimal"><span>Minimal</span></label>
+            </div>
+          </div>
+          <div class="field">
+            <label class="lbl" for="lt-line1">Top line</label>
+            <input type="text" id="lt-line1" maxlength="120" placeholder="Name, headline, or place">
+            <label class="check"><input type="checkbox" id="lt-caps1"> All capitals</label>
+          </div>
+          <div class="field">
+            <label class="lbl" for="lt-line2">Second line <span class="tag">optional</span></label>
+            <input type="text" id="lt-line2" maxlength="160" placeholder="Title, detail, or time">
+            <label class="check"><input type="checkbox" id="lt-caps2"> All capitals</label>
+          </div>
+          <div class="field lt-tagfield">
+            <label class="lbl" for="lt-tag">Tag <span class="tag">optional</span></label>
+            <input type="text" id="lt-tag" maxlength="24" placeholder="e.g. LIVE, BREAKING, EXCLUSIVE">
+          </div>
+        </div>
+      </details>
+
+      <details class="sec" open>
+        <summary>Look</summary>
+        <div class="sec-body">
+          <div class="row2">
+            <div class="field"><label class="lbl" for="lt-font">Font</label>
+              <select id="lt-font">
+                <option value="Libre Franklin">Libre Franklin</option>
+                <option value="Inter">Inter</option>
+                <option value="Roboto Condensed">Roboto Condensed</option>
+                <option value="Oswald">Oswald</option>
+                <option value="Montserrat">Montserrat</option>
+                <option value="Source Serif 4">Source Serif 4</option>
+              </select></div>
+            <div class="field"><label class="lbl" for="lt-size">Size</label>
+              <div class="range"><input type="range" id="lt-size" min="0.6" max="1.6" step="0.05"><output for="lt-size"></output></div></div>
+          </div>
+          <div class="field lt-pos">
+            <span class="lbl">Position</span>
+            <div class="seg" role="radiogroup" aria-label="Position">
+              <label><input type="radio" name="lt-pos" value="left"><span>Left</span></label>
+              <label><input type="radio" name="lt-pos" value="center"><span>Center</span></label>
+              <label><input type="radio" name="lt-pos" value="right"><span>Right</span></label>
+            </div>
+          </div>
+          <div class="row2">
+            <div class="field"><label class="lbl" for="lt-lift">Height from bottom</label>
+              <div class="range"><input type="range" id="lt-lift" min="0.04" max="0.5" step="0.01"><output for="lt-lift"></output></div></div>
+            <div class="field lt-boxed"><label class="lbl" for="lt-radius">Corner rounding</label>
+              <div class="range"><input type="range" id="lt-radius" min="0" max="24" step="1"><output for="lt-radius"></output></div></div>
+          </div>
+          <label class="check"><input type="checkbox" id="lt-shadow"> Soft shadow</label>
+          <p class="hint">In 9:16, turn on Safe zones under the preview and keep the graphic above the platform buttons and captions.</p>
+          <div class="row2 lt-topbar">
+            <div class="field"><label class="lbl" for="lt-bar">Top bar</label>
+              <div class="color"><input type="color" id="lt-bar"><input type="text" id="lt-bar-hex" maxlength="7" spellcheck="false" aria-label="Top bar hex"></div></div>
+            <div class="field"><label class="lbl" for="lt-text1">Top line text</label>
+              <div class="color"><input type="color" id="lt-text1"><input type="text" id="lt-text1-hex" maxlength="7" spellcheck="false" aria-label="Top line text hex"></div></div>
+          </div>
+          <div class="row2">
+            <div class="field lt-boxed"><label class="lbl" for="lt-band"><span class="lt-band-lbl">Lower bar</span></label>
+              <div class="color"><input type="color" id="lt-band"><input type="text" id="lt-band-hex" maxlength="7" spellcheck="false" aria-label="Lower bar hex"></div></div>
+            <div class="field"><label class="lbl" for="lt-text2"><span class="lt-text2-lbl">Lower line text</span></label>
+              <div class="color"><input type="color" id="lt-text2"><input type="text" id="lt-text2-hex" maxlength="7" spellcheck="false" aria-label="Lower line text hex"></div></div>
+          </div>
+          <div class="row2">
+            <div class="field"><label class="lbl" for="lt-accent">Accent</label>
+              <div class="color"><input type="color" id="lt-accent"><input type="text" id="lt-accent-hex" maxlength="7" spellcheck="false" aria-label="Accent hex"></div></div>
+            <div class="field lt-boxed"><label class="lbl" for="lt-tagtext"><span class="lt-tagtext-lbl">Tag text</span></label>
+              <div class="color"><input type="color" id="lt-tagtext"><input type="text" id="lt-tagtext-hex" maxlength="7" spellcheck="false" aria-label="Tag text hex"></div></div>
+          </div>
+        </div>
+      </details>
+
+      <details class="sec" open>
+        <summary>Background</summary>
+        <div class="sec-body">
+          <div class="field">
+            <span class="lbl">Behind the graphic</span>
+            <div class="seg" role="radiogroup" aria-label="Background">
+              <label><input type="radio" name="lt-bgmode" value="transparent"><span>Transparent</span></label>
+              <label><input type="radio" name="lt-bgmode" value="green"><span>Green screen</span></label>
+              <label><input type="radio" name="lt-bgmode" value="color"><span>Color</span></label>
+            </div>
+          </div>
+          <div class="field" id="lt-bgcolor-field">
+            <label class="lbl" for="lt-bgcolor">Background color</label>
+            <div class="color"><input type="color" id="lt-bgcolor"><input type="text" id="lt-bgcolor-hex" maxlength="7" spellcheck="false" aria-label="Background color hex"></div>
+          </div>
+          <div class="field">
+            <span class="lbl">Preview over a photo <span class="tag">not rendered</span></span>
+            <div class="btn-row">
+              <button class="btn small" id="lt-photo-pick" type="button">Choose image</button>
+              <button class="btn small" id="lt-photo-clear" type="button" hidden>Remove</button>
+            </div>
+            <span class="fname" id="lt-photo-name"></span>
+            <input type="file" id="lt-photo-file" accept="image/*" hidden>
+            <p class="hint">Check placement and colors against a frame of your footage. The photo stays out of the render.</p>
+          </div>
+        </div>
+      </details>
+
+      <details class="sec" open>
+        <summary>Animation</summary>
+        <div class="sec-body">
+          <div class="field">
+            <span class="lbl">In and out</span>
+            <div class="seg" role="radiogroup" aria-label="Animation">
+              <label><input type="radio" name="lt-anim" value="wipe"><span>Wipe</span></label>
+              <label><input type="radio" name="lt-anim" value="slide"><span>Slide</span></label>
+              <label><input type="radio" name="lt-anim" value="fade"><span>Fade</span></label>
+              <label><input type="radio" name="lt-anim" value="pop"><span>Pop</span></label>
+            </div>
+          </div>
+          <div class="row2">
+            <div class="field"><label class="lbl" for="lt-delay">Hold at start</label>
+              <div class="range"><input type="range" id="lt-delay" min="0" max="3" step="0.1"><output for="lt-delay"></output></div></div>
+            <div class="field"><label class="lbl" for="lt-indur">Animate in</label>
+              <div class="range"><input type="range" id="lt-indur" min="0" max="2" step="0.05"><output for="lt-indur"></output></div></div>
+          </div>
+          <div class="row2">
+            <div class="field"><label class="lbl" for="lt-hold">Time on screen</label>
+              <div class="range"><input type="range" id="lt-hold" min="0.5" max="15" step="0.1"><output for="lt-hold"></output></div></div>
+            <div class="field"><label class="lbl" for="lt-outdur">Animate out</label>
+              <div class="range"><input type="range" id="lt-outdur" min="0" max="2" step="0.05"><output for="lt-outdur"></output></div></div>
+          </div>
+          <label class="check"><input type="checkbox" id="lt-outon"> Animate out at the end (off: it stays on screen)</label>
+        </div>
+      </details>
+
+      <details class="sec" open>
+        <summary>Output</summary>
+        <div class="sec-body" data-output="lt"></div>
+      </details>
+    </aside>
+
+    <div class="stage">
+      <div class="monitor-bar"><span id="lt-fmt"></span><span></span></div>
+      <div class="monitor" id="lt-monitor">
+        <div class="viewer" id="lt-viewer">
+          <canvas id="lt-canvas" aria-label="Lower third preview"></canvas>
+          <canvas class="overlay" id="lt-guides" aria-hidden="true"></canvas>
+        </div>
+      </div>
+      <div class="track" id="lt-track" aria-hidden="true"></div>
+      <div class="transport" data-player="lt"></div>
+    </div>
+  </section>
+
+  <!-- ===================== THUMBNAILS TOOL ===================== -->
+  <section class="tool" id="tool-th" role="tabpanel" aria-labelledby="tab-th" hidden>
+    <aside class="rack" aria-label="Thumbnail settings">
+      <details class="sec">
+        <summary>Presets</summary>
+        <div class="sec-body" data-presets="th"></div>
+      </details>
+
+      <details class="sec" open>
+        <summary>Photo</summary>
+        <div class="sec-body">
+          <div class="field">
+            <div class="btn-row">
+              <button class="btn" id="th-photo-pick" type="button">Choose photo</button>
+              <button class="btn small" id="th-photo-clear" type="button" hidden>Remove</button>
+            </div>
+            <span class="fname" id="th-photo-name"></span>
+            <input type="file" id="th-photo-file" accept="image/*" hidden>
+            <p class="hint">Drag the preview to move the photo; scroll to zoom. You can also drop an image on the preview.</p>
+          </div>
+          <div class="row2">
+            <div class="field"><label class="lbl" for="th-zoom">Zoom</label>
+              <div class="range"><input type="range" id="th-zoom" min="1" max="4" step="0.01"><output for="th-zoom"></output></div></div>
+            <div class="field"><span class="lbl">Framing</span><button class="btn small" id="th-recenter" type="button">Center and fit</button></div>
+          </div>
+          <div class="row2">
+            <div class="field"><label class="lbl" for="th-bright">Brightness</label>
+              <div class="range"><input type="range" id="th-bright" min="0.5" max="1.5" step="0.01"><output for="th-bright"></output></div></div>
+            <div class="field"><label class="lbl" for="th-sat">Color</label>
+              <div class="range"><input type="range" id="th-sat" min="0" max="2" step="0.01"><output for="th-sat"></output></div></div>
+          </div>
+          <div class="field"><label class="lbl" for="th-bg">Background (without a photo)</label>
+            <div class="color"><input type="color" id="th-bg"><input type="text" id="th-bg-hex" maxlength="7" spellcheck="false" aria-label="Background hex"></div></div>
+        </div>
+      </details>
+
+      <details class="sec" open>
+        <summary>Headline</summary>
+        <div class="sec-body">
+          <div class="field">
+            <label class="lbl" for="th-headline">Headline</label>
+            <textarea id="th-headline" rows="3" maxlength="140"></textarea>
+            <p class="hint">Put [square brackets] around the words to highlight. Short is better: thumbnails are seen small.</p>
+          </div>
+          <div class="field">
+            <label class="lbl" for="th-tag">Tag <span class="tag">optional</span></label>
+            <input type="text" id="th-tag" maxlength="24" placeholder="e.g. EXPLAINED, LIVE, NEW">
+          </div>
+          <label class="check"><input type="checkbox" id="th-caps"> All capitals</label>
+          <div class="row2">
+            <div class="field"><label class="lbl" for="th-font">Font</label>
+              <select id="th-font">
+                <option value="Montserrat">Montserrat Black</option>
+                <option value="Archivo">Archivo Black</option>
+                <option value="Inter">Inter Black</option>
+                <option value="Oswald">Oswald</option>
+                <option value="Bebas Neue">Bebas Neue</option>
+                <option value="Playfair Display">Playfair Display</option>
+              </select></div>
+            <div class="field"><label class="lbl" for="th-size">Text size</label>
+              <div class="range"><input type="range" id="th-size" min="0.5" max="1.8" step="0.05"><output for="th-size"></output></div></div>
+          </div>
+          <div class="row2">
+            <div class="field"><label class="lbl" for="th-boxw">Text width</label>
+              <div class="range"><input type="range" id="th-boxw" min="0.3" max="0.95" step="0.01"><output for="th-boxw"></output></div></div>
+            <div class="field"><label class="lbl" for="th-tilt">Tilt</label>
+              <div class="range"><input type="range" id="th-tilt" min="-8" max="8" step="0.5"><output for="th-tilt"></output></div></div>
+          </div>
+          <div class="field">
+            <span class="lbl">Across</span>
+            <div class="seg" role="radiogroup" aria-label="Text across">
+              <label><input type="radio" name="th-align" value="left"><span>Left</span></label>
+              <label><input type="radio" name="th-align" value="center"><span>Center</span></label>
+              <label><input type="radio" name="th-align" value="right"><span>Right</span></label>
+            </div>
+          </div>
+          <div class="field">
+            <span class="lbl">Up and down</span>
+            <div class="seg" role="radiogroup" aria-label="Text up and down">
+              <label><input type="radio" name="th-valign" value="top"><span>Top</span></label>
+              <label><input type="radio" name="th-valign" value="middle"><span>Middle</span></label>
+              <label><input type="radio" name="th-valign" value="bottom"><span>Bottom</span></label>
+            </div>
+          </div>
+        </div>
+      </details>
+
+      <details class="sec" open>
+        <summary>Text look</summary>
+        <div class="sec-body">
+          <div class="row2">
+            <div class="field"><label class="lbl" for="th-fg">Text</label>
+              <div class="color"><input type="color" id="th-fg"><input type="text" id="th-fg-hex" maxlength="7" spellcheck="false" aria-label="Text hex"></div></div>
+            <div class="field"><label class="lbl" for="th-hl">Highlight</label>
+              <div class="color"><input type="color" id="th-hl"><input type="text" id="th-hl-hex" maxlength="7" spellcheck="false" aria-label="Highlight hex"></div></div>
+          </div>
+          <div class="field">
+            <span class="lbl">Highlighted words</span>
+            <div class="seg" role="radiogroup" aria-label="Highlight style">
+              <label><input type="radio" name="th-hlmode" value="color"><span>Colored</span></label>
+              <label><input type="radio" name="th-hlmode" value="box"><span>In a box</span></label>
+            </div>
+          </div>
+          <div class="field th-box-only"><label class="lbl" for="th-hltext">Text in the box</label>
+            <div class="color"><input type="color" id="th-hltext"><input type="text" id="th-hltext-hex" maxlength="7" spellcheck="false" aria-label="Box text hex"></div></div>
+          <div class="row2">
+            <div class="field"><label class="lbl" for="th-outline">Outline</label>
+              <div class="range"><input type="range" id="th-outline" min="0" max="14" step="1"><output for="th-outline"></output></div></div>
+            <div class="field"><label class="lbl" for="th-outlinecolor">Outline color</label>
+              <div class="color"><input type="color" id="th-outlinecolor"><input type="text" id="th-outlinecolor-hex" maxlength="7" spellcheck="false" aria-label="Outline hex"></div></div>
+          </div>
+          <div class="field"><label class="lbl" for="th-shadow">Shadow</label>
+            <div class="range"><input type="range" id="th-shadow" min="0" max="1" step="0.05"><output for="th-shadow"></output></div></div>
+          <div class="row2">
+            <div class="field"><label class="lbl" for="th-tagbg">Tag</label>
+              <div class="color"><input type="color" id="th-tagbg"><input type="text" id="th-tagbg-hex" maxlength="7" spellcheck="false" aria-label="Tag hex"></div></div>
+            <div class="field"><label class="lbl" for="th-tagfg">Tag text</label>
+              <div class="color"><input type="color" id="th-tagfg"><input type="text" id="th-tagfg-hex" maxlength="7" spellcheck="false" aria-label="Tag text hex"></div></div>
+          </div>
+        </div>
+      </details>
+
+      <details class="sec" open>
+        <summary>Overlay</summary>
+        <div class="sec-body">
+          <div class="field">
+            <span class="lbl">Keeps the text readable</span>
+            <div class="seg" role="radiogroup" aria-label="Overlay">
+              <label><input type="radio" name="th-overlay" value="none"><span>None</span></label>
+              <label><input type="radio" name="th-overlay" value="side"><span>Side</span></label>
+              <label><input type="radio" name="th-overlay" value="bottom"><span>Bottom</span></label>
+              <label><input type="radio" name="th-overlay" value="darken"><span>Darken</span></label>
+              <label><input type="radio" name="th-overlay" value="vignette"><span>Edges</span></label>
+            </div>
+          </div>
+          <div class="row2">
+            <div class="field"><label class="lbl" for="th-overlaycolor">Color</label>
+              <div class="color"><input type="color" id="th-overlaycolor"><input type="text" id="th-overlaycolor-hex" maxlength="7" spellcheck="false" aria-label="Overlay hex"></div></div>
+            <div class="field"><label class="lbl" for="th-overlayamt">Strength</label>
+              <div class="range"><input type="range" id="th-overlayamt" min="0" max="1" step="0.05"><output for="th-overlayamt"></output></div></div>
+          </div>
+        </div>
+      </details>
+
+      <details class="sec" open>
+        <summary>Inset picture</summary>
+        <div class="sec-body">
+          <div class="field">
+            <div class="btn-row">
+              <button class="btn" id="th-inset-pick" type="button">Choose picture</button>
+              <button class="btn small" id="th-inset-clear" type="button" hidden>Remove</button>
+            </div>
+            <span class="fname" id="th-inset-name"></span>
+            <input type="file" id="th-inset-file" accept="image/*" hidden>
+            <p class="hint">A face, logo, or document. Drag it on the preview to place it; scroll over it to resize.</p>
+          </div>
+          <div class="th-inset-only group">
+            <div class="field">
+              <span class="lbl">Shape</span>
+              <div class="seg" role="radiogroup" aria-label="Inset shape">
+                <label><input type="radio" name="th-insetshape" value="circle"><span>Circle</span></label>
+                <label><input type="radio" name="th-insetshape" value="rounded"><span>Rounded</span></label>
+              </div>
+            </div>
+            <div class="row2">
+              <div class="field"><label class="lbl" for="th-insetsize">Size</label>
+                <div class="range"><input type="range" id="th-insetsize" min="0.12" max="0.9" step="0.01"><output for="th-insetsize"></output></div></div>
+              <div class="field"><label class="lbl" for="th-insetborder">Border</label>
+                <div class="range"><input type="range" id="th-insetborder" min="0" max="20" step="1"><output for="th-insetborder"></output></div></div>
+            </div>
+            <div class="field"><label class="lbl" for="th-insetbordercolor">Border color</label>
+              <div class="color"><input type="color" id="th-insetbordercolor"><input type="text" id="th-insetbordercolor-hex" maxlength="7" spellcheck="false" aria-label="Border hex"></div></div>
+          </div>
+        </div>
+      </details>
+
+      <details class="sec" open>
+        <summary>Save</summary>
+        <div class="sec-body">
+          <div class="field">
+            <span class="lbl">Size</span>
+            <div class="seg" role="radiogroup" aria-label="Thumbnail size">
+              <label><input type="radio" name="th-size-out" value="16:9"><span>YouTube 1280 × 720</span></label>
+              <label><input type="radio" name="th-size-out" value="9:16"><span>Shorts 1080 × 1920</span></label>
+              <label><input type="radio" name="th-size-out" value="1:1"><span>Square</span></label>
+            </div>
+          </div>
+          <div class="field">
+            <span class="lbl">File</span>
+            <div class="seg" role="radiogroup" aria-label="File type">
+              <label><input type="radio" name="th-format" value="jpeg"><span>JPEG (under 2 MB)</span></label>
+              <label><input type="radio" name="th-format" value="png"><span>PNG</span></label>
+            </div>
+          </div>
+          <div class="btn-row"><button class="btn primary" id="th-save" type="button">Save thumbnail</button></div>
+          <p class="status" id="th-save-status" role="status"></p>
+          <p class="hint">YouTube takes JPEG or PNG up to 2 MB. JPEG picks the best quality that fits.</p>
+        </div>
+      </details>
+    </aside>
+
+    <div class="stage th-stage">
+      <div class="monitor-bar"><span id="th-fmt"></span><span></span></div>
+      <div class="monitor" id="th-monitor">
+        <div class="viewer" id="th-viewer">
+          <canvas id="th-canvas" aria-label="Thumbnail preview"></canvas>
+          <p class="viewer-msg" id="th-empty">Choose a photo, or drop one here.</p>
+        </div>
+      </div>
+      <div class="th-feed" aria-label="How it looks in a feed">
+        <figure><canvas id="th-feed-lg" aria-hidden="true"></canvas><figcaption>In a feed</figcaption></figure>
+        <figure><canvas id="th-feed-sm" aria-hidden="true"></canvas><figcaption>Up next, on a phone</figcaption></figure>
+      </div>
+    </div>
+  </section>
+
+  <!-- ===================== AUDIOGRAM TOOL ===================== -->
+  <section class="tool" id="tool-au" role="tabpanel" aria-labelledby="tab-au" hidden>
+    <aside class="rack" aria-label="Audiogram settings">
+      <details class="sec">
+        <summary>Presets</summary>
+        <div class="sec-body" data-presets="au"></div>
+      </details>
+
+      <details class="sec" open>
+        <summary>Audio</summary>
+        <div class="sec-body">
+          <div class="drop" id="au-drop">
+            <div class="btn-row" style="width:100%"><button class="btn primary" id="au-pick">Choose audio or video</button></div>
+            <span class="fname plain"><span class="tag" id="au-sample-tag">Sample</span> MP3, M4A, WAV, or a video with sound. You can also drop it here.</span>
+            <input type="file" id="au-file" accept="audio/*,video/*,.mp3,.m4a,.wav,.ogg,.opus,.flac" hidden>
+          </div>
+          <p class="status" id="au-status" role="status"></p>
+          <div class="group" id="au-trim-f">
+            <div class="field"><label class="lbl" for="au-trim">Start at</label>
+              <div class="range"><input type="range" id="au-trim" min="0" max="0" step="0.05" value="0"><output id="au-trim-out" for="au-trim"></output></div></div>
+            <div class="field"><label class="lbl" for="au-len">Length</label>
+              <div class="range"><input type="range" id="au-len" min="0" max="600" step="0.5"><output for="au-len"></output></div></div>
+          </div>
+          <div id="au-media" hidden></div>
+        </div>
+      </details>
+
+      <details class="sec" open>
+        <summary>Speaker</summary>
+        <div class="sec-body">
+          <div class="row2">
+            <div class="field"><label class="lbl" for="au-name">Name</label><input type="text" id="au-name" maxlength="60" placeholder="e.g. Dispatcher"></div>
+            <div class="field"><label class="lbl" for="au-role">Title or context</label><input type="text" id="au-role" maxlength="80" placeholder="e.g. 911 call, March 3"></div>
+          </div>
+          <div class="btn-row">
+            <button class="btn small" id="au-photo-pick" type="button">Add photo</button>
+            <button class="btn small" id="au-photo-clear" type="button" hidden>Remove photo</button>
+            <input type="file" id="au-photo-file" accept="image/*" hidden>
+          </div>
+          <label class="check"><input type="checkbox" id="au-showphoto"> Show the photo circle (initials when there's no photo)</label>
+          <div class="field"><label class="lbl" for="au-source">Source line <span class="tag">optional</span></label><input type="text" id="au-source" maxlength="100" placeholder="e.g. Audio: County emergency services"></div>
+        </div>
+      </details>
+
+      <details class="sec" open>
+        <summary>Captions</summary>
+        <div class="sec-body">
+          <div class="field">
+            <label class="lbl" for="au-captions">What is said, or an .srt / .vtt file</label>
+            <textarea id="au-captions" rows="6" spellcheck="true"></textarea>
+            <p class="status" id="au-cap-note"></p>
+            <div class="btn-row"><button class="btn small" id="au-capfile-pick" type="button">Import .srt or .vtt</button><input type="file" id="au-capfile" accept=".srt,.vtt,text/vtt" hidden></div>
+          </div>
+          <div class="field">
+            <span class="lbl">Words</span>
+            <div class="seg" role="radiogroup" aria-label="Caption words">
+              <label><input type="radio" name="au-capmode" value="word"><span>Highlight each word</span></label>
+              <label><input type="radio" name="au-capmode" value="pop"><span>Words appear</span></label>
+              <label><input type="radio" name="au-capmode" value="line"><span>Whole line</span></label>
+            </div>
+          </div>
+          <div class="row2">
+            <div class="field"><label class="lbl" for="au-capwords">Most words at once</label>
+              <div class="range"><input type="range" id="au-capwords" min="2" max="14" step="1"><output for="au-capwords"></output></div></div>
+            <div class="field"><label class="lbl" for="au-capsize">Caption size</label>
+              <div class="range"><input type="range" id="au-capsize" min="36" max="110" step="1"><output for="au-capsize"></output></div></div>
+          </div>
+          <div class="field">
+            <span class="lbl">Position</span>
+            <div class="seg" role="radiogroup" aria-label="Caption position">
+              <label><input type="radio" name="au-cappos" value="bottom"><span>Low</span></label>
+              <label><input type="radio" name="au-cappos" value="middle"><span>Middle</span></label>
+            </div>
+          </div>
+          <label class="check"><input type="checkbox" id="au-capbox"> Dark box behind captions</label>
+          <label class="check"><input type="checkbox" id="au-upper"> ALL CAPS</label>
+        </div>
+      </details>
+
+      <details class="sec" open>
+        <summary>Look</summary>
+        <div class="sec-body">
+          <div class="field">
+            <span class="lbl">Waveform</span>
+            <div class="seg" role="radiogroup" aria-label="Waveform style">
+              <label><input type="radio" name="au-style" value="bars"><span>Bars</span></label>
+              <label><input type="radio" name="au-style" value="line"><span>Wave</span></label>
+              <label><input type="radio" name="au-style" value="pulse"><span>Pulse around photo</span></label>
+            </div>
+          </div>
+          <div class="row2">
+            <div class="field"><label class="lbl" for="au-bg">Background</label>
+              <div class="color"><input type="color" id="au-bg"><input type="text" id="au-bg-hex" maxlength="7" spellcheck="false" aria-label="Background hex"></div></div>
+            <div class="field"><label class="lbl" for="au-wave">Waveform</label>
+              <div class="color"><input type="color" id="au-wave"><input type="text" id="au-wave-hex" maxlength="7" spellcheck="false" aria-label="Waveform hex"></div></div>
+          </div>
+          <div class="row2">
+            <div class="field"><label class="lbl" for="au-fg">Text</label>
+              <div class="color"><input type="color" id="au-fg"><input type="text" id="au-fg-hex" maxlength="7" spellcheck="false" aria-label="Text hex"></div></div>
+            <div class="field"><label class="lbl" for="au-hiword">Spoken word</label>
+              <div class="color"><input type="color" id="au-hiword"><input type="text" id="au-hiword-hex" maxlength="7" spellcheck="false" aria-label="Highlighted word hex"></div></div>
+          </div>
+          <div class="row2">
+            <div class="field"><label class="lbl" for="au-muted">Secondary text</label>
+              <div class="color"><input type="color" id="au-muted"><input type="text" id="au-muted-hex" maxlength="7" spellcheck="false" aria-label="Secondary text hex"></div></div>
+            <div class="field"><label class="lbl" for="au-font">Font</label>
+              <select id="au-font">
+                <option value="Inter">Inter</option>
+                <option value="Libre Franklin">Libre Franklin</option>
+                <option value="Montserrat">Montserrat</option>
+                <option value="Oswald">Oswald</option>
+              </select></div>
+          </div>
+          <label class="check"><input type="checkbox" id="au-progress"> Progress bar and time</label>
+        </div>
+      </details>
+
+      <details class="sec" open>
+        <summary>Output</summary>
+        <div class="sec-body" data-output="au"></div>
+      </details>
+    </aside>
+
+    <div class="stage">
+      <div class="monitor-bar"><span id="au-fmt"></span><span></span></div>
+      <div class="monitor" id="au-monitor">
+        <div class="viewer" id="au-viewer">
+          <canvas id="au-canvas" aria-label="Audiogram preview. Drop an audio file, a caption file, or a photo here."></canvas>
+          <canvas class="overlay" id="au-guides" aria-hidden="true"></canvas>
+        </div>
+      </div>
+      <div class="track" id="au-track" aria-hidden="true"></div>
+      <div class="transport" data-player="au"></div>
+    </div>
+  </section>
+</div>
+
+<!-- Hidden home for the split-screen video elements (browsers decode off-screen videos more reliably when they are in the page) -->
+<div id="sp-media" aria-hidden="true"></div>
+
+<!-- Render dialog -->
+<dialog class="dlg" id="render-dlg" aria-labelledby="render-title">
+  <div class="dlg-in">
+    <h2 id="render-title">Rendering</h2>
+    <div class="render-stage" id="render-stage"><div class="map-host" id="render-maphost"></div></div>
+    <div class="progress" aria-hidden="true"><div class="bar" id="render-bar"></div></div>
+    <div class="render-meta"><span id="render-count">Preparing…</span><span id="render-eta"></span></div>
+    <p class="hint" id="render-note">Keep this tab in front while rendering. Browsers pause background tabs.</p>
+    <div class="dlg-actions">
+      <button class="btn" id="render-cancel">Cancel</button>
+      <button class="btn" id="render-close" hidden>Done</button>
+      <button class="btn primary" id="render-save" hidden>Download again</button>
+    </div>
+  </div>
+</dialog>
+
+<!-- Setup & help dialog -->
+<dialog class="dlg" id="help-dlg" aria-labelledby="help-title">
+  <div class="dlg-in">
+    <h2 id="help-title">Setup &amp; help</h2>
+    <h3>Where to open this file</h3>
+    <p>Open <code>index.html</code> in Chrome or Edge on a computer, or use the project's GitHub Pages address (it also works on phones). App previews, such as the Claude app's file viewer, block map servers and downloads, so the map tool stays blank there.</p>
+    <h3>Google Maps key (optional)</h3>
+    <p>The map tool works without a key using free imagery. A key only adds Google's own satellite, hybrid, and roadmap tiles, plus Google's address search.</p>
+    <ol>
+      <li>Open <a href="https://console.cloud.google.com/" target="_blank" rel="noopener">Google Cloud Console</a> and create a project (for example "Clip Studio").</li>
+      <li>Go to <strong>Billing</strong> and link a billing account. Google requires one even when you stay inside the free monthly usage.</li>
+      <li>Go to <strong>APIs &amp; Services → Library</strong> and enable <strong>Map Tiles API</strong> and <strong>Geocoding API</strong>.</li>
+      <li>Go to <strong>APIs &amp; Services → Credentials → Create credentials → API key</strong>.</li>
+      <li>Edit the key. Under <strong>API restrictions</strong>, choose <em>Restrict key</em> and tick only Map Tiles API and Geocoding API.</li>
+      <li>Under <strong>Application restrictions</strong>: if you open this file by double-clicking it, leave it at <em>None</em> (files opened from disk send no website address). If you serve it from a website or local server, choose <em>Websites</em> and add that address.</li>
+      <li>Set guard rails: in <strong>Billing → Budgets &amp; alerts</strong> add a small budget alert, and lower the daily request quotas under <strong>APIs &amp; Services → Map Tiles API → Quotas</strong>.</li>
+      <li>Paste the key into Map Zoom → Imagery &amp; 3D and press <strong>Save &amp; test</strong>.</li>
+    </ol>
+    <p>As of October 2026, Google's price list gives 100,000 free 2D map tile requests and 10,000 free geocoding requests per month. An HD zoom uses a few hundred tiles; the counter above the preview keeps a running total.</p>
+    <h3>Scroll Zoom</h3>
+    <p>Open a PDF or images, then type the words you want to highlight and press <strong>Add</strong>. Scanned PDFs and images have no searchable text: turn on <strong>Draw boxes</strong> and drag over the words. Scroll the preview to move through the document; hold Ctrl (⌘ on a Mac) and scroll, or pinch, to zoom. Your documents stay on your computer.</p>
+    <h3>Before you publish</h3>
+    <div class="note">Google's Map Tiles API policies only allow its imagery in promotional videos of your own app, 30 seconds or less. For news and commentary clips, Google's brand guidelines point to Google Earth Studio, which allows non-commercial, news, and entertainment videos with on-screen credit. Every source's credit is burned into the corner of the video; check each provider's terms for commercial use. This isn't legal advice.</div>
+    <div class="dlg-actions"><button class="btn primary" id="help-close">Close</button></div>
+  </div>
+</dialog>
+
+<div class="toast" id="toast" role="status" hidden></div>
+
+
+<!-- Libraries (pinned versions). Everything else is plain JavaScript with no build step. -->
+<script src="lib/maplibre-gl/dist/maplibre-gl.js"></script>
+<script src="lib/mp4-muxer/build/mp4-muxer.js"></script>
+<script src="lib/fflate/umd/index.js"></script>
+<!-- App scripts: core first, then one file per tool, then app.js which wires the tabs and boots everything. -->
+<script src="libs.js"></script>
+<script src="js/core.js"></script>
+<script src="js/platforms.js"></script>
+<script src="js/underline.js"></script>
+<script src="js/boundaries.js"></script>
+<script src="js/map.js"></script>
+<script src="js/split.js"></script>
+<script src="js/scroll.js"></script>
+<script src="js/timeline.js"></script>
+<script src="js/numbers.js"></script>
+<script src="js/audiogram.js"></script>
+<script src="js/lowerthird.js"></script>
+<script src="js/thumbnail.js"></script>
+<script src="js/layout.js"></script>
+<script src="js/app.js"></script>
+</body>
+</html>

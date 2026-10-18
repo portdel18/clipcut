@@ -6,11 +6,12 @@ pure-Rust editing engine (its own H.264, HEVC, ProRes, DNxHR, VP9, AV1, AAC and 
 frame timing, colour, audio mixing and export), and will bring in
 [Clip Studio](https://github.com/portdel18/clip-stu)'s news graphics.
 
-> **Status: Phase 1 done (1d, transitions).** A magnetic main track you split, trim, reorder and
+> **Status: Phase 2, Clip Studio inside.** A magnetic main track you split, trim, reorder and
 > ripple-delete; transitions on its cuts; lanes for overlays, text, music and voiceover; a
-> Properties panel; vertical and square canvases; and auto-captions from the speech (on this
-> computer) that follow every cut, with transcript cutting, filler-word and pause removal, and
-> subtitle files. Clip Studio's graphics come next (Phase 2). See [the roadmap](#roadmap).
+> Properties panel; vertical and square canvases; auto-captions from the speech (on this computer)
+> that follow every cut, with transcript cutting and subtitle files; and a **Graphics** tab with
+> Clip Studio's lower thirds, maps, numbers, timelines and more, whose graphics become clips you can
+> open again and change. See [the roadmap](#roadmap).
 
 ## Install on Windows
 
@@ -62,6 +63,21 @@ Shorts, 1:1 or 4:5; clips are refitted to the new shape.
 | `↑` `↓` | The previous or next cut; `Home` / `End`: the start or the end |
 | `Ctrl`+wheel, `Ctrl+=` / `Ctrl+-`, `Ctrl+0` | Zoom the timeline at the pointer, in and out, fit it all |
 
+**Graphics.** The **Graphics** tab opens [Clip Studio](https://github.com/portdel18/clip-stu)
+over the editor: Underline, Map Zoom, Split Screen, Scroll Zoom, Timeline, Numbers, Audiogram and
+Lower Thirds. Make a graphic as you would there, then press **Add to video**: it renders with Clip
+Studio's own drawing, in the video's shape, and lands on a lane at the playhead, fitted to the frame
+(a lower third keeps its transparent background, over the video). Its frames, sound and settings go
+in a `Graphics` folder beside the project. Select a graphic and press **Edit in Graphics** to open it
+again with its settings; **Update in video** puts the new version in its place, at the same time
+and size. Photos, videos and sound a graphic used aren't kept: add them again when you change it.
+Maps need the internet for their tiles and searches; scanned-PDF text recognition (Scroll Zoom)
+isn't available inside ClipCut.
+
+**Platform overlays.** The player's **Overlay** menu shows what TikTok, Instagram Reels or YouTube
+Shorts cover on a 9:16 video (the same drawing as Clip Studio's), or the safe zones on any shape.
+It is only in the player, never in an export.
+
 **Transitions.** Hover a cut on the main track and click its square, then pick one of sixteen in
 the **Transitions** tab (Mix, through black or white, Flash, Blur, Zoom, Push, Slide, Whip, Wipe,
 Circle, Glitch, Light leak, 3D spin; each tile plays a preview when you point at it). It plays over
@@ -98,7 +114,7 @@ Cancel.
 |---|---|
 | **0. Prove it** (done) | Open, play with sound, scrub, export; the Windows installer from CI |
 | **1. Editor v1** (done: 1a cutting, 1b lanes and properties, 1c captions, 1d transitions) | Split, trim, ripple delete, a magnetic main track plus overlay, text and audio lanes, speed, transitions, vertical and horizontal canvases, undo, autosave. First workflows: cutting down interviews and captioned explainers (auto-captions with styles, transcript cutting) |
-| **2. Clip Studio inside** | A Graphics tab with Clip Studio's tools (lower thirds, map zoom, numbers, timelines, underline); graphics become clips you can reopen and edit; TikTok, Reels and Shorts overlays in the preview |
+| **2. Clip Studio inside** (this) | A Graphics tab with Clip Studio's tools (lower thirds, map zoom, numbers, timelines, underline); graphics become clips you can reopen and edit; TikTok, Reels and Shorts overlays in the preview |
 | **3. Pro panels** | Keyframes, colour, the audio mixer, scopes and precise trimming, from the engine |
 | **4. CapCut extras** | Caption styles, text animations, templates, beat markers, music ducking, quick social exports |
 | **5. Polish** | Live graphics, proxies, speed work, signed installers and updates |
@@ -108,7 +124,7 @@ Cancel.
 | Layer | Where | What |
 |---|---|---|
 | Engine | `crates/*` (from FilmCraft) | Decoding, the timeline model, rendering, effects, audio mixing, export |
-| Façade | `crates/clipcut-core` | The engine operations the app calls: the magnetic main track and the lanes around it (`timeline.rs`, `lanes.rs`), clip properties, canvas and waveforms (`props.rs`), captions and transcript cutting (`captions.rs`), transitions (`transitions.rs`), each edit one undo step; projects, preview frames and thumbnails, playback audio, export jobs |
+| Façade | `crates/clipcut-core` | The engine operations the app calls: the magnetic main track and the lanes around it (`timeline.rs`, `lanes.rs`), clip properties, canvas and waveforms (`props.rs`), captions and transcript cutting (`captions.rs`), transitions (`transitions.rs`), graphics from the Graphics tab (`graphics.rs`), each edit one undo step; projects, preview frames and thumbnails, playback audio, export jobs |
 | App | `apps/clipcut` | A [Tauri](https://tauri.app) window: Rust commands in `src/`, the interface in `ui/` (HTML, CSS and JavaScript, no build step) |
 
 The sound card is the playback clock; the interface shows the frame the engine renders at that time.

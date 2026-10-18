@@ -16,7 +16,7 @@ use tauri_plugin_dialog::DialogExt;
 use crate::{App, OPEN_EXTENSIONS, blocking, lock};
 
 /// Where ClipCut keeps projects: `Documents\ClipCut` (the home folder when there is no Documents).
-fn projects_root(handle: &tauri::AppHandle) -> PathBuf {
+pub(crate) fn projects_root(handle: &tauri::AppHandle) -> PathBuf {
     let base = handle.path().document_dir().or_else(|_| handle.path().home_dir()).unwrap_or_else(|_| PathBuf::from("."));
     base.join("ClipCut")
 }
@@ -42,7 +42,7 @@ fn remember(handle: &tauri::AppHandle, path: Option<&str>) {
 }
 
 /// A folder name from a clip or project name: no characters Windows refuses, never empty.
-fn safe_name(name: &str) -> String {
+pub(crate) fn safe_name(name: &str) -> String {
     let n: String = name.chars().map(|c| if "\\/:*?\"<>|".contains(c) || c.is_control() { ' ' } else { c }).collect();
     let n = n.trim().trim_end_matches('.').trim().to_string();
     if n.is_empty() { "Untitled".to_string() } else { n.chars().take(80).collect() }

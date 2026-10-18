@@ -11,6 +11,7 @@
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
 
 mod captions;
+mod graphics;
 mod lanes;
 mod props;
 mod timeline;
@@ -26,6 +27,7 @@ use serde::Serialize;
 use serde_json::{Value, json};
 
 pub use captions::{CaptionStyleView, CaptionView, CaptionsView, ModelView, TranscribeJob, WordView, caption_presets, download_model, speech_models};
+pub use graphics::{GRAPHIC_FILE, GRAPHIC_SOUND, read_graphic};
 pub use props::{ClipProps, PEAKS_PER_SECOND, Peaks, TextProps};
 pub use timeline::{ClipView, Keep, LaneView, MediaView, ProjectView, TimelineView};
 pub use transitions::{DEFAULT_SECONDS as TRANSITION_SECONDS, TRANSITIONS, TransitionPresetView, TransitionView, transition_presets, transition_previews};
@@ -153,6 +155,8 @@ pub struct Studio {
     session: Session,
     /// The key and undo step of the last mergeable edit ([`Studio::set_props`] while a slider moves).
     merge: Option<(String, Arc<Project>)>,
+    /// What made each graphic folder seen so far (see `graphics.rs`).
+    graphics: std::sync::Mutex<std::collections::HashMap<std::path::PathBuf, Option<String>>>,
 }
 
 impl Default for Studio {
@@ -163,7 +167,7 @@ impl Default for Studio {
 
 impl Studio {
     pub fn new() -> Self {
-        Self { session: Session::default(), merge: None }
+        Self { session: Session::default(), merge: None, graphics: Default::default() }
     }
 
     /// The engine session, for operations this façade doesn't cover yet.

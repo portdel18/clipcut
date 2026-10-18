@@ -96,6 +96,7 @@ h2 { margin: 0 0 10px; font-size: 12px; font-weight: 700; letter-spacing: .08em;
 .play:disabled { opacity: .4; cursor: default; }
 .play svg { fill: currentColor; stroke: none; }
 .t-right { position: absolute; right: 12px; display: flex; align-items: center; gap: 12px; }
+#guide { width: 128px; }
 .note { color: var(--faint); font-size: 12px; }
 .ratio { display: flex; align-items: center; gap: 6px; color: var(--muted); font-size: 12px; }
 select, .props input[type="number"], .props textarea { font: inherit; color: var(--text); background: var(--well); border: 1px solid var(--line); border-radius: 6px; }
@@ -112,6 +113,14 @@ select:disabled { opacity: .5; }
 .text-style { height: 64px; display: grid; place-items: center; border-radius: 8px; border: 1px solid var(--line); background: #2a2a30; cursor: pointer; font-size: 20px; font-weight: 700; color: #fff; overflow: hidden; }
 .text-style:hover { border-color: var(--accent); }
 .text-style span { padding: 0 6px; border-radius: 3px; }
+
+/* Graphics: Clip Studio over the whole editor */
+.graphics-view { position: fixed; inset: 0; z-index: 50; display: grid; grid-template-rows: 44px minmax(0, 1fr); background: var(--bg); }
+.graphics-bar { display: flex; align-items: center; gap: 14px; padding: 0 12px; background: var(--panel); border-bottom: 1px solid var(--line); }
+.graphics-bar .meta { color: var(--muted); font-size: 12px; }
+.graphics-view iframe { width: 100%; height: 100%; border: 0; background: #141312; }
+.clip .gr-tag { position: absolute; right: 6px; top: 4px; padding: 1px 6px; border-radius: 4px; background: var(--accent); color: var(--accent-ink); font-size: 10px; font-weight: 700; pointer-events: none; }
+.clip.narrow .gr-tag { display: none; }
 
 /* Transitions tab, and transitions on the main track */
 #tr-target { margin: 0 0 12px; }
