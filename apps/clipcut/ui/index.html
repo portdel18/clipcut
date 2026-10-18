@@ -9,12 +9,13 @@
 <body>
 <div class="app">
   <header class="top">
-    <div class="brand"><img src="logo.png" alt="" width="22" height="22"><span>ClipCut</span></div>
+    <button class="brand" id="about-btn" title="About ClipCut and updates"><img src="logo.png" alt="" width="22" height="22"><span>ClipCut</span></button>
     <div class="project">
       <span class="title" id="project-name">Untitled</span>
       <span class="save-state" id="save-state" aria-live="polite"></span>
     </div>
     <div class="top-actions">
+      <button class="btn update" id="update-btn" hidden title="A newer ClipCut is ready to install">Update</button>
       <button class="btn" id="new-btn" title="Start a new project (Ctrl+N)">New</button>
       <button class="btn" id="open-btn" title="Open a saved project (Ctrl+O)">Open</button>
       <button class="btn primary" id="export-btn" disabled title="Export (Ctrl+E)">Export</button>
@@ -234,6 +235,18 @@
 <div class="drop-veil" id="drop-veil"><p>Drop to add: videos to the main track, sound below it</p></div>
 <div class="toast" id="toast" role="status" hidden></div>
 
+<dialog class="dlg wide" id="about-dlg" aria-labelledby="about-title">
+  <h2 id="about-title">About ClipCut</h2>
+  <p class="meta" id="about-version"></p>
+  <p class="dlg-text" id="about-status" aria-live="polite"></p>
+  <pre class="notes" id="about-notes" hidden></pre>
+  <div class="dlg-actions">
+    <button class="btn" id="about-releases">All releases</button>
+    <button class="btn" id="about-check">Check for updates</button>
+    <button class="btn primary" id="about-install" hidden>Update and restart</button>
+    <button class="btn" id="about-close">Close</button>
+  </div>
+</dialog>
 <dialog class="dlg" id="remake-dlg" aria-labelledby="remake-title">
   <h2 id="remake-title">Graphics in the old shape</h2>
   <p class="dlg-text" id="remake-text"></p>

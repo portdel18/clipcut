@@ -3324,5 +3324,64 @@ invoke('restore').then(r => {
   invoke('timeline').then(tl => apply(tl, { fit: true })).catch(() => {});
 });
 
+/* ---------- updates ---------- */
+// The app asks GitHub Releases for a newer version once at start; a build that can't install
+// updates itself (no signing key) only links to the Releases page.
+const Upd = { info: null, busy: false };
+function showUpdate() {
+  const i = Upd.info;
+  $('#about-version').textContent = i ? `Version ${i.current}` : '';
+  $('#update-btn').hidden = !(i && i.available && i.can_update);
+  if (i && i.available) $('#update-btn').textContent = `Update to ${i.available}`;
+  $('#about-install').hidden = !(i && i.available && i.can_update) || Upd.busy;
+  $('#about-check').hidden = !(i && i.can_update) || Upd.busy;
+  $('#about-notes').hidden = !(i && i.available && i.notes);
+  // release notes are GitHub's Markdown: shown as plain text
+  $('#about-notes').textContent = ((i && i.notes) || '').replace(/^#+\s*/gm, '').replace(/\*\*/g, '');
+}
+async function checkUpdate(quiet) {
+  if (Upd.busy) return;
+  if (!quiet) $('#about-status').textContent = 'Checking for updates…';
+  try {
+    Upd.info = await invoke('check_update');
+    const i = Upd.info;
+    $('#about-status').textContent = !i.can_update
+      ? 'This copy of ClipCut doesn\'t update itself. New versions are on the Releases page.'
+      : i.available ? `ClipCut ${i.available} is ready to install. Your project is saved first, then ClipCut restarts.`
+      : 'ClipCut is up to date.';
+  } catch (e) {
+    if (!quiet) $('#about-status').textContent = String(e);
+  }
+  showUpdate();
+}
+async function installUpdate() {
+  if (Upd.busy) return;
+  if (S.playing) await pause();
+  await flushSave();
+  Upd.busy = true;
+  showUpdate();
+  $('#about-status').textContent = `Downloading ClipCut ${Upd.info.available}…`;
+  if (!$('#about-dlg').open) $('#about-dlg').showModal();
+  try {
+    await invoke('install_update');
+  } catch (e) {
+    $('#about-status').textContent = String(e);
+  }
+  Upd.busy = false;
+  showUpdate();
+}
+$('#about-btn').onclick = () => {
+  showUpdate();
+  $('#about-dlg').showModal();
+  if (!Upd.info) checkUpdate(false);
+};
+$('#about-check').onclick = () => checkUpdate(false);
+$('#about-install').onclick = installUpdate;
+$('#update-btn').onclick = installUpdate;
+$('#about-releases').onclick = () => invoke('open_releases').catch(e => toast(e, true));
+$('#about-close').onclick = () => $('#about-dlg').close();
+$('#about-dlg').oncancel = e => { if (Upd.busy) e.preventDefault(); };
+setTimeout(() => checkUpdate(true), 3000);
+
 // For tests and debugging in the web inspector
-window.__clipcut = { S, apply, openGraphics, closeGraphics, selectCut, pickTransition, mainCuts, transitionEverywhere, seek, play, pause, split, splitKeep, deleteSelection, undo, redo, select, setPx, fitZoom, saveNow, addPaths, mainClips, addToLane, addText, queueProps, showTab, queueMixer, takeLevels, slipSel, nudgeSel, rollCut, setDucking, previewAnimation, pickExport, addTitle, saveAsTitle, renderTitles, remakeGraphics, offerRemake };
+window.__clipcut = { S, apply, openGraphics, closeGraphics, selectCut, pickTransition, mainCuts, transitionEverywhere, seek, play, pause, split, splitKeep, deleteSelection, undo, redo, select, setPx, fitZoom, saveNow, addPaths, mainClips, addToLane, addText, queueProps, showTab, queueMixer, takeLevels, slipSel, nudgeSel, rollCut, setDucking, previewAnimation, pickExport, addTitle, saveAsTitle, renderTitles, remakeGraphics, offerRemake, checkUpdate, Upd };
