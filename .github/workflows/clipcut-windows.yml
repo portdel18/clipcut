@@ -38,9 +38,26 @@ jobs:
           shared-key: clipcut-windows
 
       - name: ffmpeg (test clips only; never shipped)
-        run: choco install ffmpeg --no-progress -y
+        shell: pwsh
+        run: |
+          # Chocolatey's community feed sometimes fails and choco still exits 0 ("installed 0/0"),
+          # so check that ffmpeg runs, and fall back to a static build from GitHub
+          choco install ffmpeg --no-progress -y
+          if (-not (Get-Command ffmpeg -ErrorAction SilentlyContinue)) {
+            Write-Output "Chocolatey didn't install ffmpeg; using a static build instead"
+            $zip = "$env:RUNNER_TEMP\ffmpeg.zip"
+            Invoke-WebRequest -Uri "https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-win64-gpl.zip" -OutFile $zip
+            Expand-Archive $zip -DestinationPath "$env:RUNNER_TEMP\ffmpeg"
+            $bin = (Get-ChildItem "$env:RUNNER_TEMP\ffmpeg" -Recurse -Filter ffmpeg.exe | Select-Object -First 1).DirectoryName
+            Add-Content $env:GITHUB_PATH $bin
+            $env:PATH = "$bin;$env:PATH"
+          }
+          ffmpeg -hide_banner -version | Select-Object -First 1
 
       - name: Test clipcut-core
+        # tests that need ffmpeg fail rather than skip without it
+        env:
+          FILMCRAFT_REQUIRE_ORACLES: "1"
         run: cargo test --release -p clipcut-core
 
       - name: Build ClipCut and its installer
