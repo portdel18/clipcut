@@ -235,7 +235,32 @@ pub fn track_overlay(track: &CaptionTrack, t: Tick, w: usize, h: usize) -> Optio
         return None;
     }
     let c = track.caption_at(t)?;
-    render_caption(c, &track.style, w, h)
+    cached_caption(c, &track.style, w, h)
+}
+
+/// Captions rendered lately. A caption shows for many frames and rendering it (layout, glyphs and
+/// the outline's dilation) costs tens of milliseconds at 1080p, so an export or playback renders
+/// each one once. The key holds everything [`render_caption`] reads.
+static RENDERED: std::sync::Mutex<std::collections::VecDeque<(String, Option<Overlay>)>> = std::sync::Mutex::new(std::collections::VecDeque::new());
+/// Enough for the captions around the frames that parallel export workers render at once.
+const RENDERED_KEEP: usize = 16;
+
+/// [`render_caption`], from [`RENDERED`] when it was rendered lately.
+pub fn cached_caption(c: &Caption, style: &CaptionStyle, w: usize, h: usize) -> Option<Overlay> {
+    let key = format!("{w}x{h}\u{1f}{}\u{1f}{}\u{1f}{style:?}", c.text, c.settings);
+    let lock = || RENDERED.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    if let Some((_, o)) = lock().iter().find(|(k, _)| *k == key) {
+        return o.clone();
+    }
+    let o = render_caption(c, style, w, h);
+    let mut cache = lock();
+    if !cache.iter().any(|(k, _)| *k == key) {
+        if cache.len() >= RENDERED_KEEP {
+            cache.pop_front();
+        }
+        cache.push_back((key, o.clone()));
+    }
+    o
 }
 
 /// Overlays of every visible caption track of a sequence at `t`, bottom track first.
@@ -250,6 +275,20 @@ mod tests {
 
     fn cap(text: &str) -> Caption {
         Caption { id: ClipId(1), start: Tick(0), duration: Tick(100), text: text.into(), speaker: None, cue_id: None, settings: String::new() }
+    }
+
+    #[test]
+    fn a_caption_is_rendered_once_and_changes_show() {
+        let st = CaptionStyle::default();
+        let a = cached_caption(&cap("Cached once"), &st, 1920, 1080);
+        assert_eq!(a, render_caption(&cap("Cached once"), &st, 1920, 1080));
+        assert_eq!(cached_caption(&cap("Cached once"), &st, 1920, 1080), a, "from the cache");
+        // anything render_caption reads makes another entry: text, style, size
+        assert_ne!(cached_caption(&cap("Cached twice"), &st, 1920, 1080), a);
+        let big = CaptionStyle { size: st.size * 2.0, ..st.clone() };
+        assert_ne!(cached_caption(&cap("Cached once"), &big, 1920, 1080), a);
+        assert_ne!(cached_caption(&cap("Cached once"), &st, 1280, 720), a);
+        assert!(cached_caption(&cap("   "), &st, 1920, 1080).is_none());
     }
 
     #[test]

@@ -120,7 +120,9 @@ impl Studio {
     pub fn export_as(&mut self, path: &str, choice: &str) -> Result<u64> {
         let c = self.export_choices()?.into_iter().find(|c| c.id == choice).ok_or_else(|| Error::Invalid(format!("there is no export called “{choice}”")))?;
         let fps = self.info()?.fps;
-        let mut p = json!({"path": path, "burnCaptions": self.burn_captions()});
+        // the GPU composites and encodes where the machine has one that can (a real adapter;
+        // NVENC for H.264); everything else falls back to the CPU, frame by frame
+        let mut p = json!({"path": path, "burnCaptions": self.burn_captions(), "gpuRendering": "auto", "hardwareEncoding": "auto"});
         match c.id {
             "sound" => p["format"] = json!("wav"),
             "master" => p["format"] = json!("prores"),

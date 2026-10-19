@@ -112,7 +112,13 @@ impl ExportRenderer {
                     return None;
                 }
                 let instance = wgpu::Instance::default();
-                let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions::default())).ok()?;
+                let options = wgpu::RequestAdapterOptions { power_preference: wgpu::PowerPreference::HighPerformance, ..Default::default() };
+                let adapter = pollster::block_on(instance.request_adapter(&options)).ok()?;
+                // a software adapter (WARP, llvmpipe) composites slower than the CPU renderer
+                if adapter.get_info().device_type == wgpu::DeviceType::Cpu {
+                    log::info!("GPU export: only a software adapter ({}); exports render on the CPU", adapter.get_info().name);
+                    return None;
+                }
                 let (device, queue) = pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor::default())).ok()?;
                 // wgpu's default handler panics on a validation or out-of-memory error; log it and
                 // send the remaining frames to the CPU instead.

@@ -28,3 +28,4 @@ thiserror = { workspace = true }
 
 [dev-dependencies]
 filmcraft-testkit = { workspace = true }
+filmcraft-export = { workspace = true }
