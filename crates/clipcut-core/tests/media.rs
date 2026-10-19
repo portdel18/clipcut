@@ -79,6 +79,25 @@ fn rotated() -> Vec<&'static str> {
     vec!["-display_rotation", "90", "-i", Box::leak(plain.into_boxed_str()), "-c", "copy"]
 }
 
+/// The arguments for an AV1 encoder this ffmpeg has (builds differ: SVT-AV1, libaom, rav1e), or
+/// `None` when it has none, and AV1 isn't checked.
+fn av1_encoder() -> Option<&'static [&'static str]> {
+    let ff = ffmpeg_or_skip("clipcut-core media")?;
+    let out = Command::new(ff).args(["-hide_banner", "-encoders"]).output().ok()?;
+    let list = String::from_utf8_lossy(&out.stdout);
+    let has = |name: &str| list.lines().any(|l| l.split_whitespace().nth(1) == Some(name));
+    let choices: [(&str, &'static [&'static str]); 3] = [
+        ("libsvtav1", &["-c:v", "libsvtav1", "-preset", "12"]),
+        ("libaom-av1", &["-c:v", "libaom-av1", "-cpu-used", "8", "-row-mt", "1"]),
+        ("librav1e", &["-c:v", "librav1e", "-speed", "10"]),
+    ];
+    let found = choices.into_iter().find(|(name, _)| has(name)).map(|(_, args)| args);
+    if found.is_none() {
+        eprintln!("clipcut-core media: this ffmpeg has no AV1 encoder; AV1 isn't checked");
+    }
+    found
+}
+
 fn footage() -> Vec<Footage> {
     let v = |name, extra: &[&'static str], size, fps, sound| {
         let mut args = vec!["-f", "lavfi", "-i", PICTURE, "-f", "lavfi", "-i", TONE];
@@ -86,7 +105,7 @@ fn footage() -> Vec<Footage> {
         args.push("-shortest");
         Footage { name, args, size, fps, sound }
     };
-    vec![
+    let mut list = vec![
         v("h264-aac.mp4", &["-c:v", "libx264", "-pix_fmt", "yuv420p", "-c:a", "aac"], (640, 360), 30.0, true),
         // cameras: H.264 in .mov with PCM sound; 10-bit 4:2:2
         v("h264-pcm.mov", &["-c:v", "libx264", "-pix_fmt", "yuv420p", "-c:a", "pcm_s16le"], (640, 360), 30.0, true),
@@ -106,7 +125,6 @@ fn footage() -> Vec<Footage> {
         v("prores.mov", &["-c:v", "prores_ks", "-profile:v", "2", "-c:a", "pcm_s24le"], (640, 360), 30.0, true),
         v("dnxhr.mov", &["-c:v", "dnxhd", "-profile:v", "dnxhr_lb", "-pix_fmt", "yuv422p", "-c:a", "pcm_s16le"], (640, 360), 30.0, true),
         v("vp9-opus.webm", &["-c:v", "libvpx-vp9", "-deadline", "realtime", "-cpu-used", "8", "-c:a", "libopus"], (640, 360), 30.0, true),
-        v("av1.mp4", &["-c:v", "libsvtav1", "-preset", "12", "-c:a", "aac"], (640, 360), 30.0, true),
         v("mjpeg.avi", &["-c:v", "mjpeg", "-q:v", "3", "-c:a", "pcm_s16le"], (640, 360), 30.0, true),
         v("xvid-mp3.avi", &["-c:v", "mpeg4", "-q:v", "3", "-c:a", "libmp3lame"], (640, 360), 30.0, true),
         // screen recordings and odd sizes: 4:4:4, an odd width and height, no sound
@@ -114,7 +132,13 @@ fn footage() -> Vec<Footage> {
         // 25 and 60 fps, and 29.97
         v("pal-25.mp4", &["-vf", "fps=25", "-c:v", "libx264", "-pix_fmt", "yuv420p", "-c:a", "aac"], (640, 360), 25.0, true),
         v("ntsc-2997.mp4", &["-vf", "fps=30000/1001", "-c:v", "libx264", "-pix_fmt", "yuv420p", "-c:a", "aac"], (640, 360), 29.97, true),
-    ]
+    ];
+    if let Some(enc) = av1_encoder() {
+        let mut extra = enc.to_vec();
+        extra.extend_from_slice(&["-c:a", "aac"]);
+        list.push(v("av1.mp4", &extra, (640, 360), 30.0, true));
+    }
+    list
 }
 
 /// What the engine's own decoders can't show yet (H.264 beyond 8-bit 4:2:0, MPEG-4 Part 2): these
