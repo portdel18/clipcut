@@ -84,6 +84,14 @@ remote `upstream`). Read `README.md` for what it is and the roadmap.
   beyond 8-bit 4:2:0 progressive, codecs without a decoder) shows the unreadable slate:
   `Studio::check_picture` names it in plain words on import (`MediaView.unreadable`). Folder and file
   names from the user go through `safe_name` (Windows device names, trailing dots).
+- Exports ask the engine for `gpuRendering` and `hardwareEncoding` `auto` (`export_as`); the GPU
+  renderer never takes a software adapter. They are bound by the one-at-a-time H.264 encoder
+  (`export/src/job.rs` stage clocks: `tests/export_speed.rs`, run with `--ignored --nocapture`);
+  burnt-in captions are rendered once each (`captions::burn::cached_caption`).
+- Keyframes: a diamond on the timeline singles one out (`S.kf`); Delete and dragging go to
+  `Studio::delete_keyframes` / `move_keyframes` (every property keyed at that time, the sound's
+  volume too). A main clip's own fades are one-sided transitions on its A1 sound (`fade_alone`), and
+  `transitions::lay_out` keeps them on the clip's edges through main-track edits.
 - Disk is tight here: `rm -rf target/debug/incremental` when a build fails with "no space left".
 - Interface copy: plain words from the user's side, errors that say what went wrong and how to fix it.
   One dark theme from the tokens at the top of `ui/app.css`; amber (`--accent`) marks the active thing.

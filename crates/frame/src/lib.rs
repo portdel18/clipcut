@@ -408,6 +408,32 @@ impl VideoFrame {
                 let kg = 1.0 - kr - kb;
                 let (cr_r, cb_b) = (2.0 * (1.0 - kr), 2.0 * (1.0 - kb));
                 let (cr_g, cb_g) = (cr_r * kr / kg, cb_b * kb / kg);
+                // Full size and opaque (every export and full-resolution preview of camera video):
+                // a row at a time, the same arithmetic as the general loop below, so the same
+                // pixels, without its per-sample box filter and alpha.
+                if n == 1 && alpha.is_none() {
+                    out.par_chunks_mut(r.w * 4).enumerate().for_each(|(ry, row)| {
+                        let y = (r.y + ry).min(h - 1);
+                        let cy = y >> sy;
+                        let (Some(yrow), Some(urow), Some(vrow)) =
+                            (planes[0].get(y * w..y * w + w), planes[1].get(cy * cw..cy * cw + cw), planes[2].get(cy * cw..cy * cw + cw))
+                        else {
+                            row.fill(0.0);
+                            return;
+                        };
+                        for (rx, p) in row.as_chunks_mut::<4>().0.iter_mut().enumerate() {
+                            let x = (r.x + rx).min(w - 1);
+                            let cx = x >> sx;
+                            let (Some(&ys), Some(&us), Some(&vs)) = (yrow.get(x), urow.get(cx), vrow.get(cx)) else {
+                                *p = [0.0; 4];
+                                continue;
+                            };
+                            let (yy, u, v) = (ytab[ys as usize], ctab[us as usize], ctab[vs as usize]);
+                            *p = [q(yy + cr_r * v), q(yy - cr_g * v - cb_g * u), q(yy + cb_b * u), 1.0];
+                        }
+                    });
+                    return;
+                }
                 out.par_chunks_mut(r.w * 4).enumerate().for_each(|(ry, row)| {
                     let oy = r.y + ry;
                     for rx in 0..r.w {
@@ -711,6 +737,51 @@ fn rotate_chroma<T: Copy + Default + Send + Sync>(planes: &[Arc<Vec<T>>; 3], chr
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn opaque_full_size_yuv_converts_exactly_as_the_general_path() {
+        // the fast path (no alpha, n = 1) against the general one (alpha 255 everywhere: a = 1.0)
+        let (w, h) = (13usize, 9usize);
+        let mut seed = 12345u32;
+        let mut noise = |n: usize| -> Vec<u8> {
+            (0..n)
+                .map(|_| {
+                    seed = seed.wrapping_mul(1_103_515_245).wrapping_add(12345);
+                    (seed >> 16) as u8
+                })
+                .collect()
+        };
+        for chroma in [Chroma::C420, Chroma::C422, Chroma::C444] {
+            let (sx, sy) = chroma.shifts();
+            let (cw, ch) = (w.div_ceil(1 << sx), h.div_ceil(1 << sy));
+            let planes = [Arc::new(noise(w * h)), Arc::new(noise(cw * ch)), Arc::new(noise(cw * ch))];
+            for color in [ColorInfo::default(), ColorInfo { range: Range::Full, ..ColorInfo::default() }] {
+                let frame = |alpha| VideoFrame {
+                    width: w as u32,
+                    height: h as u32,
+                    data: PixelData::Yuv8 { planes: planes.clone(), chroma, alpha },
+                    color,
+                    par: (1, 1),
+                    pts: Default::default(),
+                };
+                let fast = frame(None);
+                let general = frame(Some(Arc::new(vec![255; w * h])));
+                assert_eq!(fast.to_linear_f32(), general.to_linear_f32(), "{chroma:?} {color:?}");
+                let r = Region { x: 3, y: 2, w: 7, h: 5 };
+                assert_eq!(fast.to_linear_f32_region(1, None, r), general.to_linear_f32_region(1, None, r));
+            }
+        }
+        // a plane shorter than its size: blank rows, never a panic
+        let short = VideoFrame {
+            width: 4,
+            height: 2,
+            data: PixelData::Yuv8 { planes: [Arc::new(vec![9; 3]), Arc::new(vec![128; 2]), Arc::new(vec![128; 2])], chroma: Chroma::C420, alpha: None },
+            color: ColorInfo::default(),
+            par: (1, 1),
+            pts: Default::default(),
+        };
+        assert!(short.to_linear_f32().iter().all(|v| *v == 0.0));
+    }
 
     #[test]
     fn cropping_cuts_every_plane_at_the_same_place() {

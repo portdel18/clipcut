@@ -512,6 +512,16 @@ pub async fn toggle_keyframe(clip: u64, prop: String, seconds: f64, app: tauri::
 }
 
 #[tauri::command]
+pub async fn delete_keyframes(clip: u64, seconds: f64, app: tauri::State<'_, App>) -> Result<TimelineView, String> {
+    edit(&app, move |s| s.delete_keyframes(clip, seconds)).await
+}
+
+#[tauri::command]
+pub async fn move_keyframes(clip: u64, from: f64, to: f64, app: tauri::State<'_, App>) -> Result<TimelineView, String> {
+    edit(&app, move |s| s.move_keyframes(clip, from, to)).await
+}
+
+#[tauri::command]
 pub async fn set_easing(clip: u64, smooth: bool, app: tauri::State<'_, App>) -> Result<TimelineView, String> {
     edit(&app, move |s| s.set_easing(clip, smooth)).await
 }

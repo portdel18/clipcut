@@ -28,6 +28,7 @@ const S = {
   playing: false,
   px: 60,                // timeline zoom, px per second
   sel: new Set(),        // selected clip ids (main track and lanes; never the main track's sound)
+  kf: null,              // a keyframe singled out on the timeline: {clip, t}
   cut: null,             // or the selected cut on the main track: the clip before it
   snap: true,
   frameBusy: false,      // a preview frame request is in flight
@@ -1468,9 +1469,24 @@ function kfButton(ids, prop) {
   });
   return b;
 }
+/** The keyframe singled out on the timeline goes (every property keyed there). */
+async function deleteKeyframe() {
+  const k = S.kf;
+  if (!k) return;
+  if (await edit('delete_keyframes', { clip: k.clip, seconds: k.t })) { S.kf = null; renderSelection(); }
+}
 /** Previous / next keyframe, and whether the clip's keyframes ease in and out. */
 function keyframeControls(s, c) {
   const times = keyTimes(c);
+  if (S.kf && S.kf.clip === c.id) {
+    const names = { position: 'Position', scale: 'Scale', rotation: 'Rotation', opacity: 'Opacity', volume: 'Volume' };
+    const here = (c.keys || []).filter(k => k.times.some(t => Math.abs(t - S.kf.t) < KF_EPS())).map(k => names[k.prop] || k.prop);
+    const p = document.createElement('p');
+    p.className = 'kf-sel';
+    p.textContent = `Selected keyframe at ${fmtFrames(S.kf.t)}: ${here.join(', ') || 'none'}. Drag its diamond to move it.`;
+    s.appendChild(p);
+    s.appendChild(buttons([['Delete keyframe', 'Remove this keyframe (Delete)', deleteKeyframe]]));
+  }
   if (!times.length) {
     const p = document.createElement('p');
     p.className = 'hint';
@@ -1648,7 +1664,7 @@ function makeClipEl(c) {
   el.className = 'clip ' + kind;
   el.dataset.id = c.id;
   const handles = '<div class="handle in" title="Drag to trim the start"></div><div class="handle out" title="Drag to trim the end"></div>';
-  if (kind === 'main') el.innerHTML = '<div class="pics"><canvas></canvas></div><div class="snd"><canvas></canvas></div><span class="label"></span>' + handles;
+  if (kind === 'main') el.innerHTML = '<div class="pics"><canvas></canvas></div><div class="snd"><canvas></canvas><div class="fade in"></div><div class="fade out"></div></div><span class="label"></span>' + handles;
   else if (kind === 'overlay') el.innerHTML = '<div class="pics"><canvas></canvas></div><span class="label"></span>' + handles;
   else if (kind === 'audio') el.innerHTML = '<div class="wave"><canvas></canvas></div><div class="fade in"></div><div class="fade out"></div><span class="label"></span>' + handles;
   else el.innerHTML = '<span class="label"></span>' + handles;
@@ -1657,9 +1673,11 @@ function makeClipEl(c) {
   if (c.graphic) { const t = document.createElement('span'); t.className = 'gr-tag'; t.textContent = 'Graphic'; el.appendChild(t); el.title = `${name}: made in Graphics. Select it and press Edit in Graphics to change it.`; }
   if (kind === 'caption') el.title = c.text;
   if (kind === 'main') el.querySelector('.snd').classList.toggle('none', !hasSound(c));
-  if (kind === 'audio') {
-    el.querySelector('.fade.in').style.width = (c.props.fadeIn * S.px) + 'px';
-    el.querySelector('.fade.out').style.width = (c.props.fadeOut * S.px) + 'px';
+  if (kind === 'audio' || kind === 'main') {
+    // a main clip's fades are its sound's
+    const p = (soundOf(c) || c).props;
+    el.querySelector('.fade.in').style.width = (p.fadeIn * S.px) + 'px';
+    el.querySelector('.fade.out').style.width = (p.fadeOut * S.px) + 'px';
   }
   el.classList.toggle('muted', kind === 'caption' ? !S.tl.captions.on : !laneOn(c.track));
   if (kind === 'main') el.querySelector('.snd').classList.toggle('off', !laneOn('A1'));
@@ -1670,8 +1688,10 @@ function makeClipEl(c) {
     for (const t of times) {
       const d = document.createElement('i');
       d.style.left = ((t - c.start) / (c.end - c.start) * 100) + '%';
-      d.title = `Keyframe at ${fmtFrames(t)}`;
-      d.addEventListener('pointerdown', e => { if (e.button !== 0) return; e.stopPropagation(); e.preventDefault(); if (!S.sel.has(c.id)) select([c.id]); seek(t); });
+      d.dataset.t = t;
+      d.title = `Keyframe at ${fmtFrames(t)}: click to select it (Delete removes it), drag to move it`;
+      d.classList.toggle('sel', isSelKf(c.id, t));
+      d.addEventListener('pointerdown', e => kfPointerDown(e, c, t, d));
       kfs.appendChild(d);
     }
     el.appendChild(kfs);
@@ -1961,14 +1981,50 @@ function scrollToTime(t) {
 }
 
 /* ---------- selection, properties and details ---------- */
-function select(ids) {
+/** `kf`: a keyframe singled out on the timeline ({clip, t}), else null. */
+function select(ids, kf = null) {
   S.sel = new Set(ids);
   S.cut = null;
+  S.kf = kf;
   renderSelection();
+}
+const isSelKf = (clip, t) => !!S.kf && S.kf.clip === clip && Math.abs(S.kf.t - t) < KF_EPS();
+/** A keyframe's diamond: a click singles it out (its clip selected, the playhead on it); a drag
+ *  moves it along the clip, frame by frame. */
+function kfPointerDown(e, c, t, d) {
+  if (e.button !== 0) return;
+  e.stopPropagation();
+  e.preventDefault();
+  select([c.id], { clip: c.id, t });
+  seek(t);
+  const x0 = e.clientX, step = frameStep();
+  const lo = c.start, hi = Math.max(c.start, c.end - step);
+  let to = t, moved = false;
+  const at = ev => Math.min(hi, Math.max(lo, Math.round((t + (ev.clientX - x0) / S.px) / step) * step));
+  const move = ev => {
+    if (!moved && Math.abs(ev.clientX - x0) < 3) return;
+    moved = true;
+    S.dragging = true;
+    to = at(ev);
+    d.style.left = ((to - c.start) / (c.end - c.start) * 100) + '%';
+    d.title = `Move to ${fmtFrames(to)}`;
+  };
+  const up = () => {
+    window.removeEventListener('pointermove', move);
+    window.removeEventListener('pointerup', up);
+    S.dragging = false;
+    if (!moved || Math.abs(to - t) < KF_EPS()) { d.style.left = ((t - c.start) / (c.end - c.start) * 100) + '%'; return; }
+    edit('move_keyframes', { clip: c.id, from: t, to }).then(tl => { if (tl) { S.kf = { clip: c.id, t: to }; seek(to); renderSelection(); } });
+  };
+  window.addEventListener('pointermove', move);
+  window.addEventListener('pointerup', up);
 }
 function renderSelection() {
   refreshLive();
-  for (const [id, el] of S.els) el.classList.toggle('sel', S.sel.has(id));
+  for (const [id, el] of S.els) {
+    el.classList.toggle('sel', S.sel.has(id));
+    for (const d of el.querySelectorAll('.kfs i')) d.classList.toggle('sel', isSelKf(id, +d.dataset.t));
+  }
   for (const el of document.querySelectorAll('#track .cut, #track .tr-span')) el.classList.toggle('sel', +el.dataset.from === S.cut);
   renderTransitionsPanel();
   renderTools();
@@ -2332,7 +2388,7 @@ function renderProps() {
     return;
   }
   const one = sel.length === 1 ? sel[0] : null;
-  const sig = one ? `${one.id}:${one.kind}:${isCap(one) || isMain(one)}:${!isCap(one) && hasSound(one)}:${keyTimes(one).length > 0}:${pictureClip(one)}` : `n${sel.length}`;
+  const sig = one ? `${one.id}:${one.kind}:${isCap(one) || isMain(one)}:${!isCap(one) && hasSound(one)}:${keyTimes(one).length > 0}:${pictureClip(one)}:${S.kf && S.kf.clip === one.id ? S.kf.t : ''}` : `n${sel.length}`;
   $('#props-title').textContent = one ? (one.graphic ? 'Graphic' : one.title ? 'Title' : { text: 'Text', audio: 'Sound', image: 'Picture', caption: 'Caption' }[one.kind] || (isMain(one) ? 'Clip' : 'Overlay')) : sel.length ? `${sel.length} clips` : 'Project';
   if (sig === propsSig) { syncProps(one); return; }
   propsSig = sig;
@@ -2376,10 +2432,10 @@ function renderProps() {
   if (hasSound(one)) {
     const s = section('Sound');
     s.appendChild(slider('Volume', ids, 'volumeDb', { min: -60, max: 15, step: 0.5, unit: 'dB', read: c => (c.live && c.live.volumeDb != null ? c.live.volumeDb : (soundOf(c) || c).props.volumeDb), kf: 'volume' }));
-    // a main clip's edges meet its neighbours, so its fades belong to transitions (later)
+    // fades of the clip's own sound (a main clip's too: its picture's edges are the transitions')
+    s.appendChild(slider('Fade in', ids, 'fadeIn', { min: 0, max: 10, step: 0.1, unit: 's', read: c => (soundOf(c) || c).props.fadeIn }));
+    s.appendChild(slider('Fade out', ids, 'fadeOut', { min: 0, max: 10, step: 0.1, unit: 's', read: c => (soundOf(c) || c).props.fadeOut }));
     if (!isMain(one)) {
-      s.appendChild(slider('Fade in', ids, 'fadeIn', { min: 0, max: 10, step: 0.1, unit: 's', read: c => (soundOf(c) || c).props.fadeIn }));
-      s.appendChild(slider('Fade out', ids, 'fadeOut', { min: 0, max: 10, step: 0.1, unit: 's', read: c => (soundOf(c) || c).props.fadeOut }));
       duckingControls(s, ids);
       beatControls(s, ids);
     }
@@ -2630,6 +2686,7 @@ async function splitKeep(keep) {
   apply(r.timeline);
 }
 async function deleteSelection() {
+  if (S.kf) { await deleteKeyframe(); return; }
   if (transitionAt(S.cut)) { await edit('remove_transitions', { from: [S.cut] }); return; }
   if (!S.sel.size) { toast('Select a clip to delete'); return; }
   const caps = new Set(capClips().map(c => c.id));
@@ -3260,10 +3317,35 @@ scroller().addEventListener('scroll', () => {
   $('#heads-inner').style.transform = `translateY(${-scroller().scrollTop}px)`;
   drawVisible();
 });
+// Zoom: Ctrl + mouse wheel, or a touchpad pinch (the webview sends a pinch as a Ctrl + wheel with
+// small, often fractional steps: spreading two fingers is negative deltaY). Anywhere over the
+// timeline, the toolbar and the lane heads included, zooming around the pointer.
+const pinchZoom = e => {
+  if (!(e.ctrlKey || e.metaKey)) return false;
+  e.preventDefault();
+  const dy = e.deltaMode === 1 ? e.deltaY * 33 : e.deltaY;
+  // a pinch moves a few units an event, a mouse wheel notch about 100
+  const k = Math.abs(dy) < 50 ? 0.012 : 0.0015;
+  const sc = scroller().getBoundingClientRect();
+  // a pinch sends dozens of steps a second: one relayout per screen refresh, all steps together
+  zoomStep.factor *= Math.exp(-dy * k);
+  zoomStep.x = Math.min(sc.right, Math.max(sc.left, e.clientX));
+  if (!zoomStep.queued) {
+    zoomStep.queued = true;
+    requestAnimationFrame(() => {
+      zoomStep.queued = false;
+      const f = zoomStep.factor;
+      zoomStep.factor = 1;
+      setPx(S.px * f, zoomStep.x);
+    });
+  }
+  return true;
+};
+const zoomStep = { factor: 1, x: 0, queued: false };
+$('.timeline').addEventListener('wheel', e => { if (!e.target.closest('#tl-scroll')) pinchZoom(e); }, { passive: false });
 scroller().addEventListener('wheel', e => {
-  if (e.ctrlKey || e.metaKey) {
-    e.preventDefault();
-    setPx(S.px * Math.exp(-e.deltaY * 0.0015), e.clientX);
+  if (pinchZoom(e)) {
+    // zoomed
   } else if (e.shiftKey || scroller().scrollHeight <= scroller().clientHeight + 1) {
     // a plain wheel scrolls through time; with lanes to spare it scrolls them, Shift through time
     if (Math.abs(e.deltaY) > Math.abs(e.deltaX)) { e.preventDefault(); scroller().scrollLeft += e.deltaY; }

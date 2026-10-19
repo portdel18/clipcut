@@ -147,3 +147,67 @@ fn keyframes_move_with_their_clip() {
     let k = keys(&s, b, "scale").unwrap();
     assert!((k.times[0] - 0.25).abs() < 0.02, "{k:?}");
 }
+
+#[test]
+fn a_keyframe_singled_out_is_deleted_or_moved_on_its_own() {
+    let Some((mut s, id)) = studio() else { return };
+    // scale at 0.5 and 1.5 (100 → 300), opacity and volume keyed at 1.5 too
+    assert!(s.toggle_keyframe(id, "scale", 0.5).unwrap());
+    s.set_props(&[id], &json!({"scale": 300.0, "at": 1.5}), None).unwrap();
+    assert!(s.toggle_keyframe(id, "opacity", 1.5).unwrap());
+    assert!(s.toggle_keyframe(id, "volume", 1.5).unwrap());
+    let n = s.timeline().clips.len();
+
+    // moving the diamond at 1.5 moves every property keyed there, values kept
+    s.move_keyframes(id, 1.5, 1.0).unwrap();
+    for prop in ["scale", "opacity", "volume"] {
+        let k = keys(&s, id, prop).unwrap();
+        assert!(k.times.iter().any(|t| (t - 1.0).abs() < 1e-6) && !k.times.iter().any(|t| (t - 1.5).abs() < 1e-6), "{prop}: {k:?}");
+    }
+    assert!((s.props_at(id, 1.0).unwrap().scale.unwrap() - 300.0).abs() < 1e-6);
+    let mid = s.props_at(id, 0.8).unwrap().scale.unwrap();
+    assert!((mid - 220.0).abs() < 1.0, "three fifths of the way at 0.8: {mid}, keys {:?}", keys(&s, id, "scale"));
+    s.undo().unwrap();
+    assert!(keys(&s, id, "volume").unwrap().times.iter().any(|t| (t - 1.5).abs() < 1e-6), "one undo step");
+    // kept on the clip
+    s.move_keyframes(id, 1.5, 99.0).unwrap();
+    assert!(keys(&s, id, "scale").unwrap().times.iter().all(|t| *t < 2.0));
+    s.undo().unwrap();
+
+    // deleting it takes those keyframes only: the clip and the other keyframe stay
+    s.delete_keyframes(id, 1.5).unwrap();
+    assert_eq!(s.timeline().clips.len(), n, "the clip stays");
+    assert_eq!(keys(&s, id, "scale").map(|k| k.times.len()).unwrap_or(0), 1);
+    assert!(keys(&s, id, "opacity").is_none_or(|k| k.times.is_empty()));
+    assert!(keys(&s, id, "volume").is_none_or(|k| k.times.is_empty()));
+    s.undo().unwrap();
+    assert_eq!(keys(&s, id, "scale").unwrap().times.len(), 2, "one undo step");
+
+    // nothing there, or no such clip
+    assert!(s.delete_keyframes(id, 1.2).is_err());
+    assert!(s.move_keyframes(id, 1.2, 0.3).is_err());
+    assert!(s.delete_keyframes(987_654, 1.5).is_err());
+}
+
+#[test]
+fn a_main_track_clip_fades_its_own_sound() {
+    let Some((mut s, id)) = studio() else { return };
+    s.add_clip(clip("kf-white", "white").unwrap().to_str().unwrap()).unwrap();
+    let before = loud(&s, 0.1);
+    s.set_props(&[id], &json!({"fadeIn": 0.8, "fadeOut": 0.5}), None).unwrap();
+    let snd = s.timeline().clips.into_iter().find(|c| c.track == "A1" && c.start < 0.1).unwrap();
+    assert!((snd.props.fade_in - 0.8).abs() < 0.05 && (snd.props.fade_out - 0.5).abs() < 0.05, "{:?}", snd.props);
+    assert!(loud(&s, 0.1) < before * 0.5, "quiet at the start: {} vs {before}", loud(&s, 0.1));
+    assert!(loud(&s, 1.0) > before * 0.8, "full in the middle");
+    assert!(loud(&s, 1.95) < before * 0.5, "quiet at the end, before the next clip");
+    assert!(loud(&s, 2.5) > before * 0.8, "the next clip is untouched");
+    // the fades stay on the clip's edges when the main track changes around it
+    let second = main(&s.timeline())[1];
+    s.reorder(second, 0).unwrap();
+    let snd = s.timeline().clips.into_iter().find(|c| c.track == "A1" && c.start > 1.0).unwrap();
+    assert!((snd.props.fade_in - 0.8).abs() < 0.05 && (snd.props.fade_out - 0.5).abs() < 0.05, "after moving: {:?}", snd.props);
+    assert!(loud(&s, 2.1) < before * 0.5 && loud(&s, 0.1) > before * 0.8, "the faded clip is second now");
+    s.undo().unwrap();
+    s.undo().unwrap();
+    assert!(s.timeline().clips.iter().all(|c| c.props.fade_in == 0.0), "the fades were one undo step");
+}

@@ -223,6 +223,28 @@ fn lay_out(q: &mut Sequence, wanted: Vec<Transition>, spare: &Spare, alloc: &mut
             });
         }
     }
+    // a main clip's own fade in and fade out (one-sided, on its sound) stay on that edge of it,
+    // wherever the clip moved, unless a crossfade took the edge; never longer than half the clip
+    if let Some(a1) = q.audio_tracks.first() {
+        for o in &old_audio {
+            let (clip, fade_in) = match (o.from, o.to) {
+                (None, Some(c)) => (c, true),
+                (Some(c), None) => (c, false),
+                _ => continue,
+            };
+            let Some(c) = a1.items.iter().find(|i| i.id == clip) else { continue };
+            if audio.iter().any(|x| if fade_in { x.to == Some(c.id) } else { x.from == Some(c.id) }) {
+                continue;
+            }
+            let duration = o.duration.min(c.duration.mul_ratio(1, 2));
+            if duration <= Tick(0) {
+                continue;
+            }
+            let start = if fade_in { c.start } else { c.end() - duration };
+            audio.push(Transition { start, duration, ..o.clone() });
+        }
+    }
+    audio.sort_by_key(|t| t.start);
     let before = (signature(q.video_tracks.first()), signature(q.audio_tracks.first()));
     let mut v1 = q.video_tracks.first().cloned();
     let mut a1 = q.audio_tracks.first().cloned();

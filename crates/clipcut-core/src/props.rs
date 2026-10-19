@@ -371,11 +371,34 @@ impl Studio {
                 .session
                 .execute("sequence.setTransition", json!({"transition": t, "frames": n, "align": if edge == "in" { "start" } else { "end" }}))
                 .map(|_| ()),
-            (None, n) => {
-                self.session.execute("sequence.applyAudioTransition", json!({"clip": clip, "edge": edge, "effect": "constant_power", "frames": n})).map(|_| ())
-            }
+            (None, n) => self
+                .session
+                .execute("sequence.applyAudioTransition", json!({"clip": clip, "edge": edge, "effect": "constant_power", "frames": n}))
+                .and_then(|r| match r.get("transition").and_then(Value::as_u64) {
+                    Some(t) => self.fade_alone(clip, t, edge == "in"),
+                    None => Ok(()),
+                }),
         }
         .map_err(engine)
+    }
+
+    /// Where another clip meets this edge (a main clip's sound always has one) the engine makes
+    /// the new fade a crossfade on the cut: it becomes a fade of `clip` alone, inside its edge.
+    fn fade_alone(&mut self, clip: u64, transition: u64, fade_in: bool) -> std::result::Result<(), filmcraft_engine::EngineError> {
+        self.session.edit_sequence("Fade", |q, _, _| {
+            for tr in q.audio_tracks.iter_mut().chain(q.video_tracks.iter_mut()) {
+                let Some(item) = tr.items.iter().find(|i| i.id.0 == clip).cloned() else { continue };
+                if let Some(t) = tr.transitions.iter_mut().find(|t| t.id.0 == transition) {
+                    let duration = t.duration.min(item.duration.mul_ratio(1, 2));
+                    if fade_in {
+                        *t = filmcraft_project::Transition { from: None, to: Some(item.id), start: item.start, duration, ..t.clone() };
+                    } else {
+                        *t = filmcraft_project::Transition { from: Some(item.id), to: None, start: item.end() - duration, duration, ..t.clone() };
+                    }
+                }
+            }
+            Ok(())
+        })
     }
 
     /// The canvas's size (16:9 1920 × 1080, 9:16 1080 × 1920…). Clips are refitted to the new
