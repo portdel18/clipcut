@@ -356,6 +356,8 @@ fn main() {
             editing::set_proxies,
             editing::props_at,
             editing::toggle_keyframe,
+            editing::delete_keyframes,
+            editing::move_keyframes,
             editing::set_easing,
             graphics::graphic_begin,
             graphics::graphic_frame,
