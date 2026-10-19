@@ -3193,50 +3193,64 @@ async function exportClip() {
     path = await invoke('pick_export_path', { name: projectName(), ext: choice.ext });
   } catch (e) { toast(e, true); return; }
   if (!path) return;
-  let job;
-  try {
-    job = await invoke('export_as', { path, choice: choice.id });
-  } catch (e) { toast(e, true); return; }
   const dlg = $('#export-dlg');
   $('#export-title').textContent = `Exporting: ${choice.name}`;
   $('#export-path').textContent = path;
+  $('#export-reveal').onclick = () => invoke('reveal', { path }).catch(e => toast(e, true));
+  $('#export-close').onclick = () => dlg.close();
+  // the graphics card's encoder first; if it fails partway, once more with ClipCut's own encoder
+  for (const hardware of [true, false]) {
+    const outcome = await runExport(path, choice, hardware, dlg);
+    if (outcome !== 'gpu-failed') break;
+    toast("The graphics card's video encoder stopped partway, so ClipCut is exporting again with its own encoder (slower).", true);
+  }
+  $('#export-cancel').hidden = true;
+  $('#export-close').hidden = false;
+}
+/** One export job, shown in the Export dialog: 'done', 'failed', 'cancelled', or 'gpu-failed'
+ *  (the graphics card's encoder failed: worth trying again without it). */
+async function runExport(path, choice, hardware, dlg) {
+  const before = await invoke('hardware_frames').catch(() => 0);
+  let job;
+  try {
+    job = await invoke('export_as', { path, choice: choice.id, hardware });
+  } catch (e) { toast(e, true); dlg.close(); return 'failed'; }
   $('#export-bar').style.width = '0';
-  $('#export-meta').textContent = 'Starting…';
+  $('#export-meta').textContent = hardware ? 'Starting…' : "Starting again with ClipCut's own encoder…";
   $('#export-meta').className = 'meta';
   $('#export-cancel').hidden = false;
   $('#export-reveal').hidden = true;
   $('#export-close').hidden = true;
   $('#export-cancel').onclick = () => invoke('cancel_export', { job }).catch(() => {});
-  $('#export-reveal').onclick = () => invoke('reveal', { path }).catch(e => toast(e, true));
-  $('#export-close').onclick = () => dlg.close();
-  dlg.showModal();
+  if (!dlg.open) dlg.showModal();
   const t0 = performance.now();
   for (;;) {
     await sleep(250);
     let st;
     try { st = await invoke('export_status', { job }); } catch (e) { st = null; }
-    if (!st) { $('#export-meta').textContent = 'The export stopped reporting progress.'; $('#export-meta').className = 'meta err'; break; }
+    if (!st) { $('#export-meta').textContent = 'The export stopped reporting progress.'; $('#export-meta').className = 'meta err'; return 'failed'; }
     $('#export-bar').style.width = (st.progress * 100).toFixed(1) + '%';
     const eta = st.etaSeconds != null ? ` · about ${Math.ceil(st.etaSeconds)} s left` : '';
     $('#export-meta').textContent = `${Math.floor(st.progress * 100)}%${eta}`;
     if (st.finished) {
       if (st.error) {
         const cancelled = /cancel/i.test(st.error);
+        // the hardware encoders' errors say how to turn them off
+        if (!cancelled && hardware && /Hardware encoding|NVENC|Media Foundation|MFT/i.test(st.error)) return 'gpu-failed';
         $('#export-title').textContent = cancelled ? 'Export cancelled' : 'Export failed';
         $('#export-meta').textContent = cancelled ? 'Nothing was saved.' : cap(st.error);
         $('#export-meta').className = 'meta err';
-      } else {
-        $('#export-title').textContent = 'Export finished';
-        $('#export-bar').style.width = '100%';
-        $('#export-meta').textContent = `Saved in ${((performance.now() - t0) / 1000).toFixed(1)} s.`;
-        $('#export-meta').className = 'meta ok';
-        $('#export-reveal').hidden = false;
+        return cancelled ? 'cancelled' : 'failed';
       }
-      break;
+      const gpu = (await invoke('hardware_frames').catch(() => before)) > before;
+      $('#export-title').textContent = 'Export finished';
+      $('#export-bar').style.width = '100%';
+      $('#export-meta').textContent = `Saved in ${((performance.now() - t0) / 1000).toFixed(1)} s${gpu ? ', encoded on the graphics card' : ''}.`;
+      $('#export-meta').className = 'meta ok';
+      $('#export-reveal').hidden = false;
+      return 'done';
     }
   }
-  $('#export-cancel').hidden = true;
-  $('#export-close').hidden = false;
 }
 
 /* ---------- wiring ---------- */

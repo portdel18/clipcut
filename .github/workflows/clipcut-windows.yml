@@ -79,6 +79,38 @@ jobs:
           Get-Content selftest-report.json
           if ($p.ExitCode -ne 0) { throw "self-test failed (exit $($p.ExitCode))" }
 
+      - name: Export through Media Foundation's encoder
+        shell: pwsh
+        run: |
+          # The path Intel Quick Sync and other GPUs' H.264 encoders take (Media Foundation), with
+          # Microsoft's software encoder MFT standing in for the hardware one (this runner has no
+          # GPU), against ClipCut's own encoder: both must decode cleanly, every frame there, and
+          # look like the source.
+          $clip = "$env:RUNNER_TEMP\speed-in.mp4"
+          ffmpeg -v error -y -f lavfi -i "testsrc2=size=1080x1920:rate=30:duration=20" -f lavfi -i "sine=frequency=440:duration=20:sample_rate=48000" -vf "noise=alls=12:allf=t" -c:v libx264 -preset veryfast -b:v 10M -pix_fmt yuv420p -c:a aac -shortest $clip
+          $exe = @("target\release\ClipCut.exe", "target\release\clipcut.exe") | Where-Object { Test-Path $_ } | Select-Object -First 1
+          foreach ($mode in @("hardware", "software")) {
+            if ($mode -eq "hardware") { $env:FILMCRAFT_MF_SOFTWARE_ENCODER = "1" } else { Remove-Item Env:\FILMCRAFT_MF_SOFTWARE_ENCODER -ErrorAction SilentlyContinue }
+            $out = "$env:RUNNER_TEMP\export-$mode.mp4"
+            $p = Start-Process -FilePath $exe -ArgumentList "--export-test", $clip, $out, "export-$mode.json", $mode -Wait -PassThru -NoNewWindow
+            Get-Content "export-$mode.json"
+            if ($p.ExitCode -ne 0) { throw "the $mode export failed (exit $($p.ExitCode))" }
+            $r = Get-Content "export-$mode.json" -Raw | ConvertFrom-Json
+            $errs = ffmpeg -v error -i $out -f null - 2>&1 | Out-String
+            if ($errs.Trim()) { throw "the $mode export doesn't decode cleanly: $errs" }
+            $n = (ffprobe -v error -count_frames -select_streams v:0 -show_entries stream=nb_read_frames -of csv=p=0 $out | Out-String).Trim()
+            if ($n -ne "600") { throw "the $mode export has $n frames, not 600" }
+            $line = ffmpeg -i $out -i $clip -lavfi "[0:v][1:v]psnr" -f null - 2>&1 | Out-String
+            $m = [regex]::Match($line, "average:([0-9.]+|inf)")
+            if (-not $m.Success) { throw "no PSNR for the $mode export: $line" }
+            $psnr = if ($m.Groups[1].Value -eq "inf") { 99 } else { [double]$m.Groups[1].Value }
+            Write-Output "$mode export: $([math]::Round($r.seconds, 1)) s, $([math]::Round($r.fps, 1)) fps, PSNR $psnr dB against the source, $($r.hardwareFrames) pictures through Media Foundation"
+            if ($psnr -lt 28) { throw "the $mode export looks wrong: PSNR $psnr dB" }
+            if ($mode -eq "hardware" -and $r.hardwareFrames -lt 600) { throw "Media Foundation encoded only $($r.hardwareFrames) of 600 pictures" }
+            if ($mode -eq "software" -and $r.hardwareFrames -ne 0) { throw "the software export went through a hardware encoder" }
+          }
+          Remove-Item Env:\FILMCRAFT_MF_SOFTWARE_ENCODER -ErrorAction SilentlyContinue
+
       - name: Speech model cache (Whisper tiny, for the captions test)
         uses: actions/cache@v4
         with:

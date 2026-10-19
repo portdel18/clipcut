@@ -181,7 +181,9 @@ clip's name>`, and every change after that is saved a moment later. ClipCut reop
 when it starts. **New** (`Ctrl+N`) starts another, **Open** (`Ctrl+O`) picks a saved one.
 
 **Export** (`Ctrl+E`) asks where the video goes (see Export above), then saves an H.264 MP4 (a
-ProRes `.mov` for the master, a `.wav` for the sound) with progress and Cancel.
+ProRes `.mov` for the master, a `.wav` for the sound) with progress and Cancel. The graphics card
+composes and encodes the video where it can (NVIDIA's NVENC, Intel Quick Sync and AMD's encoders
+through Windows' Media Foundation); if its encoder fails partway, ClipCut exports again with its own.
 
 ## Roadmap
 

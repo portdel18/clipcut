@@ -1,4 +1,5 @@
-//! Media Foundation / Direct3D 11 (Windows) hardware H.264 / HEVC decoding.
+//! Media Foundation / Direct3D 11 (Windows) hardware H.264 / HEVC decoding, and hardware H.264
+//! encoding for Export ([`export`]: Intel Quick Sync, AMD and other GPUs' encoder MFTs).
 //!
 //! The decoder is a Direct3D-aware decoder MFT (Microsoft's H.264 decoder, the HEVC Video
 //! Extensions' decoder, or a vendor's synchronous hardware MFT) driven at the level of single
@@ -26,6 +27,9 @@
 //! The modules that call into Windows (`gpu`, `mft`) are the FFI modules of this backend
 //! (docs/adr/0001-platform-ffi.md); this one is safe code.
 
+#[allow(unsafe_code)]
+mod encode;
+pub mod export;
 #[allow(unsafe_code)]
 mod gpu;
 #[allow(unsafe_code)]
