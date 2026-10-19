@@ -365,3 +365,38 @@ h3.sub { margin: 12px 0 6px; font-size: 11px; font-weight: 600; color: var(--mut
 #quality { width: 70px; }
 #ratio { width: 118px; }
 .dlg .dlg-text { margin: 0 0 16px; color: var(--muted); }
+
+/* Find and replace in the transcript */
+.find-open { justify-self: start; }
+.find { display: grid; gap: 8px; padding: 10px; border-radius: 8px; background: var(--panel-2); border: 1px solid var(--line); }
+.find-row { display: flex; align-items: center; gap: 6px; }
+.find-row input { width: 0; }
+.cap-tools { grid-template-columns: minmax(0, 1fr); }
+.find input[type="search"], .find input[type="text"], .keys-filter { flex: 1; min-width: 0; height: 28px; padding: 0 8px; font: inherit; color: var(--text); background: var(--well); border: 1px solid var(--line); border-radius: 6px; -webkit-user-select: text; user-select: text; }
+.find input:focus, .keys-filter:focus { outline: none; border-color: var(--accent); }
+.find-count { min-width: 64px; text-align: right; font-family: var(--mono); font-size: 11.5px; color: var(--muted); white-space: nowrap; }
+.find-count.none { color: var(--err); }
+.find .tool svg, .keys-btn svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.transcript span.w.found { background: rgba(244, 196, 67, .16); box-shadow: inset 0 -2px 0 rgba(244, 196, 67, .55); }
+.transcript span.w.found-now { background: var(--accent); color: var(--accent-ink); box-shadow: none; }
+
+/* Keyboard shortcuts */
+.keys-btn { width: 34px; height: 30px; }
+.keys-filter { display: block; width: 100%; flex: none; margin: 0 0 10px; }
+.keys-list { max-height: min(56vh, 520px); overflow-y: auto; margin: 0 -4px 6px; padding: 0 4px; }
+.keys-list h3 { margin: 14px 0 4px; font-size: 11px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; color: var(--faint); }
+.keys-list h3:first-child { margin-top: 0; }
+.key-row { display: flex; align-items: center; gap: 8px; min-height: 34px; padding: 3px 6px; border-radius: 6px; }
+.key-row:hover { background: var(--panel-2); }
+.key-row .what { flex: 1; min-width: 0; }
+.key-row .changed { color: var(--accent); font-size: 11px; margin-left: 6px; }
+.key-row .chips { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 4px; }
+.kbd { display: inline-flex; align-items: center; gap: 4px; height: 24px; padding: 0 4px 0 8px; border-radius: 5px; border: 1px solid var(--line); background: var(--well); font: 12px var(--mono); color: var(--text); white-space: nowrap; }
+.kbd button { width: 18px; height: 18px; display: grid; place-items: center; border: 0; border-radius: 4px; background: none; color: var(--faint); cursor: pointer; font-size: 13px; line-height: 1; }
+.kbd button:hover { color: var(--text); background: var(--panel-2); }
+.kbd.none { padding-right: 8px; color: var(--faint); font-family: var(--ui); }
+.kbd.rec { border-color: var(--accent); color: var(--accent); padding-right: 8px; }
+.key-row .add { width: 26px; height: 24px; border-radius: 5px; border: 1px dashed var(--line); background: none; color: var(--muted); cursor: pointer; font-size: 15px; line-height: 1; }
+.key-row .add:hover { border-color: var(--faint); color: var(--text); }
+.key-row .reset { height: 24px; padding: 0 8px; border: 0; border-radius: 5px; background: none; color: var(--faint); cursor: pointer; font-size: 12px; }
+.key-row .reset:hover { color: var(--text); background: var(--panel-2); }

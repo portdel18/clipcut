@@ -26,6 +26,41 @@ fn last_project_file(handle: &tauri::AppHandle) -> Option<PathBuf> {
     handle.path().app_config_dir().ok().map(|d| d.join("last-project.txt"))
 }
 
+/// The keys the user set in Keyboard shortcuts (only the actions they changed), in the settings
+/// folder: `{"split": ["S"], ...}`.
+fn shortcuts_file(handle: &tauri::AppHandle) -> Option<PathBuf> {
+    handle.path().app_config_dir().ok().map(|d| d.join("shortcuts.json"))
+}
+
+/// The most a shortcuts file may hold: far more than every action with several keys.
+const SHORTCUTS_MAX: usize = 64 * 1024;
+
+#[tauri::command]
+pub fn load_shortcuts(handle: tauri::AppHandle) -> serde_json::Value {
+    shortcuts_file(&handle)
+        .and_then(|f| std::fs::read(f).ok())
+        .filter(|b| b.len() <= SHORTCUTS_MAX)
+        .and_then(|b| serde_json::from_slice::<serde_json::Value>(&b).ok())
+        .filter(serde_json::Value::is_object)
+        .unwrap_or_else(|| serde_json::json!({}))
+}
+
+#[tauri::command]
+pub fn save_shortcuts(keys: serde_json::Value, handle: tauri::AppHandle) -> Result<(), String> {
+    if !keys.is_object() {
+        return Err("the shortcuts couldn't be saved: they were not a list of actions".into());
+    }
+    let f = shortcuts_file(&handle).ok_or("the shortcuts couldn't be saved: there is no settings folder")?;
+    let text = serde_json::to_string_pretty(&keys).map_err(|e| e.to_string())?;
+    if text.len() > SHORTCUTS_MAX {
+        return Err("the shortcuts couldn't be saved: there are too many keys".into());
+    }
+    if let Some(dir) = f.parent() {
+        std::fs::create_dir_all(dir).map_err(|e| format!("the shortcuts couldn't be saved in {}: {e}", dir.display()))?;
+    }
+    std::fs::write(&f, text).map_err(|e| format!("the shortcuts couldn't be saved in {}: {e}", f.display()))
+}
+
 fn remember(handle: &tauri::AppHandle, path: Option<&str>) {
     let Some(f) = last_project_file(handle) else { return };
     match path {

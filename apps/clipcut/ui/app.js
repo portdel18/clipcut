@@ -736,6 +736,8 @@ async function loadWords() {
 }
 function renderTranscript() {
   const box = $('#transcript');
+  // emptied for a moment, the panel would lose its place
+  const pane = $('#panel-captions'), top = pane.scrollTop;
   box.innerHTML = '';
   W.spans = [];
   W.now = -1;
@@ -757,6 +759,10 @@ function renderTranscript() {
     last = w;
   });
   markWord();
+  runFind(true);
+  pane.scrollTop = top;
+  if (F.scroll && !$('#find-bar').hidden) $('#find-bar').scrollIntoView({ block: 'start' });
+  F.scroll = false;
 }
 function paintWordSel() {
   W.spans.forEach((sp, i) => sp.classList.toggle('sel', !!W.sel && i >= W.sel[0] && i <= W.sel[1]));
@@ -808,6 +814,137 @@ function markWord() {
     W.spans[at].classList.add('now');
     if (S.playing) W.spans[at].scrollIntoView({ block: 'nearest' });
   }
+}
+
+/* Find and replace in the transcript. The search runs over the words joined by spaces, as in a text
+   editor: the same rules as `find_in` in clipcut-core's replace.rs, which does the replacing. */
+const F = { matches: [], at: -1, scroll: false };
+/** A character as the search compares it (see `fold` in replace.rs). */
+function foldChar(c, matchCase) {
+  if (matchCase) return c;
+  const l = c.toLowerCase();
+  return [...l].length === 1 ? l : c;
+}
+/** Every place `find` appears in `words` ({first, last} word), left to right, no overlaps. */
+function findMatches(words, find, matchCase) {
+  const needle = [...find.split(/\s+/).filter(Boolean).join(' ')].map(c => foldChar(c, matchCase));
+  if (!needle.length) return [];
+  const text = [], at = [];
+  words.forEach((w, i) => {
+    if (i) { text.push(' '); at.push(-1); }
+    for (const c of w) { text.push(foldChar(c, matchCase)); at.push(i); }
+  });
+  const out = [];
+  for (let i = 0; i + needle.length <= text.length;) {
+    let j = 0;
+    while (j < needle.length && text[i + j] === needle[j]) j++;
+    if (j === needle.length) {
+      const first = at[i], last = at[i + needle.length - 1];
+      if (first >= 0 && last >= 0) out.push({ first, last });
+      i += needle.length;
+    } else i++;
+  }
+  return out;
+}
+function openFind() {
+  showTab('captions');
+  if (!S.tl || !S.tl.captions.exists) { toast('There is no transcript to search yet: press Auto captions first.'); return; }
+  $('#find-bar').hidden = false;
+  $('#find-open').hidden = true;
+  const q = $('#find-q');
+  // words selected in the transcript are what to find
+  if (W.sel && W.words.length) q.value = W.words.slice(W.sel[0], W.sel[1] + 1).map(w => w.text).join(' ');
+  // the bar at the top, the transcript under it: now, and again once the words are in
+  F.scroll = true;
+  requestAnimationFrame(() => $('#find-bar').scrollIntoView({ block: 'start' }));
+  q.focus({ preventScroll: true });
+  q.select();
+  runFind();
+}
+function closeFind() {
+  $('#find-bar').hidden = true;
+  $('#find-open').hidden = false;
+  F.matches = [];
+  F.at = -1;
+  paintFound();
+}
+/** Finds again (after typing, or new words); `keep` stays on the same match number. */
+function runFind(keep = false) {
+  if ($('#find-bar').hidden) return;
+  F.matches = findMatches(W.words.map(w => w.text), $('#find-q').value, $('#find-case').checked);
+  if (!F.matches.length) F.at = -1;
+  else if (keep && F.at >= 0) F.at = Math.min(F.at, F.matches.length - 1);
+  else {
+    // the first match from the playhead on
+    const i = F.matches.findIndex(m => W.words[m.first].start >= S.t - 1e-6);
+    F.at = i >= 0 ? i : 0;
+  }
+  paintFound();
+}
+function paintFound() {
+  const now = F.matches[F.at];
+  const found = new Set();
+  for (const m of F.matches) for (let i = m.first; i <= m.last; i++) found.add(i);
+  W.spans.forEach((sp, i) => {
+    sp.classList.toggle('found', found.has(i));
+    sp.classList.toggle('found-now', !!now && i >= now.first && i <= now.last);
+  });
+  const c = $('#find-count'), q = $('#find-q').value.trim();
+  c.textContent = !q ? '' : F.matches.length ? `${F.at + 1} of ${F.matches.length}` : 'No matches';
+  c.classList.toggle('none', !!q && !F.matches.length);
+  $('#find-one').disabled = !now;
+  $('#find-all').disabled = !F.matches.length;
+  $('#find-prev').disabled = $('#find-next').disabled = F.matches.length < 2 && !now;
+}
+/** Goes to the next (1) or previous (-1) match: the playhead and the transcript follow. */
+function goFind(dir) {
+  if (!F.matches.length) return;
+  F.at = (F.at + dir + F.matches.length) % F.matches.length;
+  paintFound();
+  showFound();
+}
+function showFound() {
+  const m = F.matches[F.at];
+  if (!m) return;
+  seek(W.words[m.first].start);
+  scrollToTime(W.words[m.first].start);
+  const sp = W.spans[m.first];
+  if (sp) sp.scrollIntoView({ block: 'nearest' });
+}
+async function replaceFound(all) {
+  const find = $('#find-q').value, matchCase = $('#find-case').checked, w = $('#find-with').value;
+  if (!find.trim() || (!all && F.at < 0)) return;
+  const r = await run('replace_words', { find, with: w, case: matchCase, only: all ? null : F.at });
+  if (!r) return;
+  apply(r.timeline);
+  // the words again; the match after the one replaced is now at its number
+  try { W.words = await invoke('words'); } catch (e) { W.words = []; }
+  W.sel = null;
+  renderTranscript();
+  runFind(!all);
+  if (!all) showFound();
+  toast(all ? `${r.removed} place${r.removed === 1 ? '' : 's'} replaced` : F.matches.length ? `Replaced: ${F.matches.length} more to go` : 'Replaced: no more matches');
+}
+function wireFind() {
+  const q = $('#find-q'), w = $('#find-with');
+  q.addEventListener('input', () => runFind());
+  $('#find-case').addEventListener('change', () => runFind());
+  for (const el of [q, w]) {
+    el.addEventListener('keydown', e => {
+      e.stopPropagation();
+      const combo = comboOf(e);
+      if (e.key === 'Escape') { e.preventDefault(); closeFind(); $('#transcript').focus(); }
+      else if (e.key === 'Enter' && el === q) { e.preventDefault(); goFind(e.shiftKey ? -1 : 1); }
+      else if (e.key === 'Enter' && el === w) { e.preventDefault(); replaceFound(e.ctrlKey || e.metaKey); }
+      else if (combo && (KEYS.get('find') || []).includes(combo)) { e.preventDefault(); q.focus(); q.select(); }
+    });
+  }
+  $('#find-prev').onclick = () => goFind(-1);
+  $('#find-next').onclick = () => goFind(1);
+  $('#find-close').onclick = closeFind;
+  $('#find-one').onclick = () => replaceFound(false);
+  $('#find-all').onclick = () => replaceFound(true);
+  $('#find-open').onclick = openFind;
 }
 
 /* ---------- Graphics: Clip Studio over the editor; its graphics come in as clips ---------- */
@@ -1110,7 +1247,7 @@ function transitionControls(box, t) {
   controls.push({ el: range, read }, { el: num, read, write: (el, v) => { el.value = v.toFixed(2); } });
   box.appendChild(row);
   box.appendChild(buttons([
-    ['Remove', 'Back to a plain cut (Delete)', () => edit('remove_transitions', { from: [t.from] })],
+    ['Remove', `Back to a plain cut${keyText('delete') ? ` (${keyText('delete')})` : ''}`, () => edit('remove_transitions', { from: [t.from] })],
     ['Apply to every cut', `Put ${t.name} on every cut`, transitionEverywhere],
     ['Change', 'Pick another in the Transitions tab', () => showTab('transitions')],
   ]));
@@ -1485,7 +1622,7 @@ function keyframeControls(s, c) {
     p.className = 'kf-sel';
     p.textContent = `Selected keyframe at ${fmtFrames(S.kf.t)}: ${here.join(', ') || 'none'}. Drag its diamond to move it.`;
     s.appendChild(p);
-    s.appendChild(buttons([['Delete keyframe', 'Remove this keyframe (Delete)', deleteKeyframe]]));
+    s.appendChild(buttons([['Delete keyframe', `Remove this keyframe${keyText('delete') ? ` (${keyText('delete')})` : ''}`, deleteKeyframe]]));
   }
   if (!times.length) {
     const p = document.createElement('p');
@@ -1976,8 +2113,9 @@ function renderTools() {
   $('#delete-btn').disabled = S.sel.size === 0 && !transitionAt(S.cut);
   $('#undo-btn').disabled = !S.tl.canUndo;
   $('#redo-btn').disabled = !S.tl.canRedo;
-  $('#undo-btn').title = S.tl.undoLabel ? `Undo ${S.tl.undoLabel} (Ctrl+Z)` : 'Undo (Ctrl+Z)';
-  $('#redo-btn').title = S.tl.redoLabel ? `Redo ${S.tl.redoLabel} (Ctrl+Shift+Z)` : 'Redo (Ctrl+Shift+Z)';
+  const uk = keyText('undo'), rk = keyText('redo');
+  $('#undo-btn').title = (S.tl.undoLabel ? `Undo ${S.tl.undoLabel}` : 'Undo') + (uk ? ` (${uk})` : '');
+  $('#redo-btn').title = (S.tl.redoLabel ? `Redo ${S.tl.redoLabel}` : 'Redo') + (rk ? ` (${rk})` : '');
   $('#snap-btn').setAttribute('aria-pressed', String(S.snap));
   // the player's frame follows whether the selected clip is under the playhead
   const at = stageClip() ? 1 : 0;
@@ -3318,6 +3456,7 @@ listen('caption-progress', e => {
   $('#cap-status').textContent = `${Math.floor(100 * (p.fraction || 0))}% · ${p.status || ''}`;
 });
 wireTranscript();
+wireFind();
 click('#play-btn', toggle);
 click('#export-btn', exportClip);
 click('#new-btn', newProject);
@@ -3384,55 +3523,276 @@ scroller().addEventListener('wheel', e => {
   }
 }, { passive: false });
 
+/* ---------- keyboard shortcuts: every action's keys, which the user can change ---------- */
+// a frame at a time (Shift: 10): the selected cut moves, else the selected lane clips
+const nudge = n => (S.cut != null ? rollCut(S.cut, n) : nudgeSel(n));
+/** Every action a key can do: `keys` are the defaults; `once` acts once per press, not while held. */
+const ACTIONS = [
+  { group: 'Playback', id: 'play', label: 'Play or pause', keys: ['Space', 'K'], fn: () => toggle() },
+  { group: 'Playback', id: 'frame-back', label: 'Back one frame', keys: ['ArrowLeft'], fn: () => seekBy(-frameStep()) },
+  { group: 'Playback', id: 'frame-on', label: 'Forward one frame', keys: ['ArrowRight'], fn: () => seekBy(frameStep()) },
+  { group: 'Playback', id: 'second-back', label: 'Back one second', keys: ['J'], fn: () => seekBy(-1) },
+  { group: 'Playback', id: 'second-on', label: 'Forward one second', keys: ['L'], fn: () => seekBy(1) },
+  { group: 'Playback', id: 'five-back', label: 'Back five seconds', keys: ['Shift+ArrowLeft'], fn: () => seekBy(-5) },
+  { group: 'Playback', id: 'five-on', label: 'Forward five seconds', keys: ['Shift+ArrowRight'], fn: () => seekBy(5) },
+  { group: 'Playback', id: 'cut-back', label: 'Go to the previous cut', keys: ['ArrowUp'], fn: () => seekCut(-1) },
+  { group: 'Playback', id: 'cut-on', label: 'Go to the next cut', keys: ['ArrowDown'], fn: () => seekCut(1) },
+  { group: 'Playback', id: 'start', label: 'Go to the start', keys: ['Home'], fn: () => { seek(0); scrollToTime(0); } },
+  { group: 'Playback', id: 'end', label: 'Go to the end', keys: ['End'], fn: () => { seek(Infinity); scrollToTime(dur()); } },
+  { group: 'Editing', id: 'split', label: 'Split at the playhead', keys: ['S'], once: true, fn: () => split() },
+  { group: 'Editing', id: 'delleft', label: 'Delete to the left of the playhead', keys: ['Q'], once: true, fn: () => splitKeep('right') },
+  { group: 'Editing', id: 'delright', label: 'Delete to the right of the playhead', keys: ['W'], once: true, fn: () => splitKeep('left') },
+  { group: 'Editing', id: 'delete', label: 'Delete the selection (clips, a keyframe, a transition or transcript words)', keys: ['Delete', 'Backspace'], once: true, fn: () => deleteSelection() },
+  { group: 'Editing', id: 'undo', label: 'Undo', keys: ['Ctrl+Z'], fn: () => undo() },
+  { group: 'Editing', id: 'redo', label: 'Redo', keys: ['Ctrl+Shift+Z', 'Ctrl+Y'], fn: () => redo() },
+  { group: 'Editing', id: 'select-all', label: 'Select every clip', keys: ['Ctrl+A'], fn: () => select(visibleClips().map(c => c.id)) },
+  { group: 'Editing', id: 'deselect', label: 'Select nothing', keys: ['Escape'], fn: () => select([]) },
+  { group: 'Editing', id: 'nudge-back', label: 'Move the selection (or the selected cut) one frame left', keys: [','], when: has, fn: () => nudge(-1) },
+  { group: 'Editing', id: 'nudge-on', label: 'Move the selection (or the selected cut) one frame right', keys: ['.'], when: has, fn: () => nudge(1) },
+  { group: 'Editing', id: 'nudge-back-10', label: 'Move the selection (or the selected cut) ten frames left', keys: ['Shift+,'], when: has, fn: () => nudge(-10) },
+  { group: 'Editing', id: 'nudge-on-10', label: 'Move the selection (or the selected cut) ten frames right', keys: ['Shift+.'], when: has, fn: () => nudge(10) },
+  { group: 'Editing', id: 'slip-back', label: 'Slip the selected clip one frame left', keys: ['Alt+,'], when: has, fn: () => slipSel(-1) },
+  { group: 'Editing', id: 'slip-on', label: 'Slip the selected clip one frame right', keys: ['Alt+.'], when: has, fn: () => slipSel(1) },
+  { group: 'Editing', id: 'slip-back-10', label: 'Slip the selected clip ten frames left', keys: ['Alt+Shift+,'], when: has, fn: () => slipSel(-10) },
+  { group: 'Editing', id: 'slip-on-10', label: 'Slip the selected clip ten frames right', keys: ['Alt+Shift+.'], when: has, fn: () => slipSel(10) },
+  { group: 'Timeline', id: 'snap', label: 'Snapping on or off', keys: ['N'], once: true, fn: () => toggleSnap() },
+  { group: 'Timeline', id: 'zoom-in', label: 'Zoom in', keys: ['=', 'Shift+=', 'Ctrl+=', 'Num +'], fn: () => setPx(S.px * 1.5) },
+  { group: 'Timeline', id: 'zoom-out', label: 'Zoom out', keys: ['-', 'Ctrl+-', 'Num -'], fn: () => setPx(S.px / 1.5) },
+  { group: 'Timeline', id: 'zoom-fit', label: 'Fit the whole video', keys: ['Ctrl+0'], fn: () => fitZoom() },
+  { group: 'Project', id: 'new', label: 'New project', keys: ['Ctrl+N'], fn: () => newProject() },
+  { group: 'Project', id: 'open', label: 'Open a project', keys: ['Ctrl+O'], fn: () => openProject() },
+  { group: 'Project', id: 'save', label: 'Save now', keys: ['Ctrl+S'], fn: () => { saveNow(); } },
+  { group: 'Project', id: 'import', label: 'Import media', keys: ['Ctrl+I'], fn: () => importClips() },
+  { group: 'Project', id: 'export', label: 'Export', keys: ['Ctrl+E'], fn: () => exportClip() },
+  { group: 'Project', id: 'find', label: 'Find and replace in the transcript', keys: ['Ctrl+F'], fn: () => openFind() },
+  { group: 'Project', id: 'shortcuts', label: 'Keyboard shortcuts', keys: ['Ctrl+/'], fn: () => openShortcuts() },
+];
+const ACTION = new Map(ACTIONS.map(a => [a.id, a]));
+/** The keys of each action now (the defaults, with the user's changes). */
+const KEYS = new Map(ACTIONS.map(a => [a.id, [...a.keys]]));
+let KEYMAP = new Map();
+const MAX_KEYS = 8;
+const CODE_NAMES = {
+  Comma: ',', Period: '.', Slash: '/', Backslash: '\\', Semicolon: ';', Quote: "'", Backquote: '`', BracketLeft: '[', BracketRight: ']',
+  Equal: '=', Minus: '-', Space: 'Space', NumpadAdd: 'Num +', NumpadSubtract: 'Num -', NumpadMultiply: 'Num *', NumpadDivide: 'Num /',
+  NumpadDecimal: 'Num .', NumpadEnter: 'Enter', IntlBackslash: '\\',
+};
+const MODIFIERS = new Set(['Control', 'Shift', 'Alt', 'Meta', 'AltGraph', 'CapsLock', 'OS']);
+/** A key press as a shortcut ("Ctrl+Shift+Z"); `null` for a modifier on its own. Letters follow
+    the keyboard's layout, other keys their place (so Shift doesn't change them). */
+function comboOf(e) {
+  if (MODIFIERS.has(e.key)) return null;
+  const c = e.code || '';
+  let k;
+  if (e.key && e.key.length === 1 && /[a-z]/i.test(e.key)) k = e.key.toUpperCase();
+  else if (/^Key[A-Z]$/.test(c)) k = c.slice(3);
+  else if (/^Digit\d$/.test(c)) k = c.slice(5);
+  else if (/^Numpad\d$/.test(c)) k = 'Num ' + c.slice(6);
+  else if (CODE_NAMES[c]) k = CODE_NAMES[c];
+  else if (c) k = c;
+  else if (e.key === ' ') k = 'Space';
+  else if (e.key) k = e.key.length === 1 ? e.key.toUpperCase() : e.key;
+  else return null;
+  return [(e.ctrlKey || e.metaKey) && 'Ctrl', e.altKey && 'Alt', e.shiftKey && 'Shift', k].filter(Boolean).join('+');
+}
+const KEY_SHOWN = { ArrowLeft: '←', ArrowRight: '→', ArrowUp: '↑', ArrowDown: '↓', Escape: 'Esc', Space: 'Space' };
+/** A shortcut as it is shown: arrows as arrows ("Shift+←"). */
+function showKey(combo) {
+  const mods = [];
+  let rest = combo;
+  for (const m of ['Ctrl', 'Alt', 'Shift']) if (rest.startsWith(m + '+') && rest.length > m.length + 1) { mods.push(m); rest = rest.slice(m.length + 1); }
+  return [...mods, KEY_SHOWN[rest] || rest].join('+');
+}
+/** An action's keys for a tooltip ("Delete or Backspace"); empty when it has none. */
+function keyText(id) {
+  const k = KEYS.get(id) || [];
+  return k.slice(0, 2).map(showKey).join(' or ');
+}
+/** Tooltips that name their keys: `data-tip` with `{k}` where the keys go (else at the end). */
+function refreshKeyTips() {
+  for (const el of document.querySelectorAll('[data-keys]')) {
+    const tip = el.dataset.tip || '', k = keyText(el.dataset.keys);
+    el.title = tip.includes('{k}') ? tip.replace('{k}', k ? ` (${k})` : '') : k ? `${tip} (${k})` : tip;
+  }
+  renderTools();
+}
+function rebuildKeymap() {
+  KEYMAP = new Map();
+  for (const a of ACTIONS) for (const k of KEYS.get(a.id) || []) if (!KEYMAP.has(k)) KEYMAP.set(k, a);
+}
+/** The user's changes: only the actions whose keys differ from the defaults. */
+function keyChanges() {
+  const out = {};
+  for (const a of ACTIONS) {
+    const k = KEYS.get(a.id) || [];
+    if (k.length !== a.keys.length || k.some((x, i) => x !== a.keys[i])) out[a.id] = k;
+  }
+  return out;
+}
+/** Puts saved changes over the defaults; a key a changed action took leaves the others. */
+function useKeyChanges(saved) {
+  for (const a of ACTIONS) KEYS.set(a.id, [...a.keys]);
+  const taken = new Set();
+  for (const [id, list] of Object.entries(saved && typeof saved === 'object' ? saved : {})) {
+    if (!ACTION.has(id) || !Array.isArray(list)) continue;
+    const keys = [...new Set(list.filter(k => typeof k === 'string' && k.length > 0 && k.length <= 40))].slice(0, MAX_KEYS);
+    KEYS.set(id, keys);
+    keys.forEach(k => taken.add(k));
+  }
+  for (const a of ACTIONS) if (!(saved && Object.prototype.hasOwnProperty.call(saved, a.id))) KEYS.set(a.id, KEYS.get(a.id).filter(k => !taken.has(k)));
+  rebuildKeymap();
+  refreshKeyTips();
+}
+function saveKeys() {
+  rebuildKeymap();
+  refreshKeyTips();
+  invoke('save_shortcuts', { keys: keyChanges() }).catch(e => toast(e, true));
+}
+rebuildKeymap();
+invoke('load_shortcuts').then(useKeyChanges).catch(() => useKeyChanges({}));
+
 document.addEventListener('keydown', e => {
   if (!$('#graphics-view').hidden) { if (e.key === 'Escape') { e.preventDefault(); closeGraphics(); } return; }
   if (e.target.closest('input, textarea, select') || document.querySelector('dialog[open]') || S.dragging) return;
+  const combo = comboOf(e);
+  const a = combo && KEYMAP.get(combo);
+  if (!a || (a.when && !a.when())) return;
+  e.preventDefault();
+  if (a.once && e.repeat) return;
   // words selected in the transcript: Delete cuts them out of the video
-  if (W.sel && !$('#panel-captions').hidden && (e.key === 'Delete' || e.key === 'Backspace')) { e.preventDefault(); if (!e.repeat) cutSelectedWords(); return; }
-  const mod = e.ctrlKey || e.metaKey, k = e.key.toLowerCase();
-  const key = (cond, fn) => { if (cond) { e.preventDefault(); fn(); return true; } return false; };
-  if (mod) {
-    key(k === 'z' && !e.shiftKey, undo)
-      || key((k === 'z' && e.shiftKey) || k === 'y', redo)
-      || key(k === 'a', () => select(visibleClips().map(c => c.id)))
-      || key(k === 'i', importClips)
-      || key(k === 'e', exportClip)
-      || key(k === 'n', newProject)
-      || key(k === 'o', openProject)
-      || key(k === 's', () => { saveNow(); })
-      || key(k === '=' || k === '+', () => setPx(S.px * 1.5))
-      || key(k === '-', () => setPx(S.px / 1.5))
-      || key(k === '0', () => fitZoom());
-    return;
-  }
-  // , and . : a frame at a time (Shift: 10) — the selected cut moves, Alt slips the clip, else lane clips move
-  if ((e.code === 'Comma' || e.code === 'Period') && has()) {
-    e.preventDefault();
-    const n = (e.code === 'Comma' ? -1 : 1) * (e.shiftKey ? 10 : 1);
-    if (e.altKey) slipSel(n); else if (S.cut != null) rollCut(S.cut, n); else nudgeSel(n);
-    return;
-  }
-  if (e.altKey) return;
-  // editing keys act once per press, not again while held
-  const once = !e.repeat;
-  key(e.code === 'Space' || k === 'k', toggle)
-    || key(k === 'arrowleft', () => seekBy(e.shiftKey ? -5 : -frameStep()))
-    || key(k === 'arrowright', () => seekBy(e.shiftKey ? 5 : frameStep()))
-    || key(k === 'j', () => seekBy(-1))
-    || key(k === 'l', () => seekBy(1))
-    || key(k === 'arrowup', () => seekCut(-1))
-    || key(k === 'arrowdown', () => seekCut(1))
-    || key(k === 'home', () => { seek(0); scrollToTime(0); })
-    || key(k === 'end', () => { seek(Infinity); scrollToTime(dur()); })
-    || key(once && k === 's', split)
-    || key(once && k === 'q', () => splitKeep('right'))
-    || key(once && k === 'w', () => splitKeep('left'))
-    || key(once && (k === 'delete' || k === 'backspace'), deleteSelection)
-    || key(once && k === 'n', toggleSnap)
-    || key(k === 'escape', () => select([]))
-    || key(k === '=' || k === '+', () => setPx(S.px * 1.5))
-    || key(k === '-', () => setPx(S.px / 1.5));
+  if (a.id === 'delete' && W.sel && !$('#panel-captions').hidden) { cutSelectedWords(); return; }
+  a.fn();
 });
+
+/* The Keyboard shortcuts page: each action with its keys; + records new keys, × takes one off */
+const KD = { recording: null, last: null };
+function openShortcuts() {
+  KD.recording = null;
+  $('#keys-filter').value = '';
+  $('#keys-note').textContent = '';
+  renderShortcuts();
+  if (!$('#keys-dlg').open) $('#keys-dlg').showModal();
+  $('#keys-filter').focus();
+}
+function renderShortcuts() {
+  const list = $('#keys-list'), q = $('#keys-filter').value.trim().toLowerCase();
+  const top = list.scrollTop;
+  list.innerHTML = '';
+  let group = null;
+  for (const a of ACTIONS) {
+    const keys = KEYS.get(a.id) || [];
+    if (q && !a.label.toLowerCase().includes(q) && !keys.some(k => k.toLowerCase().includes(q) || showKey(k).toLowerCase().includes(q))) continue;
+    if (a.group !== group) {
+      group = a.group;
+      const h = document.createElement('h3');
+      h.textContent = group;
+      list.appendChild(h);
+    }
+    const row = document.createElement('div');
+    row.className = 'key-row';
+    row.dataset.action = a.id;
+    row.addEventListener('click', () => { KD.last = a.id; }, true);
+    const what = document.createElement('span');
+    what.className = 'what';
+    what.textContent = a.label;
+    const changed = keys.length !== a.keys.length || keys.some((k, i) => k !== a.keys[i]);
+    if (changed) { const c = document.createElement('span'); c.className = 'changed'; c.textContent = 'changed'; what.appendChild(c); }
+    const chips = document.createElement('span');
+    chips.className = 'chips';
+    for (const k of keys) {
+      const chip = document.createElement('span');
+      chip.className = 'kbd';
+      chip.textContent = showKey(k);
+      const x = document.createElement('button');
+      x.textContent = '×';
+      x.title = `Take ${showKey(k)} off ${a.label.toLowerCase()}`;
+      x.setAttribute('aria-label', x.title);
+      x.onclick = () => { KEYS.set(a.id, keys.filter(y => y !== k)); $('#keys-note').textContent = ''; saveKeys(); renderShortcuts(); };
+      chip.appendChild(x);
+      chips.appendChild(chip);
+    }
+    if (KD.recording === a.id) {
+      const rec = document.createElement('span');
+      rec.className = 'kbd rec';
+      rec.textContent = 'Press keys… (Esc: stop)';
+      chips.appendChild(rec);
+    } else if (!keys.length) {
+      const none = document.createElement('span');
+      none.className = 'kbd none';
+      none.textContent = 'No keys';
+      chips.appendChild(none);
+    }
+    const add = document.createElement('button');
+    add.className = 'add';
+    add.textContent = '+';
+    add.title = `Add keys for ${a.label.toLowerCase()}`;
+    add.setAttribute('aria-label', add.title);
+    add.onclick = () => { KD.recording = a.id; $('#keys-note').textContent = ''; renderShortcuts(); };
+    row.append(what, chips, add);
+    if (changed) {
+      const r = document.createElement('button');
+      r.className = 'reset';
+      r.textContent = 'Default';
+      r.title = `Back to ${a.keys.length ? a.keys.map(showKey).join(', ') : 'no keys'}`;
+      r.onclick = () => assignKeys(a.id, a.keys, true);
+      row.appendChild(r);
+    }
+    list.appendChild(row);
+  }
+  if (!list.children.length) list.innerHTML = '<p class="hint">No action or key matches.</p>';
+  list.scrollTop = top;
+  // the button pressed went with the old rows: focus stays in the dialog, on that action's +
+  if (!$('#keys-dlg').contains(document.activeElement) || document.activeElement === document.body) {
+    const add = KD.last && list.querySelector(`.key-row[data-action="${KD.last}"] .add`);
+    (add || $('#keys-filter')).focus({ preventScroll: true });
+  }
+}
+/** Gives action `id` the keys `keys` (in addition to its own, or instead of them), taking them off
+    any other action that had them. */
+function assignKeys(id, keys, replace = false) {
+  const a = ACTION.get(id);
+  const moved = [];
+  for (const k of keys) {
+    for (const b of ACTIONS) {
+      if (b.id === id) continue;
+      const bk = KEYS.get(b.id) || [];
+      if (bk.includes(k)) { KEYS.set(b.id, bk.filter(x => x !== k)); moved.push(`${showKey(k)} from “${b.label}”`); }
+    }
+  }
+  const mine = replace ? [...keys] : [...new Set([...(KEYS.get(id) || []), ...keys])];
+  if (mine.length > MAX_KEYS) { $('#keys-note').textContent = `An action can have at most ${MAX_KEYS} keys: take one off first.`; return; }
+  KEYS.set(id, mine);
+  $('#keys-note').textContent = moved.length ? `Moved to “${a.label}”: ${moved.join(', ')}.` : '';
+  saveKeys();
+  renderShortcuts();
+}
+$('#keys-dlg').addEventListener('keydown', e => {
+  // Esc closes the page from anywhere in it (a search box would only clear itself), or stops recording
+  if (!KD.recording) {
+    if (e.key === 'Escape' && !(e.target === $('#keys-filter') && e.target.value)) { e.preventDefault(); $('#keys-dlg').close(); }
+    return;
+  }
+  e.preventDefault();
+  e.stopPropagation();
+  if (e.key === 'Escape' && !e.ctrlKey && !e.altKey && !e.shiftKey && !e.metaKey) { KD.recording = null; renderShortcuts(); return; }
+  if (e.key === 'Tab') return;
+  const combo = comboOf(e);
+  if (!combo) return;
+  const id = KD.recording;
+  KD.recording = null;
+  assignKeys(id, [combo]);
+}, true);
+$('#keys-dlg').addEventListener('cancel', e => { if (KD.recording) e.preventDefault(); });
+$('#keys-filter').addEventListener('input', renderShortcuts);
+$('#keys-close').onclick = () => $('#keys-dlg').close();
+$('#keys-reset').onclick = () => {
+  for (const a of ACTIONS) KEYS.set(a.id, [...a.keys]);
+  KD.recording = null;
+  $('#keys-note').textContent = 'Every action has its default keys again.';
+  saveKeys();
+  renderShortcuts();
+};
+$('#keys-btn').onclick = openShortcuts;
 new ResizeObserver(() => { fitCanvas(); if (has() && !S.playing) showFrame(S.t); }).observe($('#stage'));
 new ResizeObserver(() => { if (S.tl) layoutTimeline(); }).observe(scroller());
 

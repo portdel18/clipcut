@@ -185,7 +185,7 @@ fn hex(c: [u8; 4]) -> String {
 }
 
 /// The main track's words, in order.
-fn main_words(q: &Sequence, p: &filmcraft_project::Project) -> Vec<SeqWord> {
+pub(crate) fn main_words(q: &Sequence, p: &filmcraft_project::Project) -> Vec<SeqWord> {
     tx::sequence_words(q, &p.transcripts).into_iter().filter(|w| w.track == 0).collect()
 }
 
@@ -745,7 +745,7 @@ impl Studio {
 }
 
 /// The main-track words heard within `[start, end)` of the timeline (by their middles).
-fn heard(words: &[SeqWord], start: Tick, end: Tick) -> String {
+pub(crate) fn heard(words: &[SeqWord], start: Tick, end: Tick) -> String {
     words
         .iter()
         .filter(|w| {
@@ -758,12 +758,12 @@ fn heard(words: &[SeqWord], start: Tick, end: Tick) -> String {
 }
 
 /// Whether two captions say the same words (line breaks and spacing aside).
-fn same_words(a: &str, b: &str) -> bool {
+pub(crate) fn same_words(a: &str, b: &str) -> bool {
     a.split_whitespace().eq(b.split_whitespace())
 }
 
 /// Words broken into at most `layout.lines` lines of about `layout.max_chars`.
-fn wrap(text: &str, layout: Layout) -> String {
+pub(crate) fn wrap(text: &str, layout: Layout) -> String {
     let mut lines: Vec<String> = Vec::new();
     let mut cur = String::new();
     for w in text.split_whitespace() {

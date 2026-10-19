@@ -101,6 +101,14 @@ remote `upstream`). Read `README.md` for what it is and the roadmap.
   `keys_of`/`keyframes_at`). Every keyframe edit runs inside `with_returns` (take them off, edit,
   put them back); a new keyframe edit must too. `hold` in that marker turns them off
   (`Studio::set_hold`). Ducked music's volume gets none.
+- Keys: every shortcut is an entry of `ACTIONS` in `app.js` (id, default `keys`, `fn`); the keydown
+  handler looks presses up by `comboOf(e)` ("Ctrl+Shift+Z": letters by layout, other keys by
+  `e.code`). A new shortcut is a new entry, never a key test in the handler. The user's changes are
+  `shortcuts.json` in the config folder (`load_shortcuts` / `save_shortcuts`); tooltips that name a
+  key use `data-tip` + `data-keys` (or `keyText(id)`), so they follow them.
+- Find and replace (`replace.rs`): the search runs over the main words joined by spaces;
+  `findMatches` in `app.js` must keep the same rules as `find_in`, since Replace sends the match's
+  number. It rewrites the media transcripts (`transcript.set`) and the captions in one step.
 - Extract Audio (`Studio::extract_audio`, `lanes.rs`) unlinks a clip's sound and moves a main
   clip's to a sound lane. Captions over words that play only on a lane stay on that lane's clip
   (`lane_sound` in `captions.rs`).

@@ -71,6 +71,13 @@ Shorts, 1:1 or 4:5; clips are refitted to the new shape.
 | `←` `→` | A frame back or on (`Shift`: 5 seconds); `J` / `L`: a second |
 | `↑` `↓` | The previous or next cut; `Home` / `End`: the start or the end |
 | Pinch on the touchpad, `Ctrl`+wheel, `Ctrl+=` / `Ctrl+-`, `Ctrl+0` | Zoom the timeline at the pointer, in and out, fit it all |
+| `Ctrl+F` | Find and replace in the transcript |
+| `Ctrl+/` | Keyboard shortcuts |
+
+These are the default keys. **Keyboard shortcuts** (the keyboard button in the top bar, or `Ctrl+/`)
+lists every action with its keys: press + beside one and then the keys you want, × to take a key off,
+or **Default** to go back. A key another action had moves to the new one. Your keys are kept in
+ClipCut's settings folder (`shortcuts.json`), and the tooltips show them.
 
 **Graphics.** The **Graphics** tab opens [Clip Studio](https://github.com/portdel18/clip-stu)
 over the editor: Underline, Map Zoom, Split Screen, Scroll Zoom, Timeline, Numbers, Audiogram and
@@ -178,6 +185,12 @@ go to it, drag across words (or Shift+click) and press `Delete` to cut them out 
 **Remove filler words** cuts um, uh and the like; **Shorten pauses** trims every pause over half a
 second. The main track closes up each time, and the captions follow.
 
+**Find and replace** (`Ctrl+F`, or the button above the transcript) searches the transcript as text:
+part of a word, or a phrase across words, with **Match case** if you want it. Enter goes to the next
+match (Shift+Enter the one before), and the playhead follows. **Replace** changes the highlighted
+match and **Replace all** every one, in the transcript and in the captions over it (a caption you
+typed over gets the change in its own words), as one undo step. Nothing is cut from the video.
+
 **Projects save themselves.** The first edit gives the project a folder, `Documents\ClipCut\<first
 clip's name>`, and every change after that is saved a moment later. ClipCut reopens the last project
 when it starts. **New** (`Ctrl+N`) starts another, **Open** (`Ctrl+O`) picks a saved one.
@@ -203,7 +216,7 @@ through Windows' Media Foundation); if its encoder fails partway, ClipCut export
 | Layer | Where | What |
 |---|---|---|
 | Engine | `crates/*` (from FilmCraft) | Decoding, the timeline model, rendering, effects, audio mixing, export |
-| Façade | `crates/clipcut-core` | The engine operations the app calls: the magnetic main track and the lanes around it (`timeline.rs`, `lanes.rs`), clip properties, canvas and waveforms (`props.rs`), captions and transcript cutting (`captions.rs`), transitions (`transitions.rs`), graphics from the Graphics tab (`graphics.rs`), keyframes (`keyframes.rs`), colour and scopes (`colour.rs`, `scopes.rs`), the mixer and precise trimming (`mixer.rs`, `trimming.rs`), text animations (`animations.rs`), ducking (`ducking.rs`), beats (`beats.rs`), quick exports (`exporting.rs`) and titles (`titles.rs`), the player's frames and proxies (`preview.rs`), each edit one undo step; projects, preview frames and thumbnails, playback audio, export jobs |
+| Façade | `crates/clipcut-core` | The engine operations the app calls: the magnetic main track and the lanes around it (`timeline.rs`, `lanes.rs`), clip properties, canvas and waveforms (`props.rs`), captions and transcript cutting (`captions.rs`), find and replace in the transcript (`replace.rs`), transitions (`transitions.rs`), graphics from the Graphics tab (`graphics.rs`), keyframes (`keyframes.rs`), colour and scopes (`colour.rs`, `scopes.rs`), the mixer and precise trimming (`mixer.rs`, `trimming.rs`), text animations (`animations.rs`), ducking (`ducking.rs`), beats (`beats.rs`), quick exports (`exporting.rs`) and titles (`titles.rs`), the player's frames and proxies (`preview.rs`), each edit one undo step; projects, preview frames and thumbnails, playback audio, export jobs |
 | App | `apps/clipcut` | A [Tauri](https://tauri.app) window: Rust commands in `src/`, the interface in `ui/` (HTML, CSS and JavaScript, no build step) |
 
 The sound card is the playback clock; the interface shows the frame for that time. While the
