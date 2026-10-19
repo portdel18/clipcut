@@ -289,3 +289,45 @@ fn exports_burn_the_captions_in() {
     assert!(diff(&burnt, &with) < diff(&burnt, &without), "the export doesn't look like the player with its captions");
     let _ = std::fs::remove_file(&out);
 }
+
+#[test]
+fn extracted_sound_stays_put_with_its_captions() {
+    let Some(mut s) = captioned() else { return };
+    let before = caps(&s);
+    let main = main_track(&s);
+    let second = main[1].clone();
+    let sound = s.extract_audio(second.id).unwrap();
+    let v = s.timeline();
+    assert_eq!(v.undo_label.as_deref(), Some("Extract Audio"));
+    let snd = v.clips.iter().find(|c| c.id == sound).unwrap();
+    assert_eq!(snd.track, "A2", "{snd:?}");
+    assert!((snd.start - second.start).abs() < 1e-6 && (snd.end - second.end).abs() < 1e-6, "same place: {snd:?}");
+    assert!(snd.link.is_none() && v.clips.iter().find(|c| c.id == second.id).unwrap().link.is_none(), "no longer linked");
+    assert!(!v.clips.iter().any(|c| c.track == "A1" && c.start >= 2.0 - 1e-6), "the main track's sound there is gone");
+    assert_eq!(caps(&s), before, "the captions stay over the words");
+    // it is a clip of its own now; the first clip's sound can be extracted from the sound itself
+    assert!(s.extract_audio(sound).is_err());
+    let first_sound = v.clips.iter().find(|c| c.track == "A1" && c.start < 0.1).unwrap().id;
+
+    // deleting the first clip moves the picture up, but the sound and its captions stay
+    s.delete(&[main[0].id]).unwrap();
+    let v = s.timeline();
+    assert!(v.clips.iter().find(|c| c.id == second.id).unwrap().start.abs() < 1e-6, "the picture moved up");
+    assert!((v.clips.iter().find(|c| c.id == sound).unwrap().start - 2.0).abs() < 1e-6, "the sound stayed");
+    let c = caps(&s);
+    assert_eq!(c.len(), before.len() / 2, "{c:#?}");
+    assert!(c.iter().all(|x| x.start >= 2.0 - 1e-6) && c.iter().any(|x| x.text.contains("Hello")), "{c:#?}");
+    assert_tidy(&s);
+    s.undo().unwrap();
+    s.undo().unwrap();
+    let v = s.timeline();
+    assert!(v.clips.iter().find(|c| c.id == sound).is_some_and(|c| c.track == "A1" && c.link.is_some()), "one undo step puts it back");
+    assert_eq!(caps(&s), before);
+
+    let picked = s.extract_audio(first_sound).unwrap();
+    assert_eq!(picked, first_sound);
+    assert_eq!(s.timeline().clips.into_iter().find(|c| c.id == first_sound).unwrap().track, "A2");
+    // a picture without sound has none to extract
+    assert!(s.extract_audio(main[0].id).is_err());
+    assert!(s.extract_audio(987_654).is_err());
+}

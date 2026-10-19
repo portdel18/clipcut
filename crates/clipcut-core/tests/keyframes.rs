@@ -70,8 +70,8 @@ fn opacity_fades_between_keyframes() {
     let half = s.props_at(id, 1.0).unwrap().opacity.unwrap();
     assert!((half - 50.0).abs() < 2.0, "{half}");
     assert!((s.props_at(id, 0.2).unwrap().opacity.unwrap() - 100.0).abs() < 1e-6);
-    assert!(s.props_at(id, 1.8).unwrap().opacity.unwrap() < 1e-6);
-    let (b0, b1, b2) = (bright(&s, 0.2), bright(&s, 1.0), bright(&s, 1.8));
+    assert!(s.props_at(id, 1.5).unwrap().opacity.unwrap() < 1e-6);
+    let (b0, b1, b2) = (bright(&s, 0.2), bright(&s, 1.0), bright(&s, 1.5));
     // half opacity over black blends in linear light: about 188 in sRGB, not 128
     assert!(b0 > 230.0 && (b1 - 188.0).abs() < 20.0 && b2 < 15.0, "{b0} {b1} {b2}");
 
@@ -120,6 +120,8 @@ fn position_and_volume_take_keyframes_and_still_ones_just_change() {
     assert!(s.toggle_keyframe(id, "volume", 0.2).unwrap());
     s.set_props(&[id], &json!({"volumeDb": -60.0, "at": 1.6}), None).unwrap();
     assert_eq!(keys(&s, id, "volume").unwrap().times.len(), 2, "the picture clip shows its sound's keyframes");
+    // held, so it stays silent after the last keyframe
+    s.set_hold(id, true).unwrap();
     assert!(s.props_at(id, 1.8).unwrap().volume_db.unwrap() <= -59.0);
     let (a, b) = (loud(&s, 0.3), loud(&s, 1.8));
     assert!(a > 0.03 && b < a / 100.0, "{a} {b}");
@@ -210,4 +212,67 @@ fn a_main_track_clip_fades_its_own_sound() {
     s.undo().unwrap();
     s.undo().unwrap();
     assert!(s.timeline().clips.iter().all(|c| c.props.fade_in == 0.0), "the fades were one undo step");
+}
+
+#[test]
+fn after_the_last_keyframe_a_clip_goes_straight_back_unless_it_holds() {
+    let Some((mut s, id)) = studio() else { return };
+    let full = bright(&s, 1.5);
+    // opacity 100 % at 0.5 → 20 % at 1.0; scale 100 % at 0.5 → 300 % at 1.0
+    assert!(s.toggle_keyframe(id, "opacity", 0.5).unwrap());
+    s.set_props(&[id], &json!({"opacity": 20.0, "at": 1.0}), None).unwrap();
+    assert!(s.toggle_keyframe(id, "scale", 0.5).unwrap());
+    s.set_props(&[id], &json!({"scale": 300.0, "at": 1.0}), None).unwrap();
+    let op = |s: &Studio, t: f64| s.props_at(id, t).unwrap().opacity.unwrap();
+    // 20 % over black is about 124 in sRGB (the blend is in linear light)
+    assert!(bright(&s, 1.0) < full * 0.6, "dim at the last keyframe: {} vs {full}", bright(&s, 1.0));
+    // a frame later, and to the end, it is back at the first keyframe's values
+    let next = 1.0 + 1.0 / 30.0;
+    assert!(bright(&s, next) > full * 0.95, "back a frame later: {}", bright(&s, next));
+    assert!(bright(&s, 1.8) > full * 0.95);
+    let p = s.props_at(id, 1.5).unwrap();
+    assert!((p.scale.unwrap() - 100.0).abs() < 1e-6 && (p.opacity.unwrap() - 100.0).abs() < 1e-6, "{p:?}");
+    // the way back is ClipCut's own: never shown, never selectable
+    for prop in ["opacity", "scale"] {
+        assert_eq!(keys(&s, id, prop).unwrap().times.len(), 2, "{prop}: {:?}", keys(&s, id, prop));
+    }
+    assert!(s.delete_keyframes(id, next).is_err());
+    assert!(!s.timeline().clips.into_iter().find(|c| c.id == id).unwrap().hold);
+
+    // a later keyframe moves the way back after it
+    s.set_props(&[id], &json!({"opacity": 50.0, "at": 1.5}), None).unwrap();
+    assert!((op(&s, 1.25) - 35.0).abs() < 2.0, "still animating at 1.25: {}", op(&s, 1.25));
+    assert!(bright(&s, 1.6) > full * 0.95, "back after the new last keyframe");
+    assert_eq!(keys(&s, id, "opacity").unwrap().times.len(), 3);
+    // deleting it puts the way back after the one before
+    s.delete_keyframes(id, 1.5).unwrap();
+    assert!((op(&s, 1.2) - 100.0).abs() < 1e-6);
+    // moving the last keyframe takes the way back with it
+    s.move_keyframes(id, 1.0, 1.4).unwrap();
+    assert!((op(&s, 1.4) - 20.0).abs() < 1e-6 && (op(&s, 1.6) - 100.0).abs() < 1e-6);
+    s.undo().unwrap();
+
+    // holding keeps the last values to the end, in one undo step
+    s.set_hold(id, true).unwrap();
+    assert!(s.timeline().clips.into_iter().find(|c| c.id == id).unwrap().hold);
+    assert!(bright(&s, 1.8) < full * 0.6, "held: {}", bright(&s, 1.8));
+    assert!((s.props_at(id, 1.8).unwrap().scale.unwrap() - 300.0).abs() < 1e-6);
+    // and keeps holding through keyframe edits
+    s.set_props(&[id], &json!({"opacity": 40.0, "at": 1.0}), None).unwrap();
+    assert!((op(&s, 1.8) - 40.0).abs() < 1e-6);
+    s.undo().unwrap();
+    s.undo().unwrap();
+    assert!(!s.timeline().clips.into_iter().find(|c| c.id == id).unwrap().hold);
+    assert!(bright(&s, 1.8) > full * 0.95, "back again after undoing the hold");
+    s.set_hold(id, false).unwrap();
+    assert!(s.set_hold(987_654, true).is_err());
+
+    // one keyframe, or keyframes that end where they began, need no way back
+    let Some((mut s, id)) = studio() else { return };
+    assert!(s.toggle_keyframe(id, "volume", 0.5).unwrap());
+    assert!(s.timeline().clips.iter().all(|c| !c.hold));
+    let loud_before = loud(&s, 1.5);
+    s.set_props(&[id], &json!({"volumeDb": -30.0, "at": 1.0}), None).unwrap();
+    assert!(loud(&s, 0.9) < loud_before * 0.2, "quiet near the last keyframe");
+    assert!(loud(&s, 1.5) > loud_before * 0.8, "the sound comes back too: {} vs {loud_before}", loud(&s, 1.5));
 }

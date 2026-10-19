@@ -43,6 +43,8 @@ pub struct ClipView {
     pub graphic: Option<String>,
     /// Its keyframed properties.
     pub keys: Vec<crate::keyframes::KeyTrack>,
+    /// After its last keyframe the clip keeps the last values (else it goes back to the first's).
+    pub hold: bool,
     /// Sound clips: their beat markers, timeline seconds.
     pub beats: Vec<f64>,
     /// A title made from a template: the template's name (its controls replace the text ones).
@@ -191,6 +193,7 @@ impl Studio {
                             props,
                             graphic: if prefix == "V" { self.graphic_tool(i.item) } else { None },
                             keys: crate::keyframes::keys_of(q, t, i),
+                            hold: crate::returns::holds(i),
                             beats: crate::beats::beats_of(i),
                             title: crate::titles::title_of(i),
                         });

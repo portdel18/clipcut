@@ -1510,7 +1510,19 @@ function keyframeControls(s, c) {
   ]);
   const smooth = row.lastChild;
   controls.push({ el: smooth, read: x => (x.keys || []).length > 0 && x.keys.every(k => k.smooth), write: (el, v) => el.setAttribute('aria-pressed', String(!!v)) });
+  const hold = document.createElement('button');
+  hold.id = 'kf-hold';
+  hold.textContent = 'Hold the last value';
+  hold.title = 'Keep the values of the last keyframe to the end of the clip, rather than going straight back to the first keyframe’s';
+  hold.onclick = () => edit('set_hold', { clip: c.id, hold: !clipById(c.id).hold });
+  row.appendChild(hold);
+  controls.push({ el: hold, read: x => !!x.hold, write: (el, v) => el.setAttribute('aria-pressed', String(!!v)) });
   s.appendChild(row);
+  const p = document.createElement('p');
+  p.className = 'hint';
+  p.id = 'kf-after';
+  controls.push({ el: p, read: x => !!x.hold, write: (el, v) => { el.textContent = v ? 'After the last keyframe the clip keeps its last values.' : 'After the last keyframe the clip goes straight back to the values at its first keyframe.'; } });
+  s.appendChild(p);
 }
 
 /* ---------- timeline layout: lanes above and below the main track ---------- */
@@ -2438,6 +2450,12 @@ function renderProps() {
     if (!isMain(one)) {
       duckingControls(s, ids);
       beatControls(s, ids);
+    }
+    // a picture's own sound can become a clip of its own on a sound lane
+    const pic = one.track[0] === 'V' ? one : one.link && S.tl.clips.find(v => v.link === one.link && v.track[0] === 'V');
+    if (pic && ids.length === 1) {
+      s.appendChild(buttons([['Extract audio', 'Put this clip’s sound on a sound lane as a clip of its own, to trim, move and fade it apart from the picture', () => make('extract_audio', { clip: one.id })]]));
+      s.lastChild.firstChild.id = 'extract-audio';
     }
   }
   if (visual(one) || hasSound(one)) keyframeControls(section('Keyframes'), one);

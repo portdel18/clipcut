@@ -50,7 +50,7 @@ The switch at the left of each lane hides it or mutes it (the main track's switc
 
 **Properties** (right panel) follow the selection: position, scale, rotation and opacity (or drag
 the picture or text in the player, with the wheel to scale it and the centre lines pulling it in);
-Fit, Fill and Centre; volume; fades on any clip's sound (the main track's too); speed (0.5× to 3×, or any percent); and
+Fit, Fill and Centre; volume; fades on any clip's sound (the main track's too); **Extract audio**, which puts a clip's sound on a sound lane as a clip of its own (captions stay on its words); speed (0.5× to 3×, or any percent); and
 for text the words, font, size, bold and italic, alignment, colour, outline, box and shadow. A slider
 drag is one undo step. **Ratio** (under the player) turns the canvas into 9:16 for TikTok, Reels and
 Shorts, 1:1 or 4:5; clips are refitted to the new shape.
@@ -95,7 +95,9 @@ clip fades, moves or grows between them. The Keyframes row goes to the previous 
 and makes the motion **Smooth** (easing in and out) or steady; the clip shows its keyframes as
 diamonds on the timeline: click one to select it (the playhead goes there and the panel says what is
 keyed), **Delete** removes just that keyframe, and dragging it moves it along the clip. Keyframes
-stay on their frames of the clip when it is moved or trimmed.
+stay on their frames of the clip when it is moved or trimmed. After its last keyframe a property
+goes straight back to its value at the first, so a zoom in for a few seconds is over by itself;
+**Hold the last value** keeps the last keyframe's values to the end of the clip instead.
 
 **Colour.** A picture clip's Properties have an **Adjust** section: exposure, contrast,
 highlights, shadows, whites, blacks, temperature, tint, saturation, vibrance, fade, sharpen and
