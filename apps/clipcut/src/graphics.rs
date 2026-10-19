@@ -210,3 +210,61 @@ pub async fn graphic_backdrop(seconds: f64, max_width: u32, hide: Vec<u64>, app:
     })
     .await
 }
+
+/// Where a still comes from (see `Studio::still_source`).
+#[derive(serde::Serialize)]
+pub(crate) struct StillSource {
+    item: u64,
+    seconds: f64,
+    name: String,
+}
+
+/// The picture a still at `seconds` comes from: clip `clip`, or the main track's clip there.
+#[tauri::command]
+pub(crate) fn still_source(seconds: f64, clip: Option<u64>, app: tauri::State<'_, App>) -> Result<StillSource, String> {
+    let (item, seconds, name) = lock(&app.studio).still_source(seconds, clip).map_err(|e| e.to_string())?;
+    Ok(StillSource { item, seconds, name })
+}
+
+/// The largest side a still is taken at (8K).
+const STILL_MAX: u32 = 8192;
+
+/// Media `item`'s picture at `seconds`, at its own size, as a PNG (for Thumbnails).
+#[tauri::command]
+pub(crate) async fn still_png(item: u64, seconds: f64, app: tauri::State<'_, App>) -> Result<tauri::ipc::Response, String> {
+    let stills = lock(&app.studio).stills();
+    blocking(move || {
+        let f = stills.frame(item, seconds, STILL_MAX).map_err(|e| e.to_string())?;
+        let png = filmcraft_export::encode_png(f.rgba, f.w, f.h).map_err(|e| format!("The still couldn't be made: {e}"))?;
+        Ok(tauri::ipc::Response::new(png))
+    })
+    .await
+}
+
+/// Saves media `item`'s picture at `seconds` as a PNG where the person picks (the Save dialog,
+/// named `name`). Returns where, or None when they cancelled.
+#[tauri::command]
+pub(crate) async fn save_still(item: u64, seconds: f64, name: String, handle: tauri::AppHandle, app: tauri::State<'_, App>) -> Result<Option<String>, String> {
+    use tauri_plugin_dialog::DialogExt;
+    let stills = lock(&app.studio).stills();
+    let file = crate::editing::safe_name(&name);
+    blocking(move || {
+        let Some(path) = handle
+            .dialog()
+            .file()
+            .set_title("Save the still")
+            .set_file_name(&file)
+            .add_filter("PNG", &["png"])
+            .blocking_save_file()
+            .and_then(|p| p.into_path().ok())
+        else {
+            return Ok(None);
+        };
+        let f = stills.frame(item, seconds, STILL_MAX).map_err(|e| e.to_string())?;
+        let png = filmcraft_export::encode_png(f.rgba, f.w, f.h).map_err(|e| format!("The still couldn't be made: {e}"))?;
+        std::fs::write(&path, png)
+            .map_err(|e| format!("Couldn't save {}: {e}. Check the folder can be written to and there's space on the drive.", path.display()))?;
+        Ok(Some(path.to_string_lossy().into_owned()))
+    })
+    .await
+}

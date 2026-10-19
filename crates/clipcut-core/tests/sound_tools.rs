@@ -265,3 +265,22 @@ fn a_colour_is_picked_and_removed() {
     assert!(s.set_key(&[id], Some(("#00ff00", "loud", 0.0, 50.0)), None).is_err());
     assert!(s.pick_colour(1.0, -5.0, 20.0).is_err());
 }
+
+#[test]
+fn a_still_comes_from_the_clip_s_own_media_at_full_size() {
+    let Some(path) = clip("ch-left-only", "sine=frequency=440", "anullsrc=channel_layout=mono") else { return };
+    let mut s = Studio::new();
+    s.add_clip(path.to_str().unwrap()).unwrap();
+    s.add_clip(path.to_str().unwrap()).unwrap();
+    let ids = main(&s.timeline());
+    let (item, at, name) = s.still_source(2.5, None).unwrap();
+    assert!((at - 0.5).abs() < 0.02, "half a second into the second clip: {at}");
+    assert_eq!(name, "ch-left-only 00m00.50s.png");
+    let f = s.stills().frame(item, at, 8192).unwrap();
+    assert_eq!((f.w, f.h), (320, 180), "the media's own size");
+    // a sped-up clip: the media time under the playhead
+    s.set_props(&[ids[0]], &serde_json::json!({"speed": 200.0}), None).unwrap();
+    assert!((s.still_source(0.5, Some(ids[0])).unwrap().1 - 1.0).abs() < 0.04);
+    assert!(s.still_source(0.5, Some(ids[1])).is_err(), "not under the playhead");
+    assert!(s.still_source(99.0, None).is_err());
+}

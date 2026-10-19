@@ -572,6 +572,7 @@ function restore(prefix, saved) {
 /* What the host app calls: match its video's shape, open a graphic again to change it, show its video
    behind the preview */
 const backdropFns = [];
+const photoFns = [];
 const hosted = {
   active: !!HOST,
   editing: null,
@@ -590,6 +591,16 @@ const hosted = {
     return !!img;
   },
   onBackdrop(fn) { backdropFns.push(fn); },
+  // a still the app hands over (a frame of its video, an image file): Thumbnails opens with it as
+  // its photo. Returns true when it was taken.
+  async photo(file) {
+    if (!file || typeof file.arrayBuffer !== 'function' || !photoFns.length) return false;
+    window.CS.showTool?.('th');
+    let took = false;
+    for (const fn of photoFns) { try { took = (await fn(file)) || took; } catch (_) { /* a tool's own problem */ } }
+    return took;
+  },
+  onPhoto(fn) { photoFns.push(fn); },
   // Files dropped on the page, handed over by the app: an app may handle drops itself (Tauri does on
   // Windows, so the page never sees them). They go to the drop zone at (x, y) as a real drop would.
   // Returns true when a drop zone took them.
