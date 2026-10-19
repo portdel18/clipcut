@@ -63,6 +63,9 @@ jobs:
           FILMCRAFT_REQUIRE_ORACLES: "1"
         run: cargo test --release -p clipcut-core
 
+      - name: Test the Media Foundation encoder's settings
+        run: cargo test --release -p filmcraft-platform media_foundation::export
+
       - name: Build ClipCut and its installer
         working-directory: apps/clipcut
         run: npx --yes @tauri-apps/cli@2 build --ci
