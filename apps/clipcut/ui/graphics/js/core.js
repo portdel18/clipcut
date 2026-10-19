@@ -590,6 +590,22 @@ const hosted = {
     return !!img;
   },
   onBackdrop(fn) { backdropFns.push(fn); },
+  // Files dropped on the page, handed over by the app: an app may handle drops itself (Tauri does on
+  // Windows, so the page never sees them). They go to the drop zone at (x, y) as a real drop would.
+  // Returns true when a drop zone took them.
+  drop(files, x, y) {
+    // files made in the app's own window are another realm's, so no instanceof
+    const list = [...(files || [])].filter(f => f && typeof f.arrayBuffer === 'function' && typeof f.name === 'string');
+    if (!list.length) return false;
+    const el = document.elementFromPoint(x, y) || document.body;
+    const dt = new DataTransfer();
+    for (const f of list) dt.items.add(f);
+    const fire = type => el.dispatchEvent(new DragEvent(type, { bubbles: true, cancelable: true, composed: true, dataTransfer: dt, clientX: x, clientY: y }));
+    fire('dragenter');
+    // a zone that wants files cancels dragover; one that doesn't is never handed them
+    if (fire('dragover')) { fire('dragleave'); return false; }
+    return !fire('drop');
+  },
   setAspect(a) {
     for (const o of Object.values(outputs)) {
       if (!o.aspects.includes(a) || o.out.aspect === a) continue;
@@ -610,8 +626,18 @@ const hosted = {
   },
   snapshot, restore, add: addToVideo,
 };
+// A desktop app holding the page saves files itself (its webview drops page downloads):
+// HOST.save(blob, name) shows its own Save dialog.
+function saveFile(blob, name) {
+  if (HOST && typeof HOST.save === 'function') {
+    Promise.resolve().then(() => HOST.save(blob, name)).catch(() => { /* the app says what went wrong */ });
+    return true;
+  }
+  return false;
+}
 function downloadBlob(blob, name) {
   const url = URL.createObjectURL(blob);
+  if (saveFile(blob, name)) return url;
   const a = document.createElement('a');
   a.href = url; a.download = name; document.body.appendChild(a); a.click(); a.remove();
   return url;
@@ -688,7 +714,11 @@ async function runRender({ title, OW, OH, fps, total, format, name, setup, frame
 }
 $('#render-cancel').addEventListener('click', () => { render.cancel = true; });
 $('#render-close').addEventListener('click', () => $('#render-dlg').close());
-$('#render-save').addEventListener('click', () => { if (render.url) { const a = document.createElement('a'); a.href = render.url; a.download = render.name; a.click(); } });
+$('#render-save').addEventListener('click', async () => {
+  if (!render.url) return;
+  if (HOST && typeof HOST.save === 'function') { saveFile(await (await fetch(render.url)).blob(), render.name); return; }
+  const a = document.createElement('a'); a.href = render.url; a.download = render.name; a.click();
+});
 $('#render-dlg').addEventListener('cancel', e => { if (render.busy) { e.preventDefault(); render.cancel = true; } });
 
 /* Render the same clip as 16:9 and 9:16, one after the other */

@@ -48,7 +48,8 @@ function toast(msg, err = false) {
   clearTimeout(toastTimer);
   toastTimer = setTimeout(() => { el.hidden = true; }, err ? 6000 : 3500);
 }
-const cap = s => s ? s[0].toUpperCase() + s.slice(1) : s;
+// a message that starts with a file's name keeps the name as it is
+const cap = s => !s || /^[^\n:]+\.[a-z0-9]{2,5}:/i.test(s) ? s : s[0].toUpperCase() + s.slice(1);
 const pad = n => String(n).padStart(2, '0');
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
@@ -455,7 +456,8 @@ async function importSound() {
   let paths;
   try { paths = await invoke('pick_clips'); } catch (e) { toast(e, true); return; }
   if (!paths || !paths.length) return;
-  if (!has()) { toast('Add a video first: music and voiceovers go under it.'); return; }
+  // an empty project starts with the sound (pictures and titles go over it)
+  if (!has()) { await addPaths(paths); return; }
   const r = await run('import_media', { paths });
   if (!r) return;
   apply(r.timeline);
@@ -469,7 +471,7 @@ const mediaThumbs = new Map();   // item → canvas
 function renderMedia() {
   const media = S.tl.media;
   renderProxies();
-  const sig = JSON.stringify(media.map(m => [m.item, m.name, m.duration, m.proxy]));
+  const sig = JSON.stringify(media.map(m => [m.item, m.name, m.duration, m.proxy, m.unreadable]));
   if (sig === mediaSig) return;
   mediaSig = sig;
   const list = $('#media-list'), sounds = $('#audio-list');
@@ -486,6 +488,7 @@ function renderMedia() {
       + '<div class="meta"><span></span><span class="dur"></span></div>';
     card.querySelector('.meta span').textContent = m.name;
     if (m.proxy) { const b = document.createElement('span'); b.className = 'proxy-tag'; b.textContent = 'Proxy'; b.title = 'Has a small copy for smooth playback'; card.appendChild(b); }
+    if (m.unreadable) { const b = document.createElement('span'); b.className = 'proxy-tag bad'; b.textContent = 'No picture'; b.title = m.unreadable; card.title = `${m.path}\n${m.unreadable}`; card.appendChild(b); }
     card.querySelector('.dur').textContent = fmtLen(m.duration);
     const add = card.querySelector('.add');
     add.title = video ? 'Add to the end of the main track' : 'Add below the main track, at the playhead';
@@ -544,7 +547,7 @@ async function makeProxies() {
 }
 
 function addSoundAtPlayhead(item) {
-  if (!has()) { toast('Add a video first: music and voiceovers go under it.'); return; }
+  if (!has()) { edit('start_with_sound', { item }); return; }
   addToLane(item, S.t);
 }
 async function paintMediaThumb(m, c) {
@@ -809,6 +812,11 @@ function markWord() {
 /* ---------- Graphics: Clip Studio over the editor; its graphics come in as clips ---------- */
 const TOOL_NAMES = { ul: 'Underline', mp: 'Map', sp: 'Split screen', sz: 'Scroll zoom', tl: 'Timeline', nm: 'Numbers', au: 'Audiogram', lt: 'Lower third' };
 const GR = { loaded: null, batch: false };
+/** Graphics covers the editor: while it shows, the editor underneath can't take focus or clicks. */
+function showGraphicsView(on) {
+  $('#graphics-view').hidden = !on;
+  $('.app').inert = on;
+}
 const graphicsWin = () => $('#graphics-frame').contentWindow;
 /* What Clip Studio calls (see "Inside ClipCut" in graphics/js/core.js): it renders with its own draw
    functions and hands each frame here; the frames go to a folder beside the project, then the timeline. */
@@ -828,6 +836,15 @@ window.__clipcutHost = {
     toast(replace != null ? 'Graphic updated' : 'Graphic added at the playhead');
   },
   abort: job => { invoke('graphic_abort', { job }).catch(() => {}); },
+  // a thumbnail, a rendered video or presets Graphics would download: the Save dialog, then the file
+  async save(blob, name) {
+    let path;
+    try { path = await invoke('save_graphic_file', { name }); } catch (e) { toast(e, true); return null; }
+    if (!path) return null;
+    try { await invoke('write_graphic_file', new Uint8Array(await blob.arrayBuffer())); } catch (e) { toast(e, true); return null; }
+    toast(`Saved ${path.split(/[\\/]/).pop()}`);
+    return path;
+  },
 };
 function loadGraphics() {
   if (!GR.loaded) {
@@ -847,8 +864,8 @@ async function openGraphics(edit = null) {
   if (edit != null) {
     try { made = await invoke('graphic_info', { clip: edit }); } catch (e) { toast(e, true); return; }
   }
-  $('#graphics-view').hidden = false;
-  try { await loadGraphics(); } catch (e) { $('#graphics-view').hidden = true; toast(e, true); return; }
+  showGraphicsView(true);
+  try { await loadGraphics(); } catch (e) { showGraphicsView(false); toast(e, true); return; }
   const cs = graphicsWin().CS;
   if (made && made.tool) cs.hosted.open(made.tool, made.state, edit);
   else cs.hosted.open(null);
@@ -899,8 +916,8 @@ async function offerRemake() {
 }
 async function remakeGraphics(ids) {
   if (S.playing) await pause();
-  $('#graphics-view').hidden = false;
-  try { await loadGraphics(); } catch (e) { $('#graphics-view').hidden = true; toast(e, true); return; }
+  showGraphicsView(true);
+  try { await loadGraphics(); } catch (e) { showGraphicsView(false); toast(e, true); return; }
   const cs = graphicsWin().CS;
   GR.batch = true;
   let done = 0;
@@ -923,7 +940,7 @@ async function remakeGraphics(ids) {
   toast(done === ids.length ? `${done === 1 ? 'The graphic was' : `All ${done} graphics were`} made for the new shape.` : `${done} of ${ids.length} graphics were made for the new shape. Open the others with Edit in Graphics.`, done < ids.length);
 }
 function closeGraphics() {
-  $('#graphics-view').hidden = true;
+  showGraphicsView(false);
   // a graphic being changed and left unfinished: the next one is new
   try { graphicsWin().CS?.hosted?.open(null); } catch (_) { /* not loaded */ }
   $('#tab-graphics').blur();
@@ -3008,7 +3025,7 @@ function startMediaDrag(m, e) {
     else if (drop.kind === 'lane') addToLane(m.item, drop.t);
     // nothing on the timeline yet: a video dropped anywhere on it starts the sequence
     else if (!sound) appendMedia(m.item);
-    else toast('Add a video first: music and voiceovers go under it.');
+    else edit('start_with_sound', { item: m.item });
   });
 }
 
@@ -3305,14 +3322,41 @@ document.addEventListener('keydown', e => {
 new ResizeObserver(() => { fitCanvas(); if (has() && !S.playing) showFrame(S.t); }).observe($('#stage'));
 new ResizeObserver(() => { if (S.tl) layoutTimeline(); }).observe(scroller());
 
-// Files dropped on the window: videos to the end of the main track, sound below it at the playhead
-listen('tauri://drag-enter', () => $('#drop-veil').classList.add('on'));
+// Files dropped on the window: videos to the end of the main track, sound below it at the playhead.
+// While Graphics is open they go to the Clip Studio drop zone under the pointer instead: the window
+// takes every drop itself (on Windows the page never sees one), so the files are handed over.
+const graphicsOpen = () => !$('#graphics-view').hidden;
+listen('tauri://drag-enter', () => { if (!graphicsOpen()) $('#drop-veil').classList.add('on'); });
 listen('tauri://drag-leave', () => $('#drop-veil').classList.remove('on'));
 listen('tauri://drag-drop', e => {
   $('#drop-veil').classList.remove('on');
   const paths = (e.payload && e.payload.paths) || [];
-  if (paths.length) addPaths(paths);
+  if (!paths.length) return;
+  if (graphicsOpen()) dropIntoGraphics(paths, e.payload.position);
+  else addPaths(paths);
 });
+const DROP_TYPES = {
+  png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', webp: 'image/webp', gif: 'image/gif', avif: 'image/avif',
+  mp4: 'video/mp4', m4v: 'video/mp4', mov: 'video/quicktime', webm: 'video/webm', mkv: 'video/x-matroska',
+  wav: 'audio/wav', mp3: 'audio/mpeg', m4a: 'audio/mp4', aac: 'audio/aac', flac: 'audio/flac', ogg: 'audio/ogg', opus: 'audio/ogg',
+  pdf: 'application/pdf', srt: 'application/x-subrip', vtt: 'text/vtt', txt: 'text/plain',
+};
+async function dropIntoGraphics(paths, pos) {
+  const frame = $('#graphics-frame'), cs = graphicsWin().CS;
+  if (!cs || !cs.hosted || !cs.hosted.drop) return;
+  const files = [];
+  try {
+    for (let i = 0; i < paths.length; i++) {
+      const name = paths[i].split(/[\\/]/).pop();
+      const bytes = await invoke('dropped_file', { index: i });
+      files.push(new (graphicsWin().File)([bytes], name, { type: DROP_TYPES[(name.split('.').pop() || '').toLowerCase()] || '' }));
+    }
+  } catch (err) { toast(String(err), true); return; }
+  // the drop's position is in the screen's pixels, the page's in CSS pixels
+  const r = frame.getBoundingClientRect(), k = window.devicePixelRatio || 1;
+  const x = (pos ? pos.x / k : r.width / 2 + r.left) - r.left, y = (pos ? pos.y / k : r.height / 2 + r.top) - r.top;
+  if (!cs.hosted.drop(files, x, y)) toast('Drop it on the preview or a photo, video or sound box of the tool on screen.');
+}
 
 renderTextStyles();
 // The last project comes back (or files given on the command line start a new one)

@@ -295,7 +295,7 @@ select:disabled { opacity: .5; }
 .drop-veil { position: fixed; inset: 0; display: none; place-items: center; background: rgba(20, 19, 22, .82); border: 3px dashed var(--accent); z-index: 20; }
 .drop-veil.on { display: grid; }
 .drop-veil p { font-size: 20px; font-weight: 600; }
-.toast { position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%); max-width: min(560px, calc(100vw - 32px)); padding: 10px 14px; border-radius: 8px; background: #2c2a30; border: 1px solid var(--line); box-shadow: 0 10px 30px rgba(0, 0, 0, .5); z-index: 30; }
+.toast { position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%); max-width: min(560px, calc(100vw - 32px)); padding: 10px 14px; border-radius: 8px; background: #2c2a30; border: 1px solid var(--line); box-shadow: 0 10px 30px rgba(0, 0, 0, .5); z-index: 60; }
 .toast.err { border-color: #6b3328; }
 .dlg { width: min(460px, calc(100vw - 32px)); padding: 20px; border-radius: 12px; border: 1px solid var(--line); background: var(--panel); color: var(--text); }
 .dlg::backdrop { background: rgba(0, 0, 0, .55); }
@@ -357,6 +357,7 @@ h3.sub { margin: 12px 0 6px; font-size: 11px; font-weight: 600; color: var(--mut
 .proxies .bar > div { height: 100%; width: 0; background: var(--accent); }
 .proxies .hint { margin: 0; }
 .media-card .proxy-tag { position: absolute; left: 6px; top: 6px; padding: 1px 6px; border-radius: 4px; background: rgba(0, 0, 0, .65); color: var(--accent); font-size: 10px; font-weight: 700; pointer-events: none; }
+.media-card .proxy-tag.bad { color: var(--err); }
 /* the transport's menus stay clear of the play button */
 #guide { width: 116px; }
 #quality { width: 70px; }

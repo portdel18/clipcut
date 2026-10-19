@@ -44,8 +44,20 @@ fn remember(handle: &tauri::AppHandle, path: Option<&str>) {
 /// A folder name from a clip or project name: no characters Windows refuses, never empty.
 pub(crate) fn safe_name(name: &str) -> String {
     let n: String = name.chars().map(|c| if "\\/:*?\"<>|".contains(c) || c.is_control() { ' ' } else { c }).collect();
-    let n = n.trim().trim_end_matches('.').trim().to_string();
-    if n.is_empty() { "Untitled".to_string() } else { n.chars().take(80).collect() }
+    // at most 80 characters, and no trailing dot or space (Windows drops them, so the folder
+    // made wouldn't be the one asked for)
+    let n: String = n.trim().chars().take(80).collect();
+    let n = n.trim_end_matches(['.', ' ']).trim_start().to_string();
+    if n.is_empty() {
+        return "Untitled".to_string();
+    }
+    // Windows' device names can't be file or folder names, with any extension
+    let stem = n.split('.').next().unwrap_or("").trim_end().to_ascii_uppercase();
+    let device = matches!(stem.as_str(), "CON" | "PRN" | "AUX" | "NUL" | "CONIN$" | "CONOUT$")
+        || (stem.len() == 4
+            && (stem.starts_with("COM") || stem.starts_with("LPT"))
+            && stem.chars().nth(3).is_some_and(|c| c.is_ascii_digit() || "¹²³".contains(c)));
+    if device { format!("{n}_") } else { n }
 }
 
 /// `root/<name>/<name>.fcproj`, or `<name> 2`, `<name> 3`… when that folder is taken.
@@ -103,9 +115,11 @@ pub async fn add_clips(paths: Vec<String>, seconds: Option<f64>, app: tauri::Sta
         {
             let mut s = lock(&studio);
             for p in &paths {
-                if let Err(e) = s.add_file(p, seconds.unwrap_or(0.0)) {
-                    let name = Path::new(p).file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_else(|| p.clone());
-                    errors.push(format!("{name}: {e}"));
+                let name = Path::new(p).file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_else(|| p.clone());
+                match s.add_file(p, seconds.unwrap_or(0.0)) {
+                    // added, but its picture shows the unreadable slate: say why now
+                    Ok(item) => errors.extend(s.check_picture(item).map(|why| format!("{name}: {why}"))),
+                    Err(e) => errors.push(format!("{name}: {e}")),
                 }
             }
         }
@@ -118,6 +132,12 @@ pub async fn add_clips(paths: Vec<String>, seconds: Option<f64>, app: tauri::Sta
 pub struct AddResult {
     timeline: TimelineView,
     errors: Vec<String>,
+}
+
+/// A sound-only file into an empty project: the project starts with it on a sound lane.
+#[tauri::command]
+pub async fn start_with_sound(item: u64, app: tauri::State<'_, App>) -> Result<TimelineView, String> {
+    edit(&app, move |s| s.start_with_sound(item).map(|_| ())).await
 }
 
 #[tauri::command]
@@ -409,7 +429,18 @@ mod tests {
     fn project_names_are_safe_and_unique() {
         assert_eq!(safe_name("Interview: take 2?"), "Interview  take 2");
         assert_eq!(safe_name("  ...  "), "Untitled");
-        assert_eq!(safe_name("con."), "con");
+        // Windows' device names, with or without an extension, get a mark so a folder can be made
+        assert_eq!(safe_name("con."), "con_");
+        assert_eq!(safe_name("NUL"), "NUL_");
+        assert_eq!(safe_name("aux.final"), "aux.final_");
+        assert_eq!(safe_name("COM1"), "COM1_");
+        assert_eq!(safe_name("lpt9"), "lpt9_");
+        assert_eq!(safe_name("COM"), "COM");
+        assert_eq!(safe_name("Console"), "Console");
+        assert_eq!(safe_name("Communities"), "Communities");
+        // cut to 80 characters without leaving a trailing dot or space
+        assert_eq!(safe_name(&format!("{}. end", "a".repeat(79))), "a".repeat(79));
+        assert_eq!(safe_name(&"é".repeat(200)).chars().count(), 80);
         let root = std::env::temp_dir().join(format!("clipcut-names-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&root);
         let first = new_project_path(&root, "Mayor interview");

@@ -1,6 +1,6 @@
 {
   "source": "https://github.com/portdel18/clip-stu",
-  "commit": "4f8efa780299bb2c1581983d04608d92ef99f852",
+  "commit": "ed58239cc37889c393150d177ad8a695dd8224ec",
   "libraries": {
     "maplibre-gl": "5.24.0",
     "mp4-muxer": "5.2.2",

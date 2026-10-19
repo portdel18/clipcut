@@ -51,12 +51,27 @@ impl Studio {
     pub fn add_file(&mut self, path: &str, seconds: f64) -> Result<u64> {
         let item = self.import(path)?;
         let picture = self.session.project.item(ItemId(item)).is_some_and(|i| i.has_video());
-        if picture || self.session.active_sequence().is_none() {
+        if picture {
             self.append_item(item)?;
+        } else if self.session.active_sequence().is_none() {
+            // a voice-over or a song first: a 16:9 project starts with it on a sound lane
+            self.start_with_sound(item)?;
         } else {
             self.add_to_lane(item, seconds)?;
         }
         Ok(item)
+    }
+
+    /// Starts the project with a sound-only item: a 1920 × 1080, 30 fps sequence with the sound
+    /// on the first sound lane at the start. Pictures, titles and graphics go over it.
+    pub fn start_with_sound(&mut self, item: u64) -> Result<Vec<u64>> {
+        let it = self.session.project.item(ItemId(item)).ok_or_else(|| Error::Invalid("that media is no longer in the project".into()))?;
+        if !it.has_audio() {
+            return Err(Error::Invalid(format!("{} has no picture or sound", it.name)));
+        }
+        let name = std::path::Path::new(&it.name).file_stem().map(|s| s.to_string_lossy().to_string()).unwrap_or_else(|| it.name.clone());
+        self.session.execute("file.newSequence", json!({"name": name, "width": 1920, "height": 1080, "fps": 30.0, "sampleRate": 48000})).map_err(engine)?;
+        self.add_to_lane(item, 0.0)
     }
 
     /// Adds media to a lane at `seconds`: a picture (video or still) on the first free overlay lane,

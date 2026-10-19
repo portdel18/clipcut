@@ -202,7 +202,7 @@ impl Studio {
         let base = thumbs.frame(item.item.0, mt.seconds(), w.clamp(32, 320))?;
         // the frame's sRGB pixels as the engine's linear-light picture
         let mut img = filmcraft_render::Image::new(base.w as usize, base.h as usize);
-        for (d, s) in img.px.chunks_mut(4).zip(base.rgba.chunks(4)) {
+        for (d, s) in img.px.chunks_exact_mut(4).zip(base.rgba.chunks_exact(4)) {
             for k in 0..3 {
                 d[k] = (f32::from(s[k]) / 255.0).powf(2.2);
             }
