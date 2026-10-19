@@ -118,6 +118,70 @@ jobs:
           if-no-files-found: error
           retention-days: 30
 
+      - name: Update to a newer release, end to end
+        shell: pwsh
+        run: |
+          # The installed ClipCut updates itself as the Update button does (no update key, like a
+          # release built without one): it finds a newer release, downloads it, checks its SHA-256,
+          # closes, the installer puts the new version in, and ClipCut starts again. The release is
+          # served from this runner (CLIPCUT_UPDATE_TEST) instead of GitHub.
+          $old = Get-ChildItem target\release\bundle\nsis\*-setup.exe | Select-Object -First 1
+          $oldCopy = "$env:RUNNER_TEMP\ClipCut-current-setup.exe"
+          Copy-Item $old.FullName $oldCopy
+          $cur = [regex]::Match((Get-Content apps\clipcut\Cargo.toml -Raw), '(?m)^version = "([^"]+)"').Groups[1].Value
+          $p = $cur.Split('.'); $new = "$($p[0]).$($p[1]).$([int]$p[2] + 1)"
+          Write-Output "updating $cur -> $new"
+
+          # the newer version: the same app, built as $new
+          @{ version = $new } | ConvertTo-Json | Set-Content "$env:RUNNER_TEMP\newer.json"
+          Push-Location apps\clipcut
+          npx --yes @tauri-apps/cli@2 build --ci --config "$env:RUNNER_TEMP\newer.json"
+          if ($LASTEXITCODE -ne 0) { throw "building $new failed" }
+          Pop-Location
+          $newInst = Get-ChildItem "target\release\bundle\nsis\*_$($new)_*-setup.exe" | Select-Object -First 1
+          if (-not $newInst) { throw "the $new installer was not found" }
+
+          # install the current version, as a person would
+          $p = Start-Process $oldCopy -ArgumentList "/S" -Wait -PassThru
+          if ($p.ExitCode -ne 0) { throw "installing $cur failed (exit $($p.ExitCode))" }
+          $installed = "$env:LOCALAPPDATA\ClipCut\ClipCut.exe"
+          if (-not (Test-Path $installed)) { throw "ClipCut wasn't installed at $installed" }
+          $key = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\ClipCut"
+          Write-Output "installed: $((Get-ItemProperty $key).DisplayVersion)"
+
+          # "the latest release", as GitHub's API describes it
+          $feed = "$env:RUNNER_TEMP\feed"
+          New-Item -ItemType Directory -Force $feed | Out-Null
+          Copy-Item $newInst.FullName "$feed\setup.exe"
+          $sum = (Get-FileHash "$feed\setup.exe" -Algorithm SHA256).Hash.ToLower()
+          @{
+            tag_name = "v$new"
+            body = "Test release"
+            assets = @(@{ name = $newInst.Name; browser_download_url = "http://127.0.0.1:8765/setup.exe"; size = $newInst.Length; digest = "sha256:$sum" })
+          } | ConvertTo-Json -Depth 5 | Set-Content -Encoding utf8NoBOM "$feed\latest"
+          $server = Start-Process python -ArgumentList "-m", "http.server", "8765", "--bind", "127.0.0.1", "--directory", $feed -PassThru -WindowStyle Hidden
+          Start-Sleep 3
+
+          $log = "$env:TEMP\ClipCut update\test.log"
+          Remove-Item $log -ErrorAction SilentlyContinue
+          $env:CLIPCUT_UPDATE_TEST = "http://127.0.0.1:8765/latest"
+          $app = Start-Process $installed -PassThru
+          Remove-Item Env:\CLIPCUT_UPDATE_TEST
+          $ok = $false
+          for ($i = 0; $i -lt 60; $i++) {
+            Start-Sleep 5
+            $v = (Get-ItemProperty $key -ErrorAction SilentlyContinue).DisplayVersion
+            $again = Get-Process ClipCut -ErrorAction SilentlyContinue | Where-Object { $_.Id -ne $app.Id }
+            if ($v -eq $new -and $app.HasExited -and $again) { $ok = $true; break }
+          }
+          Write-Output "--- the app's update log"
+          if (Test-Path $log) { Get-Content $log } else { Write-Output "(none)" }
+          Write-Output "--- installed version: $v; the $cur app closed: $($app.HasExited); ClipCut running again: $([bool]$again)"
+          Write-Output "exe version: $((Get-Item $installed).VersionInfo.ProductVersion)"
+          Get-Process ClipCut -ErrorAction SilentlyContinue | Stop-Process -Force
+          Stop-Process -Id $server.Id -Force -ErrorAction SilentlyContinue
+          if (-not $ok) { throw "ClipCut didn't update itself from $cur to $new and start again" }
+
       - name: Upload the captions test's results
         if: always()
         uses: actions/upload-artifact@v4

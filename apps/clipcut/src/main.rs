@@ -320,6 +320,7 @@ fn main() {
             updates::check_update,
             updates::install_update,
             updates::open_releases,
+            updates::update_test,
             graphics::dropped_file,
             graphics::save_graphic_file,
             graphics::write_graphic_file,

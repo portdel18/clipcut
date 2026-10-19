@@ -30,7 +30,8 @@ remote `upstream`). Read `README.md` for what it is and the roadmap.
   `CLIPCUT_UPDATER_PUBKEY` was set at build time; without it, `app.updater()` would panic, so check
   `updates::key()` first. Its manifest is `latest.json` on the latest release. Without a key, Windows
   builds update straight from GitHub's API (`releases/latest`): the `-setup.exe` asset, refused unless
-  its size and the SHA-256 `digest` GitHub lists match, run with `/P /UPDATE /R`.
+  its size and the SHA-256 `digest` GitHub lists match, run with `/P /UPDATE /R`. Windows CI updates
+  an installed copy to a newer build end to end (`CLIPCUT_UPDATE_TEST`, a local feed; keep it green).
 
 ## Running and looking at the app
 - Linux needs the Tauri system libraries (see README). Under a headless session:

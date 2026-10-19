@@ -3371,7 +3371,7 @@ invoke('restore').then(r => {
 /* ---------- updates ---------- */
 // The app asks GitHub Releases for a newer version once at start; a build that can't install
 // updates itself (no signing key) only links to the Releases page.
-const Upd = { info: null, busy: false };
+const Upd = { info: null, busy: false, test: false };
 function showUpdate() {
   const i = Upd.info;
   $('#about-version').textContent = i ? `Version ${i.current}` : '';
@@ -3397,6 +3397,8 @@ async function checkUpdate(quiet) {
     if (!quiet) $('#about-status').textContent = String(e);
   }
   showUpdate();
+  // the end-to-end update test (Windows CI) presses Update and restart itself
+  if (Upd.test && Upd.info && Upd.info.available && Upd.info.can_update) installUpdate();
 }
 async function installUpdate() {
   if (Upd.busy) return;
@@ -3425,6 +3427,7 @@ $('#update-btn').onclick = installUpdate;
 $('#about-releases').onclick = () => invoke('open_releases').catch(e => toast(e, true));
 $('#about-close').onclick = () => $('#about-dlg').close();
 $('#about-dlg').oncancel = e => { if (Upd.busy) e.preventDefault(); };
+invoke('update_test').then(t => { Upd.test = !!t; }).catch(() => {});
 setTimeout(() => checkUpdate(true), 3000);
 
 // For tests and debugging in the web inspector
