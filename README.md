@@ -24,9 +24,10 @@ frame timing, colour, audio mixing and export), and will bring in
 3. If the installer isn't code-signed, Windows shows **"Windows protected your PC"** the first time:
    choose **More info → Run anyway**.
 
-**Updates.** A release made with an update key checks for a newer version when ClipCut starts and
-shows **Update to x.y.z** in the top bar: it saves the project, installs the new version and opens
-it again. **About ClipCut** (the name at the top left) shows the version and checks by hand. How
+**Updates.** ClipCut checks for a newer release a few seconds after it starts and shows **Update to
+x.y.z** in the top bar: it saves the project, downloads and installs the new version, and opens it
+again. A release made with an update key is also checked against that key; without one, ClipCut
+installs the release's installer once it matches the checksum GitHub lists for it. **About ClipCut** (the name at the top left) shows the version and checks by hand. How
 releases, update keys and code signing are set up: [RELEASING.md](packaging/clipcut/RELEASING.md).
 
 Your footage stays on your computer: ClipCut reads it from disk and writes exports where you choose.

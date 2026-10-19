@@ -27,6 +27,12 @@ filmcraft-time = { workspace = true }
 tauri = { version = "2", features = [] }
 tauri-plugin-dialog = "2"
 tauri-plugin-updater = "2"
+# updates without a signing key: the latest release's installer, from GitHub (the same client and
+# TLS the updater plugin uses)
+reqwest = { version = "0.13", default-features = false, features = ["json", "rustls-no-provider", "system-proxy"] }
+rustls = { version = "0.23", default-features = false, features = ["ring"] }
+semver = "1"
+sha2 = "0.10"
 minisign-verify = "0.3"
 base64 = "0.22"
 cpal = "0.16"
