@@ -28,7 +28,9 @@ remote `upstream`). Read `README.md` for what it is and the roadmap.
   Actions): code signing and update signing switch on with the repository's secrets and variables
   (`packaging/clipcut/RELEASING.md`). The updater (`src/updates.rs`) is registered only when
   `CLIPCUT_UPDATER_PUBKEY` was set at build time; without it, `app.updater()` would panic, so check
-  `updates::key()` first. Its manifest is `latest.json` on the latest release.
+  `updates::key()` first. Its manifest is `latest.json` on the latest release. Without a key, Windows
+  builds update straight from GitHub's API (`releases/latest`): the `-setup.exe` asset, refused unless
+  its size and the SHA-256 `digest` GitHub lists match, run with `/P /UPDATE /R`.
 
 ## Running and looking at the app
 - Linux needs the Tauri system libraries (see README). Under a headless session:

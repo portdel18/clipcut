@@ -24,8 +24,19 @@ release page afterwards if you like (the update dialog shows the notes from when
 
 ## Updates (free, set up once)
 
-ClipCut updates itself when the release is signed with an update key. Without one it still works:
-**About ClipCut** (the name at the top left) shows the version and links to the Releases page.
+ClipCut updates itself either way. A few seconds after it starts it asks GitHub for the latest
+release, shows **Update to x.y.z** in the top bar, and **Update and restart** (also in **About
+ClipCut**, the name at the top left) saves the project, installs the new version and opens it again.
+
+- **Without an update key** (nothing to set up): it downloads the latest release's `-setup.exe`
+  and runs it only when it matches the SHA-256 checksum GitHub lists for that file. That catches a
+  damaged or swapped download, but it trusts whoever can publish releases on this repository.
+- **With an update key** (below, recommended): each update must also be signed with your private
+  key, which never leaves your computer and GitHub's secrets, so a release made by anyone else is
+  refused even if the GitHub account were misused.
+
+Pre-releases and drafts are never offered. Copies installed from a release built without a key
+switch to the signed path from the first release they install that has one.
 
 1. Make a key pair on your own computer, with a password:
 
@@ -41,9 +52,7 @@ ClipCut updates itself when the release is signed with an update key. Without on
    - secret `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`: its password;
    - variable (not secret) `CLIPCUT_UPDATER_PUBKEY`: the contents of `clipcut-updates.key.pub`.
 
-From the next release on, ClipCut checks for a newer version a few seconds after it starts, shows
-**Update to x.y.z** in the top bar, and **Update and restart** saves the project, installs the new
-version and opens it again. Each update is checked against the public key built into the app, and
+From the next release on, each update is checked against the public key built into the app, and
 against the version it was signed for; the workflow runs the same check with the built app before it
 publishes, so a key that doesn't match its public half fails the release instead of reaching
 anyone.

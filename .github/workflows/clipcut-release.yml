@@ -188,6 +188,15 @@ jobs:
             gh release upload $tag latest.json
             if ($LASTEXITCODE -ne 0) { throw "the update manifest couldn't be uploaded" }
           }
+          # copies without an update key install the setup.exe only when it matches the SHA-256
+          # GitHub lists for it: check that GitHub lists the right one
+          $sum = (Get-FileHash $env:INSTALLER -Algorithm SHA256).Hash.ToLower()
+          $leaf = Split-Path $env:INSTALLER -Leaf
+          # (still a draft, which only the list of releases shows)
+          $rel = gh api "repos/$env:GITHUB_REPOSITORY/releases?per_page=30" | ConvertFrom-Json | Where-Object { $_.tag_name -eq $tag } | Select-Object -First 1
+          $digest = ($rel.assets | Where-Object { $_.name -eq $leaf } | Select-Object -First 1).digest
+          if ("$digest" -ne "sha256:$sum") { Write-Output "::warning::GitHub lists '$digest' for $leaf, not sha256:$sum, so copies without an update key won't install this release (they say so and link to the Releases page)" }
+          else { Write-Output "GitHub lists the installer's SHA-256: copies without an update key can install it" }
           gh release edit $tag --draft=false
           if ($LASTEXITCODE -ne 0) { throw "the release couldn't be published" }
           Write-Output "Published https://github.com/$env:GITHUB_REPOSITORY/releases/tag/$tag"
