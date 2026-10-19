@@ -62,7 +62,7 @@ jobs:
           $priv = $env:HAS_UPDATE_KEY -eq 'true'
           if ($pub -and -not $priv) { throw "The CLIPCUT_UPDATER_PUBKEY variable is set but the TAURI_SIGNING_PRIVATE_KEY secret isn't, so updates couldn't be signed. Add the secret, or remove the variable to release without updates." }
           if ($priv -and -not $pub) { throw "The TAURI_SIGNING_PRIVATE_KEY secret is set but the CLIPCUT_UPDATER_PUBKEY variable isn't, so the app couldn't check updates. Add the public key as a variable." }
-          if (-not $pub) { Write-Output "::warning::No update key: this release can't update itself, and people download new versions from the Releases page." }
+          if (-not $pub) { Write-Output "::warning::No update key: copies update from the Releases page checked only against GitHub's SHA-256 of the installer, not your own signature (packaging/clipcut/RELEASING.md)." }
           if ($env:HAS_CERTIFICATE -ne 'true' -and -not $env:WINDOWS_SIGN_COMMAND) {
             Write-Output "::warning::No code-signing certificate: Windows SmartScreen warns about the installer ('Windows protected your PC', then More info, Run anyway)."
           }
@@ -82,6 +82,10 @@ jobs:
       - name: ffmpeg (self-test clip only; never shipped)
         shell: pwsh
         run: |
+          # Chocolatey's community feed sometimes fails (or answers 503) and choco then exits 1 or
+          # even 0 without ffmpeg, so check that ffmpeg runs, and fall back to a static build from
+          # GitHub. The step ends with ffmpeg itself: GitHub fails a pwsh step on the exit code of
+          # the last program it ran, which would otherwise be choco's.
           choco install ffmpeg --no-progress -y
           if (-not (Get-Command ffmpeg -ErrorAction SilentlyContinue)) {
             Write-Output "Chocolatey didn't install ffmpeg; using a static build instead"
@@ -89,8 +93,11 @@ jobs:
             Invoke-WebRequest -Uri "https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-win64-gpl.zip" -OutFile $zip
             Expand-Archive $zip -DestinationPath "$env:RUNNER_TEMP\ffmpeg"
             $bin = (Get-ChildItem "$env:RUNNER_TEMP\ffmpeg" -Recurse -Filter ffmpeg.exe | Select-Object -First 1).DirectoryName
+            if (-not $bin) { throw "the static ffmpeg build has no ffmpeg.exe" }
             Add-Content $env:GITHUB_PATH $bin
+            $env:PATH = "$bin;$env:PATH"
           }
+          ffmpeg -hide_banner -version | Select-Object -First 1
 
       - name: Code-signing certificate
         if: env.HAS_CERTIFICATE == 'true'
