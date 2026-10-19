@@ -400,3 +400,8 @@ h3.sub { margin: 12px 0 6px; font-size: 11px; font-weight: 600; color: var(--mut
 .key-row .add:hover { border-color: var(--faint); color: var(--text); }
 .key-row .reset { height: 24px; padding: 0 8px; border: 0; border-radius: 5px; background: none; color: var(--faint); cursor: pointer; font-size: 12px; }
 .key-row .reset:hover { color: var(--text); background: var(--panel-2); }
+
+/* Remove a colour: picking it in the player */
+.stage.picking, .stage.picking canvas { cursor: crosshair; }
+.ch-hint { display: grid; gap: 6px; }
+.ch-hint:empty { display: none; }

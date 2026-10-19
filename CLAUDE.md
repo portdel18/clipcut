@@ -101,6 +101,12 @@ remote `upstream`). Read `README.md` for what it is and the roadmap.
   `keys_of`/`keyframes_at`). Every keyframe edit runs inside `with_returns` (take them off, edit,
   put them back); a new keyframe edit must too. `hold` in that marker turns them off
   (`Studio::set_hold`). Ducked music's volume gets none.
+- Two-mic sides (`channels.rs`) are the engine's Channel Mixer (`channel_mixer_a`) on the sound clip;
+  `channel_levels` measures the sides without it. Keep pitch (`timing.rs`) is the engine's Pitch
+  Shifter, chained per octave, refitted by `fit_pitch` after every speed or reverse change (a new
+  speed edit must call it); a clip marker "ClipCut pitch" turns it off. Freeze is the engine's
+  Insert Frame Hold Segment after a razor of the clip and its sound, then `pack_main`. Remove a
+  colour (`key.rs`) is Ultra Key; `pick_colour` renders the frame without keys.
 - Keys: every shortcut is an entry of `ACTIONS` in `app.js` (id, default `keys`, `fn`); the keydown
   handler looks presses up by `comboOf(e)` ("Ctrl+Shift+Z": letters by layout, other keys by
   `e.code`). A new shortcut is a new entry, never a key test in the handler. The user's changes are
