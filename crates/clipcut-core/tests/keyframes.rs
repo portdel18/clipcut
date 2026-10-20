@@ -276,3 +276,51 @@ fn after_the_last_keyframe_a_clip_goes_straight_back_unless_it_holds() {
     assert!(loud(&s, 0.9) < loud_before * 0.2, "quiet near the last keyframe");
     assert!(loud(&s, 1.5) > loud_before * 0.8, "the sound comes back too: {} vs {loud_before}", loud(&s, 1.5));
 }
+
+#[test]
+fn a_fade_in_works_on_any_main_clip_and_on_lane_sound() {
+    let Some((mut s, _)) = studio() else { return };
+    s.add_clip(clip("kf-white", "white").unwrap().to_str().unwrap()).unwrap();
+    s.add_clip(clip("kf-white", "white").unwrap().to_str().unwrap()).unwrap();
+    let m = main(&s.timeline());
+    let full = loud(&s, 3.0);
+    // the second clip, with a clip before it: its sound starts quiet
+    s.set_props(&[m[1]], &json!({"fadeIn": 1.0}), None).unwrap();
+    let v = s.timeline();
+    for c in v.clips.iter().filter(|c| c.track == "A1") {
+        eprintln!("A1 {} {:.2}-{:.2} in {} out {}", c.id, c.start, c.end, c.props.fade_in, c.props.fade_out);
+    }
+    eprintln!("loud 2.1 {} 2.5 {} 3.5 {} full {full}", loud(&s, 2.1), loud(&s, 2.5), loud(&s, 3.5));
+    assert!(loud(&s, 2.1) < full * 0.4, "quiet just after the cut: {} vs {full}", loud(&s, 2.1));
+    assert!(loud(&s, 3.5) > full * 0.8);
+    assert!(loud(&s, 1.9) > full * 0.8, "the clip before is untouched: {}", loud(&s, 1.9));
+    // the last clip too
+    s.set_props(&[m[2]], &json!({"fadeIn": 0.5}), None).unwrap();
+    assert!(loud(&s, 4.1) < full * 0.5, "{}", loud(&s, 4.1));
+    assert!(loud(&s, 2.1) < full * 0.4, "the first fade stays: {}", loud(&s, 2.1));
+}
+
+#[test]
+fn a_fade_in_next_to_a_transition() {
+    let Some((mut s, _)) = studio() else { return };
+    s.add_clip(clip("kf-white", "white").unwrap().to_str().unwrap()).unwrap();
+    s.add_clip(clip("kf-white", "white").unwrap().to_str().unwrap()).unwrap();
+    let m = main(&s.timeline());
+    let full = loud(&s, 3.0);
+    s.set_transition(m[0], "mix", Some(0.5)).unwrap();
+    let r = s.set_props(&[m[1]], &json!({"fadeIn": 1.0}), None);
+    eprintln!("set: {r:?}");
+    let v = s.timeline();
+    for c in v.clips.iter().filter(|c| c.track == "A1") {
+        eprintln!("A1 {} {:.2}-{:.2} in {} out {}", c.id, c.start, c.end, c.props.fade_in, c.props.fade_out);
+    }
+    eprintln!("transitions {:?}", v.transitions.iter().map(|t| (t.from, t.start, t.end)).collect::<Vec<_>>());
+    for t in [1.6, 1.9, 2.1, 2.3, 2.6, 3.5] {
+        eprintln!("loud {t} {:.3}", loud(&s, t) / full);
+    }
+    // and on the third clip, with no transition before it
+    s.set_props(&[m[2]], &json!({"fadeIn": 1.0}), None).unwrap();
+    for t in [3.9, 4.1, 4.5] {
+        eprintln!("loud {t} {:.3}", loud(&s, t) / full);
+    }
+}

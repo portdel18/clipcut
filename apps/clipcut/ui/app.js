@@ -3358,13 +3358,19 @@ async function exportClip() {
   for (const hardware of [true, false]) {
     const outcome = await runExport(path, choice, hardware, dlg);
     if (outcome !== 'gpu-failed') break;
-    toast("The graphics card's video encoder stopped partway, so ClipCut is exporting again with its own encoder (slower).", true);
+    // the encoder's own words, without the advice to turn it off (ClipCut just did), kept in the
+    // problems log too, so they can be sent along
+    const why = cap(String(GPU_FAIL.reason || '').replace(/\s*\((?:turn )?Export ▸ Hardware encoding off[^)]*\)/gi, '').replace(/;?\s*turn Export ▸ Hardware encoding off.*$/i, '').trim());
+    const log = await invoke('note_problem', { what: 'hardware video encoder', detail: GPU_FAIL.reason || '' }).catch(() => null);
+    toast(`The graphics card's video encoder stopped (${why || 'no reason given'}), so ClipCut is exporting again with its own encoder (slower).${log ? ` The details are in ${log}.` : ''}`, true);
   }
   $('#export-cancel').hidden = true;
   $('#export-close').hidden = false;
 }
+/** Why the graphics card's encoder last failed (runExport's 'gpu-failed'). */
+const GPU_FAIL = { reason: '' };
 /** One export job, shown in the Export dialog: 'done', 'failed', 'cancelled', or 'gpu-failed'
- *  (the graphics card's encoder failed: worth trying again without it). */
+ *  (the graphics card's encoder failed: worth trying again without it; GPU_FAIL says why). */
 async function runExport(path, choice, hardware, dlg) {
   const before = await invoke('hardware_frames').catch(() => 0);
   let job;
@@ -3392,7 +3398,7 @@ async function runExport(path, choice, hardware, dlg) {
       if (st.error) {
         const cancelled = /cancel/i.test(st.error);
         // the hardware encoders' errors say how to turn them off
-        if (!cancelled && hardware && /Hardware encoding|NVENC|Media Foundation|MFT/i.test(st.error)) return 'gpu-failed';
+        if (!cancelled && hardware && /Hardware encoding|NVENC|Media Foundation|MFT/i.test(st.error)) { GPU_FAIL.reason = st.error; return 'gpu-failed'; }
         $('#export-title').textContent = cancelled ? 'Export cancelled' : 'Export failed';
         $('#export-meta').textContent = cancelled ? 'Nothing was saved.' : cap(st.error);
         $('#export-meta').className = 'meta err';
