@@ -16,9 +16,10 @@
     </div>
     <div class="top-actions">
       <button class="btn update" id="update-btn" hidden title="A newer ClipCut is ready to install">Update</button>
-      <button class="btn" id="new-btn" title="Start a new project (Ctrl+N)">New</button>
-      <button class="btn" id="open-btn" title="Open a saved project (Ctrl+O)">Open</button>
-      <button class="btn primary" id="export-btn" disabled title="Export (Ctrl+E)">Export</button>
+      <button class="tool keys-btn" id="keys-btn" data-tip="Keyboard shortcuts: see and change the keys" data-keys="shortcuts" aria-label="Keyboard shortcuts"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="2.5" y="6" width="19" height="12" rx="2"/><path d="M6 10h1M9.5 10h1M13 10h1M16.5 10h1M6 14h1M9 14h6M16.5 14h1"/></svg></button>
+      <button class="btn" id="new-btn" data-tip="Start a new project" data-keys="new">New</button>
+      <button class="btn" id="open-btn" data-tip="Open a saved project" data-keys="open">Open</button>
+      <button class="btn primary" id="export-btn" disabled data-tip="Export" data-keys="export">Export</button>
     </div>
   </header>
 
@@ -103,6 +104,23 @@
         </div>
         <h3>Transcript</h3>
         <p class="hint">Click a word to go to it. Drag across words (or Shift+click) and press Delete to cut them out of the video.</p>
+        <button class="btn small find-open" id="find-open" data-tip="Find words in the transcript and replace them, in the captions too" data-keys="find">Find and replace</button>
+        <div class="find" id="find-bar" hidden>
+          <div class="find-row">
+            <input type="search" id="find-q" placeholder="Find" aria-label="Find in the transcript" spellcheck="false">
+            <span class="find-count" id="find-count" aria-live="polite"></span>
+            <button class="tool" id="find-prev" title="Previous (Shift+Enter)" aria-label="Previous"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 15l6-6 6 6"/></svg></button>
+            <button class="tool" id="find-next" title="Next (Enter)" aria-label="Next"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg></button>
+            <button class="tool" id="find-close" title="Close (Esc)" aria-label="Close"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg></button>
+          </div>
+          <div class="find-row">
+            <input type="text" id="find-with" placeholder="Replace with" aria-label="Replace with" spellcheck="false">
+            <button class="btn small" id="find-one" title="Replace the highlighted match, then go to the next">Replace</button>
+            <button class="btn small" id="find-all" title="Replace every match">Replace all</button>
+          </div>
+          <label class="check"><input type="checkbox" id="find-case"> Match case</label>
+          <p class="hint">Replacing changes the words and the captions over them. Nothing is cut from the video.</p>
+        </div>
         <div class="transcript" id="transcript" tabindex="0"></div>
         <button class="btn" id="cap-srt">Save subtitles (.srt)</button>
       </div>
@@ -204,12 +222,12 @@
       <button class="tool" id="undo-btn" disabled title="Undo (Ctrl+Z)" aria-label="Undo"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 14L4 9l5-5"/><path d="M4 9h10a6 6 0 0 1 0 12h-3"/></svg></button>
       <button class="tool" id="redo-btn" disabled title="Redo (Ctrl+Shift+Z)" aria-label="Redo"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 14l5-5-5-5"/><path d="M20 9H10a6 6 0 0 0 0 12h3"/></svg></button>
       <span class="sep" aria-hidden="true"></span>
-      <button class="tool" id="split-btn" disabled title="Split at the playhead (S)" aria-label="Split"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v18"/><path d="M8 7H4v10h4M16 7h4v10h-4"/></svg></button>
-      <button class="tool" id="delleft-btn" disabled title="Delete to the left of the playhead (Q)" aria-label="Delete left"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M16 4v16"/><path d="M4 8h8v8H4z" stroke-dasharray="2 2"/><path d="M6 10l4 4M10 10l-4 4"/></svg></button>
-      <button class="tool" id="delright-btn" disabled title="Delete to the right of the playhead (W)" aria-label="Delete right"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 4v16"/><path d="M12 8h8v8h-8z" stroke-dasharray="2 2"/><path d="M14 10l4 4M18 10l-4 4"/></svg></button>
-      <button class="tool" id="delete-btn" disabled title="Delete the selected clips; the gap closes (Delete)" aria-label="Delete"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 7h14M10 7V5h4v2M7 7l1 12h8l1-12"/></svg></button>
+      <button class="tool" id="split-btn" disabled data-tip="Split at the playhead" data-keys="split" aria-label="Split"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v18"/><path d="M8 7H4v10h4M16 7h4v10h-4"/></svg></button>
+      <button class="tool" id="delleft-btn" disabled data-tip="Delete to the left of the playhead" data-keys="delleft" aria-label="Delete left"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M16 4v16"/><path d="M4 8h8v8H4z" stroke-dasharray="2 2"/><path d="M6 10l4 4M10 10l-4 4"/></svg></button>
+      <button class="tool" id="delright-btn" disabled data-tip="Delete to the right of the playhead" data-keys="delright" aria-label="Delete right"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 4v16"/><path d="M12 8h8v8h-8z" stroke-dasharray="2 2"/><path d="M14 10l4 4M18 10l-4 4"/></svg></button>
+      <button class="tool" id="delete-btn" disabled data-tip="Delete the selected clips; the gap closes" data-keys="delete" aria-label="Delete"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 7h14M10 7V5h4v2M7 7l1 12h8l1-12"/></svg></button>
       <span class="spacer"></span>
-      <button class="tool" id="snap-btn" aria-pressed="true" title="Snapping (N); hold Shift while dragging to skip it" aria-label="Snapping"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 4v8a6 6 0 0 0 12 0V4"/><path d="M6 8h4M14 8h4"/></svg></button>
+      <button class="tool" id="snap-btn" aria-pressed="true" data-tip="Snapping{k}; hold Shift while dragging to skip it" data-keys="snap" aria-label="Snapping"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 4v8a6 6 0 0 0 12 0V4"/><path d="M6 8h4M14 8h4"/></svg></button>
       <span class="sep" aria-hidden="true"></span>
       <button class="tool" id="zoomout-btn" title="Zoom out (pinch on the touchpad, or Ctrl+wheel)" aria-label="Zoom out"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6"/><path d="M8 11h6M20 20l-4.5-4.5"/></svg></button>
       <input type="range" id="zoom" min="0" max="100" value="0" aria-label="Timeline zoom">
@@ -245,6 +263,17 @@
     <button class="btn" id="about-check">Check for updates</button>
     <button class="btn primary" id="about-install" hidden>Update and restart</button>
     <button class="btn" id="about-close">Close</button>
+  </div>
+</dialog>
+<dialog class="dlg wide keys-dlg" id="keys-dlg" aria-labelledby="keys-title">
+  <h2 id="keys-title">Keyboard shortcuts</h2>
+  <p class="dlg-text">Press + beside an action, then the keys you want for it. Keys another action had move to this one.</p>
+  <input type="search" id="keys-filter" class="keys-filter" placeholder="Search actions or keys" aria-label="Search actions or keys" spellcheck="false">
+  <div class="keys-list" id="keys-list"></div>
+  <p class="meta" id="keys-note" aria-live="polite"></p>
+  <div class="dlg-actions">
+    <button class="btn" id="keys-reset">Reset all to defaults</button>
+    <button class="btn" id="keys-close">Close</button>
   </div>
 </dialog>
 <dialog class="dlg" id="remake-dlg" aria-labelledby="remake-title">

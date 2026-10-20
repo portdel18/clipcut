@@ -289,3 +289,96 @@ fn exports_burn_the_captions_in() {
     assert!(diff(&burnt, &with) < diff(&burnt, &without), "the export doesn't look like the player with its captions");
     let _ = std::fs::remove_file(&out);
 }
+
+#[test]
+fn extracted_sound_stays_put_with_its_captions() {
+    let Some(mut s) = captioned() else { return };
+    let before = caps(&s);
+    let main = main_track(&s);
+    let second = main[1].clone();
+    let sound = s.extract_audio(second.id).unwrap();
+    let v = s.timeline();
+    assert_eq!(v.undo_label.as_deref(), Some("Extract Audio"));
+    let snd = v.clips.iter().find(|c| c.id == sound).unwrap();
+    assert_eq!(snd.track, "A2", "{snd:?}");
+    assert!((snd.start - second.start).abs() < 1e-6 && (snd.end - second.end).abs() < 1e-6, "same place: {snd:?}");
+    assert!(snd.link.is_none() && v.clips.iter().find(|c| c.id == second.id).unwrap().link.is_none(), "no longer linked");
+    assert!(!v.clips.iter().any(|c| c.track == "A1" && c.start >= 2.0 - 1e-6), "the main track's sound there is gone");
+    assert_eq!(caps(&s), before, "the captions stay over the words");
+    // it is a clip of its own now; the first clip's sound can be extracted from the sound itself
+    assert!(s.extract_audio(sound).is_err());
+    let first_sound = v.clips.iter().find(|c| c.track == "A1" && c.start < 0.1).unwrap().id;
+
+    // deleting the first clip moves the picture up, but the sound and its captions stay
+    s.delete(&[main[0].id]).unwrap();
+    let v = s.timeline();
+    assert!(v.clips.iter().find(|c| c.id == second.id).unwrap().start.abs() < 1e-6, "the picture moved up");
+    assert!((v.clips.iter().find(|c| c.id == sound).unwrap().start - 2.0).abs() < 1e-6, "the sound stayed");
+    let c = caps(&s);
+    assert_eq!(c.len(), before.len() / 2, "{c:#?}");
+    assert!(c.iter().all(|x| x.start >= 2.0 - 1e-6) && c.iter().any(|x| x.text.contains("Hello")), "{c:#?}");
+    assert_tidy(&s);
+    s.undo().unwrap();
+    s.undo().unwrap();
+    let v = s.timeline();
+    assert!(v.clips.iter().find(|c| c.id == sound).is_some_and(|c| c.track == "A1" && c.link.is_some()), "one undo step puts it back");
+    assert_eq!(caps(&s), before);
+
+    let picked = s.extract_audio(first_sound).unwrap();
+    assert_eq!(picked, first_sound);
+    assert_eq!(s.timeline().clips.into_iter().find(|c| c.id == first_sound).unwrap().track, "A2");
+    // a picture without sound has none to extract
+    assert!(s.extract_audio(main[0].id).is_err());
+    assert!(s.extract_audio(987_654).is_err());
+}
+
+#[test]
+fn find_and_replace_fixes_the_transcript_and_its_captions() {
+    let Some(mut s) = captioned() else { return };
+    let before = caps(&s);
+    let words = |s: &Studio| s.words().into_iter().map(|w| w.text).collect::<Vec<_>>();
+    let said = |s: &Studio| caps(s).iter().map(|c| c.text.split_whitespace().collect::<Vec<_>>().join(" ")).collect::<Vec<_>>().join(" | ");
+    let length = s.timeline().duration;
+
+    // everywhere: the words and the captions, in one undo step
+    let r = s.replace_words("doe", "Smith", false, None).unwrap();
+    assert_eq!(r.count, 2);
+    assert_eq!(words(&s).iter().filter(|w| *w == "Smith.").count(), 2, "{:?}", words(&s));
+    assert!(said(&s).contains("Smith.") && !said(&s).contains("Doe"), "{}", said(&s));
+    assert_eq!(caps(&s).len(), before.len());
+    assert_eq!(s.timeline().undo_label.as_deref(), Some("Replace"));
+    assert!((s.timeline().duration - length).abs() < 1e-6, "nothing is cut");
+    s.undo().unwrap();
+    assert_eq!(caps(&s), before);
+    assert_eq!(words(&s).iter().filter(|w| *w == "Doe.").count(), 2);
+
+    // one place: the second clip's
+    s.replace_words("Doe", "Smith", true, Some(1)).unwrap();
+    let w = words(&s);
+    assert_eq!((w[5].as_str(), w[11].as_str()), ("Doe.", "Smith."), "{w:?}");
+    assert!(s.replace_words("Doe", "x", true, Some(5)).is_err(), "no sixth place");
+    s.undo().unwrap();
+
+    // fewer words than were found: they become one word over their time; none takes them out
+    s.replace_words("there um", "there", false, None).unwrap();
+    assert_eq!(words(&s).len(), 10, "{:?}", words(&s));
+    assert!(!said(&s).contains("um"), "{}", said(&s));
+    s.undo().unwrap();
+    s.replace_words("um", "", false, None).unwrap();
+    assert_eq!(words(&s).len(), 10);
+    assert!(!said(&s).contains("um") && said(&s).contains("there this"), "{}", said(&s));
+    assert!((s.timeline().duration - length).abs() < 1e-6, "the video keeps its sound");
+    s.undo().unwrap();
+
+    // a caption typed over gets the replacement in its own words
+    let first = caps(&s).into_iter().find(|c| c.text.contains("Hello")).unwrap();
+    s.set_caption_text(first.id, "Hi Hello friend").unwrap();
+    s.replace_words("hello", "Howdy", false, None).unwrap();
+    let c = caps(&s);
+    assert!(c.iter().any(|x| x.text == "Hi Howdy friend"), "{c:#?}");
+    assert!(c.iter().filter(|x| x.start >= 2.0 - 1e-6).any(|x| x.text.starts_with("Howdy")), "{c:#?}");
+
+    // what isn't there says so
+    assert!(s.replace_words("zebra", "x", false, None).is_err());
+    assert!(s.replace_words("   ", "x", false, None).is_err());
+}

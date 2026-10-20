@@ -154,6 +154,15 @@ fn main_sound(q: &Sequence) -> Vec<&TrackItem> {
     v
 }
 
+/// Sound on the lanes below the main track (extracted from a main-track clip, say): captions over
+/// words that play only there stay on them.
+fn lane_sound(q: &Sequence) -> Vec<&TrackItem> {
+    let mut v: Vec<&TrackItem> =
+        q.audio_tracks.iter().skip(1).flat_map(|t| t.items.iter()).filter(|i| i.enabled && !i.reverse && i.speed > 0.0 && i.frame_hold.is_none()).collect();
+    v.sort_by_key(|i| i.start);
+    v
+}
+
 /// Timeline time at which clip `c` plays media time `m`.
 fn timeline_at(c: &TrackItem, m: Tick) -> Tick {
     let speed = c.speed.abs().max(1e-6);
@@ -176,7 +185,7 @@ fn hex(c: [u8; 4]) -> String {
 }
 
 /// The main track's words, in order.
-fn main_words(q: &Sequence, p: &filmcraft_project::Project) -> Vec<SeqWord> {
+pub(crate) fn main_words(q: &Sequence, p: &filmcraft_project::Project) -> Vec<SeqWord> {
     tx::sequence_words(q, &p.transcripts).into_iter().filter(|w| w.track == 0).collect()
 }
 
@@ -464,6 +473,7 @@ impl Studio {
         let rate = q.settings.frame_rate;
         let layout = Layout::for_canvas(q.settings.width, q.settings.height);
         let sound = main_sound(q);
+        let lanes = lane_sound(q);
         let mut placed: Vec<Held> = Vec::new();
         for h in held {
             let Some(a) = h.anchor else {
@@ -473,7 +483,12 @@ impl Studio {
             };
             // every place its words still play (a clip used twice shows them twice)
             let mut pieces: Vec<Held> = Vec::new();
-            for c in sound.iter().filter(|c| c.item.0 == a.item) {
+            // words that no longer play on the main track but do on a lane are where the lane
+            // plays them, as they are (the transcript is the main track's)
+            let on_main = sound.iter().any(|c| c.item.0 == a.item && c.source_in < a.to && c.source_out() > a.from);
+            let from_lane = !on_main && lanes.iter().any(|c| c.item.0 == a.item && c.source_in < a.to && c.source_out() > a.from);
+            let auto = h.auto && !from_lane;
+            for c in if from_lane { &lanes } else { &sound }.iter().filter(|c| c.item.0 == a.item) {
                 let (si, so) = (c.source_in, c.source_out());
                 let (from, to) = (a.from.max(si), a.to.min(so));
                 if to <= from {
@@ -481,7 +496,7 @@ impl Studio {
                 }
                 let (start, end) = (rate.snap(timeline_at(c, from)), rate.snap(timeline_at(c, to)));
                 if end > start {
-                    pieces.push(Held { start, end, anchor: Some(Anchor { item: a.item, from, to }), ..h.clone() });
+                    pieces.push(Held { start, end, anchor: Some(Anchor { item: a.item, from, to }), auto, ..h.clone() });
                 }
             }
             // pieces that now play one after the other (a word cut out of the middle) are one
@@ -730,7 +745,7 @@ impl Studio {
 }
 
 /// The main-track words heard within `[start, end)` of the timeline (by their middles).
-fn heard(words: &[SeqWord], start: Tick, end: Tick) -> String {
+pub(crate) fn heard(words: &[SeqWord], start: Tick, end: Tick) -> String {
     words
         .iter()
         .filter(|w| {
@@ -743,12 +758,12 @@ fn heard(words: &[SeqWord], start: Tick, end: Tick) -> String {
 }
 
 /// Whether two captions say the same words (line breaks and spacing aside).
-fn same_words(a: &str, b: &str) -> bool {
+pub(crate) fn same_words(a: &str, b: &str) -> bool {
     a.split_whitespace().eq(b.split_whitespace())
 }
 
 /// Words broken into at most `layout.lines` lines of about `layout.max_chars`.
-fn wrap(text: &str, layout: Layout) -> String {
+pub(crate) fn wrap(text: &str, layout: Layout) -> String {
     let mut lines: Vec<String> = Vec::new();
     let mut cur = String::new();
     for w in text.split_whitespace() {

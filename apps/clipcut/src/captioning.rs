@@ -140,6 +140,13 @@ pub async fn remove_pauses(min_seconds: f64, keep_seconds: f64, app: tauri::Stat
     Ok(Cleaned { timeline, removed: n, seconds })
 }
 
+/// Find and replace in the transcript: everywhere, or at the `only`-th place found.
+#[tauri::command]
+pub async fn replace_words(find: String, with: String, case: bool, only: Option<usize>, app: tauri::State<'_, App>) -> Result<Cleaned, String> {
+    let (r, timeline) = studio_edit(&app, move |s| s.replace_words(&find, &with, case, only)).await?;
+    Ok(Cleaned { timeline, removed: r.count, seconds: 0.0 })
+}
+
 #[tauri::command]
 pub async fn set_caption_text(id: u64, text: String, app: tauri::State<'_, App>) -> Result<TimelineView, String> {
     studio_edit(&app, move |s| s.set_caption_text(id, &text)).await.map(|(_, v)| v)
