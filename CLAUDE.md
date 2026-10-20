@@ -110,6 +110,11 @@ remote `upstream`). Read `README.md` for what it is and the roadmap.
 - Stills: `Studio::still_source` names the media frame under the playhead; `still_png` /
   `save_still` (`src/graphics.rs`) encode it at the file's own size from `Studio::stills` (originals,
   never proxies), and Thumbnails gets it through `CS.hosted.photo`.
+- Remove background (Thumbnails) runs in the page (Clip Studio's `js/cutout.js`: ONNX Runtime Web,
+  WebGPU else WebAssembly, so the CSP has `'wasm-unsafe-eval'`); its model comes from
+  `HOST.model` → `cutout_model` (`src/cutout.rs`: downloaded once into the models folder, checked by
+  size and SHA-256 on every read). The pins in `cutout.rs` and `cutout.js` must match; Windows CI's
+  `--model-test` step checks the download.
 - Keys: every shortcut is an entry of `ACTIONS` in `app.js` (id, default `keys`, `fn`); the keydown
   handler looks presses up by `comboOf(e)` ("Ctrl+Shift+Z": letters by layout, other keys by
   `e.code`). A new shortcut is a new entry, never a key test in the handler. The user's changes are

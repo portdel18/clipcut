@@ -51,7 +51,8 @@ if (!FONTS[th.font]) th.font = TH_DEFAULT.font;
 const toolTh = $('#tool-th');
 const thCanvas = $('#th-canvas'), thViewer = $('#th-viewer'), thMonitor = $('#th-monitor');
 const mctx = document.createElement('canvas').getContext('2d');
-const media = { photo: null, photoName: '', inset: null, insetName: '' };   // never stored
+const media = { photo: null, photoName: '', photoFull: null, inset: null, insetName: '', insetFull: null };   // never stored (…Full: as it was before Remove background)
+let cutBusy = false, cutWaiting = null;   // Remove background running; which picture a chosen model file is for
 let thL = null;
 
 /* ---------- layout ---------- */
@@ -315,7 +316,7 @@ bindSeg('th-format', th.out, 'format', () => thChanged('out.format'));
 
 async function setImage(which, f) {
   try {
-    media[which] = await loadImageFile(f); media[which + 'Name'] = f.name;
+    media[which] = await loadImageFile(f); media[which + 'Name'] = f.name; media[which + 'Full'] = null; cutNote(which, '');
     if (which === 'photo') { th.panX = 0; th.panY = 0; binds.zoom.set(1); }
     mediaUI(); thRefresh();
     return true;
@@ -387,12 +388,64 @@ function mediaUI() {
   for (const which of ['photo', 'inset']) {
     $(`#th-${which}-name`).textContent = media[which + 'Name'];
     $(`#th-${which}-clear`).hidden = !media[which];
+    document.querySelector(`.th-${which}-has`).hidden = !media[which];
+    const b = $(`#th-${which}-cut`);
+    b.textContent = media[which + 'Full'] ? 'Put background back' : 'Remove background';
+    b.disabled = cutBusy;
   }
 }
+
+/* Remove background: the photo or inset through the cut-out model (CS.cutout); the picture as it was
+   is kept, so the background can come back */
+function cutNote(which, text, chooseFile = false) {
+  const n = $(`#th-${which}-cutnote`);
+  n.hidden = !text;
+  n.textContent = text || '';
+  if (chooseFile) {
+    const b = document.createElement('button');
+    b.className = 'btn small'; b.type = 'button'; b.textContent = 'Choose model file';
+    b.addEventListener('click', () => { cutWaiting = which; $('#th-model-file').click(); });
+    n.append(' ', b);
+  }
+}
+async function toggleCut(which) {
+  if (cutBusy || !media[which]) return;
+  if (media[which + 'Full']) {
+    media[which] = media[which + 'Full']; media[which + 'Full'] = null;
+    cutNote(which, ''); mediaUI(); thRefresh();
+    return;
+  }
+  cutBusy = true; mediaUI();
+  const src = media[which];
+  const t0 = performance.now();
+  try {
+    cutNote(which, 'Getting the background model ready…');
+    const img = await window.CS.cutout(src, (done, total, phase) => {
+      if (phase === 'start') cutNote(which, 'Removing the background… (a few seconds on a graphics card, up to half a minute without one)');
+      else cutNote(which, `Downloading the background model, once: ${Math.round(done / 1e6)} of ${Math.round(total / 1e6)} MB`);
+    });
+    if (media[which] !== src) return; // another picture was chosen meanwhile
+    media[which + 'Full'] = src;
+    media[which] = img;
+    cutNote(which, `Background removed in ${((performance.now() - t0) / 1000).toFixed(1)} s. Hair and soft edges may need a plainer background colour behind them.`);
+    thRefresh();
+  } catch (e) {
+    cutNote(which, e.message || String(e), !!e.needsFile);
+  } finally { cutBusy = false; mediaUI(); }
+}
+$('#th-photo-cut').addEventListener('click', () => toggleCut('photo'));
+$('#th-inset-cut').addEventListener('click', () => toggleCut('inset'));
+$('#th-model-file').addEventListener('change', async e => {
+  const f = e.target.files[0]; e.target.value = '';
+  const which = cutWaiting || 'photo';
+  cutWaiting = null;
+  if (!f) return;
+  try { await window.CS.cutout.useFile(f); cutNote(which, 'Model ready.'); toggleCut(which); } catch (err) { cutNote(which, err.message, true); }
+});
 $('#th-photo-pick').addEventListener('click', () => pickImage('photo'));
 $('#th-inset-pick').addEventListener('click', () => pickImage('inset'));
-$('#th-photo-clear').addEventListener('click', () => { media.photo = null; media.photoName = ''; mediaUI(); thRefresh(); });
-$('#th-inset-clear').addEventListener('click', () => { media.inset = null; media.insetName = ''; selInset = false; mediaUI(); thRefresh(); });
+$('#th-photo-clear').addEventListener('click', () => { media.photo = null; media.photoFull = null; media.photoName = ''; cutNote('photo', ''); mediaUI(); thRefresh(); });
+$('#th-inset-clear').addEventListener('click', () => { media.inset = null; media.insetFull = null; media.insetName = ''; selInset = false; cutNote('inset', ''); mediaUI(); thRefresh(); });
 $('#th-recenter').addEventListener('click', () => { th.panX = 0; th.panY = 0; binds.zoom.set(1); thRefresh(); });
 
 // Drag on the preview: the inset picture moves when you grab it; anywhere else pans the photo. Scroll zooms the photo.

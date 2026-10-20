@@ -120,7 +120,7 @@ pub fn update_test() -> bool {
     test_feed().is_some()
 }
 
-fn client() -> Result<reqwest::Client, String> {
+pub(crate) fn client() -> Result<reqwest::Client, String> {
     // the updater plugin does the same: reqwest's rustls needs a crypto provider
     if rustls::crypto::CryptoProvider::get_default().is_none() {
         let _ = rustls::crypto::ring::default_provider().install_default();

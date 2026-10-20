@@ -1616,6 +1616,10 @@
             </div>
             <span class="fname" id="th-photo-name"></span>
             <input type="file" id="th-photo-file" accept="image/*" hidden>
+            <div class="btn-row th-photo-has" hidden>
+              <button class="btn" id="th-photo-cut" type="button" title="Take the background off the photo (an AI model on this computer: nothing is uploaded)">Remove background</button>
+            </div>
+            <p class="hint cut-status" id="th-photo-cutnote" hidden></p>
             <input type="file" id="th-video-file" accept="video/*" hidden>
             <p class="hint">Drag the preview to move the photo; scroll to zoom. You can also drop an image on the preview, or a video to pick one of its frames.</p>
           </div>
@@ -1753,6 +1757,10 @@
             </div>
             <span class="fname" id="th-inset-name"></span>
             <input type="file" id="th-inset-file" accept="image/*" hidden>
+            <div class="btn-row th-inset-has" hidden>
+              <button class="btn" id="th-inset-cut" type="button" title="Take the background off the inset (an AI model on this computer: nothing is uploaded)">Remove background</button>
+            </div>
+            <p class="hint cut-status" id="th-inset-cutnote" hidden></p>
             <p class="hint">A face, logo, or document. Drag it on the preview to place it; scroll over it to resize.</p>
           </div>
           <div class="th-inset-only group">
@@ -1971,6 +1979,7 @@
   </div>
 </dialog>
 
+<input type="file" id="th-model-file" accept=".onnx" hidden>
 <!-- A frame of a video, for the thumbnail's photo -->
 <dialog class="dlg" id="frame-dlg" aria-labelledby="frame-title">
   <div class="dlg-in">
@@ -2026,6 +2035,7 @@
 <!-- App scripts: core first, then one file per tool, then app.js which wires the tabs and boots everything. -->
 <script src="libs.js"></script>
 <script src="js/core.js"></script>
+<script src="js/cutout.js"></script>
 <script src="js/platforms.js"></script>
 <script src="js/underline.js"></script>
 <script src="js/boundaries.js"></script>

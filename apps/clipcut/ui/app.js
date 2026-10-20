@@ -1073,6 +1073,11 @@ window.__clipcutHost = {
     toast(replace != null ? 'Graphic updated' : 'Graphic added at the playhead');
   },
   abort: job => { invoke('graphic_abort', { job }).catch(() => {}); },
+  // Thumbnails' background-removal model: ClipCut downloads it once and keeps it (src/cutout.rs)
+  async model(name, progress) {
+    const off = await listen('cutout-model', e => { try { progress?.(e.payload.done, e.payload.total); } catch (_) {} });
+    try { return await invoke('cutout_model', { name }); } finally { off(); }
+  },
   // a thumbnail, a rendered video or presets Graphics would download: the Save dialog, then the file
   async save(blob, name) {
     let path;

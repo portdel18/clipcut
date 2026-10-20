@@ -821,6 +821,7 @@ window.CS = Object.assign(window.CS || {}, {
   runRender,
   hostSink,
   hosted,
+  HOST,
   lib,
   renderBoth,
   saveStill,
