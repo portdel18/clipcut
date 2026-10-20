@@ -164,7 +164,7 @@
       </div>
     </div>
     <div class="transport">
-      <span class="tc"><span id="tc-now">00:00:00</span> <span class="tot">/ <span id="tc-total">00:00:00</span></span> <span class="note" id="sound-note"></span></span>
+      <span class="tc"><span id="tc-now">00:00:00</span> <span class="tot">/ <span id="tc-total">00:00:00</span></span> <span class="note" id="sound-note"></span> <span class="rate" id="rate-note" hidden></span></span>
       <button class="play" id="play-btn" aria-label="Play" disabled>
         <svg viewBox="0 0 24 24" id="play-icon" aria-hidden="true"><path d="M8 5v14l11-7z"/></svg>
       </button>
@@ -246,6 +246,7 @@
           <div class="snap-line" id="snap-line" hidden></div>
           <div class="insert-mark" id="insert-mark" hidden></div>
           <div class="drop-box" id="drop-box" hidden></div>
+          <div class="sel-box" id="sel-box" hidden></div>
           <div class="playhead" id="playhead"><span></span></div>
         </div>
       </div>

@@ -48,6 +48,13 @@ remote `upstream`). Read `README.md` for what it is and the roadmap.
 - The timeline takes 44% of the window by default (`--tl-h` on `.app`); the divider above it
   (`#tl-split`) resizes it and remembers the share (`clipcut.tlHeight`). `layoutRows` centres the
   lanes in it (`S.rowShift`), so code that places things by lane uses `S.rows`, never `ROW` sums.
+- Selection: Ctrl/Shift-click adds a clip; a drag on empty timeline draws a box (`boxSelect`), a
+  click there moves the playhead. Dragging one of several selected lane clips moves them all
+  (`groupDrag` → `Studio::move_clips`, one undo step; the main track and its sound stay put).
+- Shuttle (J K L): `shuttle(rate)`; 1× forward is the real player with sound, other speeds run the
+  playhead on the wall clock (`S.rate`) and show frames silently. Timeline thumbnails are a decode
+  of the same video, so none are fetched while playing (`pumpThumbs`): tiles borrow a cached
+  picture from a wider zoom until it stops.
 - Edits stop playback (the player plays a snapshot of the sequence), except mixer changes:
   `set_mixer` hands the playing `Player` a new feed (`Player::update`) so faders are heard as they
   move. Meters come from the engine's `LiveMix` in each feed (`AudioFeed::meters`); without a sound

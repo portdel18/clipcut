@@ -327,6 +327,11 @@ pub async fn move_clip(clip: u64, lane: String, seconds: f64, app: tauri::State<
     edit(&app, move |s| s.move_clip(clip, &lane, seconds)).await
 }
 
+#[tauri::command]
+pub async fn move_clips(clips: Vec<u64>, seconds: f64, app: tauri::State<'_, App>) -> Result<TimelineView, String> {
+    edit(&app, move |s| s.move_clips(&clips, seconds)).await
+}
+
 /// Properties from the Properties panel or the preview; `merge` joins a slider's run of changes
 /// into one undo step.
 #[tauri::command]
