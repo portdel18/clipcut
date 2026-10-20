@@ -20,7 +20,7 @@ const MAX_PX = 600;      // px per second at full zoom (about 20 px a frame at 3
 const THUMB_W = 192;     // filmstrip pictures are rendered this wide
 const SAVE_MS = 800;     // autosave this long after the last edit
 const PEAKS_PER_SECOND = 100;
-const ROW = { main: 64, video: 40, audio: 40, caption: 30, gap: 6, top: 14 };
+const ROW = { main: 84, video: 54, audio: 54, caption: 28, gap: 6, top: 14 };
 
 const S = {
   tl: null,              // TimelineView from the engine
@@ -2008,8 +2008,13 @@ function layoutRows() {
   y += ROW.main + ROW.gap;
   if (auds.length) y += ROW.gap;
   for (const l of auds) { rows.push({ id: l.id, kind: 'audio', top: y, h: ROW.audio }); y += ROW.audio + ROW.gap; }
+  // like CapCut, the lanes sit in the middle of a tall timeline, with room above for new ones
+  const room = scroller().clientHeight - 26 - 12;
+  const shift = Math.max(0, Math.floor((room - y) / 2));
+  for (const r of rows) r.top += shift;
+  S.rowShift = shift;
   S.rows = rows;
-  return y;
+  return Math.max(y + shift, room);
 }
 const rowOf = id => S.rows.find(r => r.id === id);
 const mainRow = () => rowOf('V1');
@@ -4162,7 +4167,49 @@ $('#keys-reset').onclick = () => {
 };
 $('#keys-btn').onclick = openShortcuts;
 new ResizeObserver(() => { fitCanvas(); if (has() && !S.playing) showFrame(S.t); }).observe($('#stage'));
-new ResizeObserver(() => { if (S.tl) layoutTimeline(); }).observe(scroller());
+new ResizeObserver(() => {
+  if (!S.tl) return;
+  // a taller or shorter timeline moves the lanes to its middle
+  const shift = S.rowShift;
+  layoutRows();
+  if (S.rowShift !== shift && !S.geom.size) { renderTrack(); renderSelection(); }
+  layoutTimeline();
+}).observe(scroller());
+
+/* The divider above the timeline: drag it to give the timeline more or less of the window. */
+{
+  const app = $('.app'), bar = $('#tl-split');
+  const TL_MIN = 220, TOP_MIN = 300;
+  const setTl = frac => {
+    const h = window.innerHeight;
+    const px = Math.min(Math.max(frac * h, TL_MIN), Math.max(TL_MIN, h - 44 - TOP_MIN));
+    app.style.setProperty('--tl-h', px + 'px');
+    return px / h;
+  };
+  let frac = 0.44;
+  try { const v = +localStorage.getItem('clipcut.tlHeight'); if (v > 0.1 && v < 0.9) frac = v; } catch (_) {}
+  setTl(frac);
+  window.addEventListener('resize', () => setTl(frac));
+  bar.addEventListener('pointerdown', e => {
+    if (e.button !== 0) return;
+    e.preventDefault();
+    bar.setPointerCapture(e.pointerId);
+    bar.classList.add('dragging');
+    const move = ev => { frac = setTl((window.innerHeight - ev.clientY) / window.innerHeight); };
+    const up = () => {
+      bar.classList.remove('dragging');
+      bar.removeEventListener('pointermove', move);
+      try { localStorage.setItem('clipcut.tlHeight', String(frac)); } catch (_) {}
+    };
+    bar.addEventListener('pointermove', move);
+    bar.addEventListener('pointerup', up, { once: true });
+    bar.addEventListener('pointercancel', up, { once: true });
+  });
+  bar.addEventListener('dblclick', () => {
+    frac = setTl(0.44);
+    try { localStorage.removeItem('clipcut.tlHeight'); } catch (_) {}
+  });
+}
 
 // Files dropped on the window: videos to the end of the main track, sound below it at the playhead.
 // While Graphics is open they go to the Clip Studio drop zone under the pointer instead: the window

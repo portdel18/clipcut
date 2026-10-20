@@ -45,6 +45,9 @@ remote `upstream`). Read `README.md` for what it is and the roadmap.
 - The timeline UI redraws from the `TimelineView` every edit returns; edits run one at a time
   (`serial` in `app.js`). Each `Studio` edit is one undo step (`group` in `clipcut-core`'s
   `timeline.rs`): keep it that way for new edits.
+- The timeline takes 44% of the window by default (`--tl-h` on `.app`); the divider above it
+  (`#tl-split`) resizes it and remembers the share (`clipcut.tlHeight`). `layoutRows` centres the
+  lanes in it (`S.rowShift`), so code that places things by lane uses `S.rows`, never `ROW` sums.
 - Edits stop playback (the player plays a snapshot of the sequence), except mixer changes:
   `set_mixer` hands the playing `Player` a new feed (`Player::update`) so faders are heard as they
   move. Meters come from the engine's `LiveMix` in each feed (`AudioFeed::meters`); without a sound
