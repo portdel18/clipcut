@@ -215,6 +215,51 @@ impl Studio {
         })
     }
 
+    /// Moves the lane clips `clips` (a box selection) together by `seconds` along the timeline,
+    /// each on its own lane where it is clear there; their linked partners go with them. Clips on
+    /// the main track and the main track's sound stay put. One undo step.
+    pub fn move_clips(&mut self, clips: &[u64], seconds: f64) -> Result<()> {
+        if !seconds.is_finite() {
+            return Err(Error::Invalid("that is not a time".into()));
+        }
+        let q = self.session.active_sequence().ok_or(Error::NothingOpen)?;
+        let mains = main_links(q);
+        let mut links = std::collections::HashSet::new();
+        let mut set = Vec::new();
+        for &c in clips {
+            let Some((track, item)) = q.find_item(ClipId(c)) else { continue };
+            let Some(kind) = q.track(track).map(|t| t.kind) else { continue };
+            let lane = if kind == TrackKind::Video { Lane::Video } else { Lane::Audio };
+            let index = tracks(q, lane).iter().position(|t| t.id == track).unwrap_or(0);
+            if index == 0 || item.link.is_some_and(|l| mains.contains(&l)) {
+                continue;
+            }
+            // a linked pair moves once: move_clip takes the partner along
+            if let Some(l) = item.link
+                && !links.insert(l)
+            {
+                continue;
+            }
+            set.push((c, lane_name(lane, index), item.start));
+        }
+        if set.is_empty() {
+            return Err(Error::Invalid("select clips on the lanes to move them together".into()));
+        }
+        let earliest = set.iter().map(|(_, _, t)| *t).min().unwrap_or(Tick::ZERO);
+        let shift = seconds.max(-earliest.seconds());
+        // the clip furthest along the way goes first, so none lands on one that has yet to move
+        set.sort_by_key(|(_, _, t)| *t);
+        if shift > 0.0 {
+            set.reverse();
+        }
+        self.group("Move", |s| {
+            for (c, lane, start) in &set {
+                s.move_clip(*c, lane, start.seconds() + shift)?;
+            }
+            Ok(())
+        })
+    }
+
     /// Extract Audio, CapCut-style: clip `clip`'s own sound (or `clip` itself, when it is that
     /// sound) moves from the main track's sound to a sound lane at the same time, to see and fade
     /// it on its own. It stays linked to the picture, so the main track's edits (cuts, trims,
