@@ -988,7 +988,10 @@ function loadGraphics() {
   if (!GR.loaded) {
     GR.loaded = new Promise((resolve, reject) => {
       const f = $('#graphics-frame');
-      f.addEventListener('load', () => (graphicsWin().CS && graphicsWin().CS.hosted ? resolve() : reject(new Error('Graphics did not load.'))), { once: true });
+      f.addEventListener('load', () => {
+        try { noPageZoom(graphicsWin()); } catch (_) { /* Graphics zooms as a page, no worse */ }
+        return graphicsWin().CS && graphicsWin().CS.hosted ? resolve() : reject(new Error('Graphics did not load.'));
+      }, { once: true });
       f.src = 'graphics/index.html';
     });
     GR.loaded.catch(() => { GR.loaded = null; });
@@ -3513,6 +3516,15 @@ const pinchZoom = e => {
   return true;
 };
 const zoomStep = { factor: 1, x: 0, queued: false };
+/** The page itself never zooms: on Windows the window lets the touchpad's pinch through as Ctrl +
+    wheel for the timeline (src/main.rs), which WebView2 would otherwise also use to zoom the whole
+    page, as it would Ctrl + = / - / 0. The timeline's own handlers still see the events. */
+function noPageZoom(w) {
+  w.addEventListener('wheel', e => { if (e.ctrlKey || e.metaKey) e.preventDefault(); }, { passive: false, capture: true });
+  const keys = new Set(['Equal', 'Minus', 'Digit0', 'NumpadAdd', 'NumpadSubtract', 'Numpad0']);
+  w.addEventListener('keydown', e => { if ((e.ctrlKey || e.metaKey) && keys.has(e.code)) e.preventDefault(); }, true);
+}
+noPageZoom(window);
 $('.timeline').addEventListener('wheel', e => { if (!e.target.closest('#tl-scroll')) pinchZoom(e); }, { passive: false });
 scroller().addEventListener('wheel', e => {
   if (pinchZoom(e)) {
