@@ -71,7 +71,10 @@ length). The sound pauses during the freeze, so speech stays with its picture.
 clip, or the main track's), and the one on a video in the Media panel takes any frame of that file:
 a dialog shows it, the slider and arrows pick another frame, then **Open in Thumbnails** makes it
 the photo of a thumbnail in Graphics, and **Save as PNG…** saves it. The still comes from the
-video file at its own size, without text or captions.
+video file at its own size, without text or captions. In Thumbnails, **Remove background** cuts the
+person or object out of the photo (or the inset) with an AI model on this computer: it downloads
+once (178 MB) and nothing is uploaded; a graphics card makes it take seconds, without one it takes up
+to half a minute. **Put background back** undoes it.
 
 **Remove a colour.** Under Properties, a video or picture clip can lose a green screen (or any flat
 colour): tick **Remove a colour**, or press **Pick from the video** and click the colour in the
