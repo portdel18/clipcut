@@ -257,8 +257,15 @@ mod tests {
         let c = config(Format::H264, 1080, 1920, FrameRate::FPS_30, &s).unwrap();
         assert_eq!((c.width, c.height, c.fps, c.bitrate_kbps, c.max_bitrate_kbps, c.keyint), (1080, 1920, (30, 1), 12_000, 18_000, 60));
         assert_eq!(c.profile, 100);
-        let mut out = Vec::new();
-        to_nv12(&[1, 2, 3, 4], &[10], &[20], &mut out);
-        assert_eq!(out, [1, 2, 3, 4, 10, 20]);
+        // the encoder's NV12 is the planar 4:2:0 conversion with Cb and Cr interleaved
+        let rgba: Vec<u8> = (0..4 * 2 * 4).map(|i| (i * 37 % 256) as u8).collect();
+        let (mut y, mut u, mut v, mut nv12) = (Vec::new(), Vec::new(), Vec::new(), Vec::new());
+        filmcraft_export::rgba_to_yuv420_8(&rgba, 4, 2, &mut y, &mut u, &mut v);
+        filmcraft_export::rgba_to_nv12(&rgba, 4, 2, &mut nv12);
+        let mut want = y.clone();
+        for (cb, cr) in u.iter().zip(&v) {
+            want.extend([*cb, *cr]);
+        }
+        assert_eq!(nv12, want);
     }
 }
