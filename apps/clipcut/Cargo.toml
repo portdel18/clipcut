@@ -38,3 +38,14 @@ base64 = "0.22"
 cpal = "0.16"
 serde = { workspace = true }
 serde_json = { workspace = true }
+
+# The GPU export renderer (filmcraft-gpu) needs a wgpu backend, which that crate leaves to the
+# application: without one there is no adapter and every export composites on the CPU.
+[target.'cfg(windows)'.dependencies]
+wgpu = { version = "30", default-features = false, features = ["dx12", "vulkan"] }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+wgpu = { version = "30", default-features = false, features = ["metal"] }
+
+[target.'cfg(all(unix, not(target_os = "macos")))'.dependencies]
+wgpu = { version = "30", default-features = false, features = ["vulkan"] }

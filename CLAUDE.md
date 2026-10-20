@@ -85,7 +85,14 @@ remote `upstream`). Read `README.md` for what it is and the roadmap.
   `Studio::check_picture` names it in plain words on import (`MediaView.unreadable`). Folder and file
   names from the user go through `safe_name` (Windows device names, trailing dots).
 - Exports ask the engine for `gpuRendering` and `hardwareEncoding` `auto` (`export_as`); the GPU
-  renderer never takes a software adapter. They are bound by the one-at-a-time H.264 encoder
+  renderer never takes a software adapter (`FILMCRAFT_GPU_SOFTWARE=1` lets tests use lavapipe:
+  `apt-get install mesa-vulkan-drivers`). `filmcraft-gpu` asks wgpu for no backend: the app's
+  `Cargo.toml` names them (dx12/vulkan, metal), or nothing renders on the GPU. Frames that need
+  nothing after rendering (`Pipeline::direct`) come back from the GPU as 8-bit (`render_8bit`),
+  as NV12 for an encoder that `takes_nv12` (Media Foundation; `readout.wgsl` matches
+  `rgba_to_nv12`). The Export dialog says where the time went (`export_counters`). Image
+  sequences decode a run of identical files once (`ImageSequenceSource::recent`), so a graphic
+  holding still is decoded and uploaded once. They are bound by the one-at-a-time H.264 encoder
   (`export/src/job.rs` stage clocks: `tests/export_speed.rs`, run with `--ignored --nocapture`);
   burnt-in captions are rendered once each (`captions::burn::cached_caption`). On Windows the
   hardware H.264 encoders are NVENC, then Media Foundation's encoder MFTs (`platform/src/

@@ -34,9 +34,6 @@ struct MfExportEncoder {
     w: u32,
     h: u32,
     rate: FrameRate,
-    y: Vec<u8>,
-    u: Vec<u8>,
-    v: Vec<u8>,
     nv12: Vec<u8>,
     sps: Option<Vec<u8>>,
     pps: Option<Vec<u8>>,
@@ -80,17 +77,6 @@ impl MfExportEncoder {
     }
 }
 
-/// Planar 4:2:0 to NV12 (Cb Cr interleaved).
-fn to_nv12(y: &[u8], u: &[u8], v: &[u8], out: &mut Vec<u8>) {
-    out.clear();
-    out.reserve(y.len() + u.len() * 2);
-    out.extend_from_slice(y);
-    for (cb, cr) in u.iter().zip(v) {
-        out.push(*cb);
-        out.push(*cr);
-    }
-}
-
 impl VideoEncoder for MfExportEncoder {
     fn sample_entry(&self) -> SampleEntry {
         let (w, h) = (u16::try_from(self.w).unwrap_or(u16::MAX), u16::try_from(self.h).unwrap_or(u16::MAX));
@@ -110,12 +96,39 @@ impl VideoEncoder for MfExportEncoder {
             return Err(ExportError::Unsupported("the Media Foundation encoder takes SDR pictures only".into()));
         }
         let (w, h) = (self.w as usize, self.h as usize);
-        filmcraft_export::timed(filmcraft_export::Stage::Convert, || {
-            filmcraft_export::rgba_to_yuv420_8(f.rgba, w, h, &mut self.y, &mut self.u, &mut self.v);
-            to_nv12(&self.y, &self.u, &self.v, &mut self.nv12);
-        });
+        let mut nv12 = std::mem::take(&mut self.nv12);
+        filmcraft_export::timed(filmcraft_export::Stage::Convert, || filmcraft_export::rgba_to_nv12(f.rgba, w, h, &mut nv12));
+        let out = self.encode_picture(&nv12, f.index);
+        self.nv12 = nv12;
+        out
+    }
+
+    fn takes_nv12(&self) -> bool {
+        true
+    }
+
+    fn encode_nv12(&mut self, width: u32, height: u32, nv12: &[u8], index: u64) -> Result<Vec<EncodedPacket>> {
+        if width != self.w || height != self.h {
+            return Err(ExportError::Encode(format!("{}: a {width}x{height} picture for a {}x{} encoder", self.enc.name(), self.w, self.h)));
+        }
+        let want = (self.w as usize) * (self.h as usize) * 3 / 2;
+        if nv12.len() != want {
+            return Err(ExportError::Encode(format!("{}: {} bytes of NV12 for {want}", self.enc.name(), nv12.len())));
+        }
+        self.encode_picture(nv12, index)
+    }
+
+    fn flush(&mut self) -> Result<Vec<EncodedPacket>> {
+        let ps = self.enc.flush(self.api).map_err(|e| ExportError::Encode(e.to_string()))?;
+        self.packets(ps)
+    }
+}
+
+impl MfExportEncoder {
+    /// One NV12 picture into the encoder, and the packets that came out.
+    fn encode_picture(&mut self, nv12: &[u8], index: u64) -> Result<Vec<EncodedPacket>> {
         let hint = " (turn Export ▸ Hardware encoding off to use the software encoder)";
-        let ps = self.enc.encode(self.api, &self.nv12, f.index).map_err(|e| ExportError::Encode(format!("{e}{hint}")))?;
+        let ps = self.enc.encode(self.api, nv12, index).map_err(|e| ExportError::Encode(format!("{e}{hint}")))?;
         filmcraft_export::note_hw_encode_frame();
         let out = self.packets(ps)?;
         if self.sps.is_none()
@@ -123,15 +136,10 @@ impl VideoEncoder for MfExportEncoder {
         {
             self.learn_parameter_sets(&header);
         }
-        if f.index >= PARAMETER_SETS_BY && (self.sps.is_none() || self.pps.is_none()) {
-            return Err(ExportError::Encode(format!("{}: no SPS / PPS after {} pictures{hint}", self.enc.name(), f.index + 1)));
+        if index >= PARAMETER_SETS_BY && (self.sps.is_none() || self.pps.is_none()) {
+            return Err(ExportError::Encode(format!("{}: no SPS / PPS after {} pictures{hint}", self.enc.name(), index + 1)));
         }
         Ok(out)
-    }
-
-    fn flush(&mut self) -> Result<Vec<EncodedPacket>> {
-        let ps = self.enc.flush(self.api).map_err(|e| ExportError::Encode(e.to_string()))?;
-        self.packets(ps)
     }
 }
 
@@ -213,8 +221,7 @@ fn factory_with(
     match open(&cfg) {
         Ok((api, enc)) => {
             filmcraft_export::note_hw_encode_session();
-            let mut e =
-                MfExportEncoder { enc, api, w, h, rate, y: Vec::new(), u: Vec::new(), v: Vec::new(), nv12: Vec::new(), sps: None, pps: None, last_time: None };
+            let mut e = MfExportEncoder { enc, api, w, h, rate, nv12: Vec::new(), sps: None, pps: None, last_time: None };
             if let Some(header) = e.enc.sequence_header() {
                 e.learn_parameter_sets(&header);
             }
