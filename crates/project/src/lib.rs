@@ -523,6 +523,10 @@ pub struct TrackItem {
     pub speed: f64,
     #[serde(default)]
     pub reverse: bool,
+    /// Speed/Duration ▸ Maintain Audio Pitch: at another speed the sound is time-stretched
+    /// (`filmcraft_audio_dsp::stretch`) instead of played faster or slower like a tape.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub maintain_pitch: bool,
     pub enabled: bool,
     /// Linked partner items (video ↔ audio of the same source).
     #[serde(default)]
@@ -1612,6 +1616,7 @@ impl Project {
             source_in: source.start,
             speed: 1.0,
             reverse: false,
+            maintain_pitch: false,
             enabled: true,
             link: None,
             group: None,

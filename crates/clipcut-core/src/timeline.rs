@@ -632,7 +632,7 @@ impl Studio {
                 self.session.state.active_sequence = Some(id);
             }
         }
-        Ok(())
+        self.migrate_pitch()
     }
 
     /// Starts an empty project.

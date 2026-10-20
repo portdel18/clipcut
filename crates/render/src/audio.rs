@@ -371,6 +371,97 @@ pub fn clip_is_mono(item: &TrackItem, sources: &dyn SourceProvider) -> Option<bo
     Some(left == right)
 }
 
+/// Where a time-stretched clip's chain of frame shifts got to (see [`stretched`]): the shifts of
+/// frames `first..` of the clip with this key.
+struct StretchChain {
+    key: u64,
+    first: i64,
+    shifts: std::collections::VecDeque<i64>,
+}
+
+/// Chains kept, and frames kept per chain: enough for a few readers (playback, export, analysis)
+/// each reading on block by block.
+const STRETCH_CHAINS: usize = 32;
+const STRETCH_KEPT: usize = 512;
+
+fn stretch_chains() -> &'static std::sync::Mutex<std::collections::VecDeque<StretchChain>> {
+    static C: std::sync::OnceLock<std::sync::Mutex<std::collections::VecDeque<StretchChain>>> = std::sync::OnceLock::new();
+    C.get_or_init(Default::default)
+}
+
+/// Maintain Audio Pitch: clip-relative output samples `[o0, o0 + n)` of `item` time-stretched to
+/// its speed ([`filmcraft_audio_dsp::stretch::Wsola`]). A reader carrying on from where it (or
+/// another) left off continues that chain of frame shifts, so blocks join as one stream would.
+fn stretched(item: &TrackItem, src: SourceAudio, o0: i64, n: usize, sr: u32) -> Option<AudioBuffer> {
+    use filmcraft_audio_dsp::stretch::{WARM_UP, Wsola};
+    use std::hash::{Hash, Hasher};
+    let w = Wsola::new(sr);
+    let speed = item.speed.abs().max(1e-6);
+    // source sample of the clip's first output sample
+    let base = item.source_time_at(item.start).to_units_floor(sr as i64);
+    let key = {
+        let mut h = std::collections::hash_map::DefaultHasher::new();
+        (item.id.0, item.item.0, speed.to_bits(), item.source_in.0, item.start.0, sr, item.audio_stream).hash(&mut h);
+        h.finish()
+    };
+    let (k0, k1) = w.frames_for(o0, n);
+    // the shifts already known for these frames, and where to carry on from
+    let (known_first, known, from) = {
+        let chains = stretch_chains().lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        let hit = chains.iter().find(|c| {
+            let last = c.first + c.shifts.len() as i64 - 1;
+            c.key == key && c.first < k0 && k0 <= last + 1 + WARM_UP
+        });
+        match hit {
+            Some(c) => {
+                let last = c.first + c.shifts.len() as i64 - 1;
+                (c.first, c.shifts.iter().copied().collect::<Vec<_>>(), (last, c.shifts.back().copied().unwrap_or(0)))
+            }
+            None => (k0 - WARM_UP, vec![0], (k0 - WARM_UP, 0)),
+        }
+    };
+    let (lo, len) = w.span(from.0.min(k0), k1, speed);
+    // the source from `lo` on (silence before the media's start)
+    let start = base.saturating_add(lo);
+    let skip = usize::try_from(start.saturating_neg().max(0)).unwrap_or(usize::MAX).min(len);
+    let raw = src(start.max(0), len - skip)?;
+    let channels: Vec<Vec<f32>> = raw
+        .channels
+        .iter()
+        .map(|c| {
+            let mut v = vec![0f32; skip];
+            v.extend_from_slice(c);
+            v
+        })
+        .collect();
+    let mut mono = vec![0f32; len];
+    for c in &channels {
+        for (m, x) in mono.iter_mut().zip(c) {
+            *m += x;
+        }
+    }
+    let more = if k1 > from.0 { w.shifts(speed, from, k1, &mono, lo) } else { Vec::new() };
+    let mut all = known;
+    all.extend_from_slice(&more);
+    let shift = |k: i64| usize::try_from(k - known_first).ok().and_then(|i| all.get(i)).copied().unwrap_or(0);
+    let mut out = AudioBuffer::silence(sr, channels.len(), n);
+    for (dst, c) in out.channels.iter_mut().zip(&channels) {
+        *dst = w.render(speed, o0, n, &shift, c, lo);
+    }
+    // keep the chain for the next block
+    let mut chains = stretch_chains().lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    chains.retain(|c| !(c.key == key && c.first == known_first));
+    let mut shifts: std::collections::VecDeque<i64> = all.into();
+    let mut first = known_first;
+    while shifts.len() > STRETCH_KEPT {
+        shifts.pop_front();
+        first += 1;
+    }
+    chains.push_front(StretchChain { key, first, shifts });
+    chains.truncate(STRETCH_CHAINS);
+    Some(out)
+}
+
 /// The clip's audio (after speed/reverse) for timeline samples `[x0, x0 + len)` as `w` channels
 /// (2: stereo, mono sources on both sides, 5.1 sources folded down; 6: 5.1), with silence outside
 /// the clip.
@@ -392,6 +483,8 @@ fn raw_channels(item: &TrackItem, src: SourceAudio, x0: i64, len: usize, sr: u32
         remixed
     } else if (speed - 1.0).abs() < 1e-9 && !item.reverse {
         src(src_start_ticks.to_units_floor(sr as i64), n)
+    } else if item.maintain_pitch && !item.reverse {
+        stretched(item, src, a0 - item_s0, n, sr)
     } else {
         // varispeed: read a longer span and resample linearly
         let span = ((n as f64) * speed).ceil() as usize + 2;

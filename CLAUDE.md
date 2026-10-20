@@ -105,9 +105,13 @@ remote `upstream`). Read `README.md` for what it is and the roadmap.
   put them back); a new keyframe edit must too. `hold` in that marker turns them off
   (`Studio::set_hold`). Ducked music's volume gets none.
 - Two-mic sides (`channels.rs`) are the engine's Channel Mixer (`channel_mixer_a`) on the sound clip;
-  `channel_levels` measures the sides without it. Keep pitch (`timing.rs`) is the engine's Pitch
-  Shifter, chained per octave, refitted by `fit_pitch` after every speed or reverse change (a new
-  speed edit must call it); a clip marker "ClipCut pitch" turns it off. Freeze is the engine's
+  `channel_levels` measures the sides without it. Keep pitch (`timing.rs`) is the sound clip's
+  `TrackItem::maintain_pitch`: the engine time-stretches it (WSOLA, `audio-dsp/src/stretch.rs`,
+  read in `render/src/audio.rs` `stretched`, whose chain of frame shifts carries on block to block),
+  never resampling, so voices stay clean. Reversed clips still get the engine's Pitch Shifter,
+  chained per octave. `fit_pitch` sets either after every speed or reverse change (a new speed edit
+  must call it), and `open_project` turns 0.4's Pitch Shifters into the flag (`migrate_pitch`); a
+  clip marker "ClipCut pitch" turns it off. Freeze is the engine's
   Insert Frame Hold Segment after a razor of the clip and its sound, then `pack_main`. Remove a
   colour (`key.rs`) is Ultra Key; `pick_colour` renders the frame without keys.
 - Stills: `Studio::still_source` names the media frame under the playhead; `still_png` /

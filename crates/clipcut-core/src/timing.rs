@@ -3,10 +3,14 @@
 //! pushes the rest of the track along; the sound under it pauses too, so speech stays with its
 //! picture. Reverse plays a clip (and its sound) backwards at the speed it has.
 //!
-//! A clip played faster or slower keeps its voice's pitch: the engine plays sound at another
-//! speed by resampling it (higher when faster), so ClipCut puts the engine's Pitch Shifter on the
-//! sound to bring it back (a chain of them past 2×, each moving at most an octave). A clip
-//! marker named "ClipCut pitch" turns that off for the clip ([`Studio::set_keep_pitch`]).
+//! A clip played faster or slower keeps its voice's pitch: its sound clip's Maintain Audio Pitch
+//! (`TrackItem::maintain_pitch`) has the engine time-stretch it, joining slices of the sound
+//! instead of resampling it, so voices stay clean. Played backwards, the engine can only resample,
+//! so a reversed clip gets the engine's Pitch Shifter to bring it back (a chain of them past 2×,
+//! each moving at most an octave). Projects from before Maintain Audio Pitch had Pitch Shifters on
+//! forward clips too, which gave voices a hiss: [`Studio::fit_pitch`] swaps them when a project
+//! opens. A clip marker named "ClipCut pitch" turns all of it off for the clip
+//! ([`Studio::set_keep_pitch`]).
 
 use filmcraft_project::{ClipId, TrackKind};
 use filmcraft_time::Tick;
@@ -108,13 +112,27 @@ impl Studio {
         })
     }
 
-    /// Puts back the Pitch Shifters the sound of `clips` needs for its speed (none at normal
-    /// speed, or when it doesn't keep its pitch). Inside an edit.
+    /// Fits the sound of `clips` to its speed: Maintain Audio Pitch on when it keeps its pitch
+    /// and plays forward, Pitch Shifters for a reversed one that keeps it (none otherwise). Inside
+    /// an edit.
     pub(crate) fn fit_pitch(&mut self, clips: &[u64]) -> Result<()> {
         for c in self.sounds_of(clips)? {
             let q = self.session.active_sequence().ok_or(Error::NothingOpen)?;
             let Some((_, i)) = q.find_item(ClipId(c)) else { continue };
-            let want = if keeps_pitch(i) { shifters_for(i.speed) } else { Vec::new() };
+            let stretch = keeps_pitch(i) && !i.reverse;
+            if i.maintain_pitch != stretch {
+                self.session
+                    .edit_sequence("Keep Pitch", |q, _, _| {
+                        if let Some((_, i)) = q.find_item_mut(ClipId(c)) {
+                            i.maintain_pitch = stretch;
+                        }
+                        Ok(())
+                    })
+                    .map_err(engine)?;
+            }
+            let q = self.session.active_sequence().ok_or(Error::NothingOpen)?;
+            let Some((_, i)) = q.find_item(ClipId(c)) else { continue };
+            let want = if keeps_pitch(i) && i.reverse { shifters_for(i.speed) } else { Vec::new() };
             let have: Vec<usize> = i.effects.iter().enumerate().filter(|(_, e)| e.effect == PITCH).map(|(k, _)| k).collect();
             let same = have.len() == want.len()
                 && have
@@ -137,6 +155,28 @@ impl Studio {
                 self.session.execute("effects.setParam", json!({"clip": c, "effect": index, "param": "semitones", "value": st})).map_err(engine)?;
             }
         }
+        Ok(())
+    }
+
+    /// Brings an opened project's sound clips up to date: the Pitch Shifters projects from before
+    /// Maintain Audio Pitch put on forward clips become Maintain Audio Pitch. Not an undo step.
+    pub(crate) fn migrate_pitch(&mut self) -> Result<()> {
+        let Some(q) = self.session.active_sequence() else { return Ok(()) };
+        let old: Vec<u64> = q
+            .audio_tracks
+            .iter()
+            .flat_map(|t| t.items.iter())
+            .filter(|i| keeps_pitch(i) && !i.reverse && (!i.maintain_pitch || i.effects.iter().any(|e| e.effect == PITCH)))
+            .filter(|i| (i.speed.abs() - 1.0).abs() > 1e-3 || i.effects.iter().any(|e| e.effect == PITCH))
+            .map(|i| i.id.0)
+            .collect();
+        if old.is_empty() {
+            return Ok(());
+        }
+        let before = self.session.history.undo.len();
+        self.fit_pitch(&old)?;
+        // opening a project is not something to undo
+        self.session.history.undo.truncate(before);
         Ok(())
     }
 
@@ -225,5 +265,49 @@ mod tests {
         assert!((three.iter().sum::<f64>() + 12.0 * 3f64.log2()).abs() < 1e-9);
         assert_eq!(shifters_for(1000.0).len(), MOST_SHIFTERS);
         assert!(shifters_for(-2.0) == [-12.0], "reversed plays at its speed");
+    }
+
+    /// A project saved before Maintain Audio Pitch: a clip at 150% whose sound has a Pitch Shifter.
+    /// Opening it swaps the shifter for Maintain Audio Pitch, without an undo step.
+    #[test]
+    fn an_old_project_s_pitch_shifters_become_maintain_audio_pitch() {
+        let Some(ff) = filmcraft_testkit::oracle::ffmpeg_or_skip("clipcut-core pitch migration") else { return };
+        use filmcraft_testkit::fixtures::{fixtures_dir, generate};
+        let dir = fixtures_dir(&format!("clipcut-core/pitch-{}", std::process::id()));
+        let media = dir.join("tone.mp4");
+        let made = generate(&media, |tmp| {
+            std::process::Command::new(&ff)
+                .args(["-v", "error", "-y", "-f", "lavfi", "-i", "testsrc2=size=320x180:rate=30:duration=2"])
+                .args(["-f", "lavfi", "-i", "sine=frequency=440:duration=2:sample_rate=48000"])
+                .args(["-c:v", "libx264", "-pix_fmt", "yuv420p", "-c:a", "aac", "-shortest"])
+                .arg(tmp)
+                .status()
+                .is_ok_and(|s| s.success())
+        });
+        let Some(media) = made else { return };
+        let mut s = Studio::new();
+        s.add_clip(media.to_str().unwrap()).unwrap();
+        let id = s.timeline().clips.iter().find(|c| c.track == "V1").unwrap().id;
+        s.set_props(&[id], &json!({"speed": 150.0}), None).unwrap();
+        let snd = s.sounds_of(&[id]).unwrap()[0];
+        let item = |s: &Studio| s.session.active_sequence().unwrap().find_item(ClipId(snd)).unwrap().1.clone();
+        assert!(item(&s).maintain_pitch && !item(&s).effects.iter().any(|e| e.effect == PITCH), "new clips stretch");
+        // as 0.4 left it
+        s.session
+            .edit_sequence("old", |q, _, _| {
+                q.find_item_mut(ClipId(snd)).unwrap().1.maintain_pitch = false;
+                Ok(())
+            })
+            .unwrap();
+        s.session.execute("effects.apply", json!({"clips": [snd], "effect": PITCH})).unwrap();
+        assert!(!item(&s).maintain_pitch && item(&s).effects.iter().any(|e| e.effect == PITCH));
+        let proj = dir.join("Old.fcproj");
+        s.save_as(proj.to_str().unwrap()).unwrap();
+        let mut back = Studio::new();
+        back.open_project(proj.to_str().unwrap()).unwrap();
+        let i = back.session.active_sequence().unwrap().find_item(ClipId(snd)).unwrap().1.clone();
+        assert!(i.maintain_pitch, "Maintain Audio Pitch after opening");
+        assert!(!i.effects.iter().any(|e| e.effect == PITCH), "the Pitch Shifter is gone");
+        assert_eq!(back.timeline().undo_label, None, "opening is not an undo step");
     }
 }
