@@ -351,6 +351,16 @@ fn main() {
     }
     let built = builder
         .manage(app)
+        .setup(|app| {
+            // the window is made here (`create: false` in tauri.conf.json) to let the touchpad's
+            // pinch through on Windows: WebView2 turns a pinch into the Ctrl + wheel events the
+            // timeline zooms with only while its own zoom is on (wry ties IsPinchZoomEnabled to
+            // it). The page stops the page itself from zooming (`noPageZoom` in ui/app.js). Elsewhere
+            // the setting would add Tauri's own zoom keys, so it stays off.
+            let config = app.config().app.windows.first().cloned().ok_or("tauri.conf.json has no window")?;
+            tauri::WebviewWindowBuilder::from_config(app.handle(), &config)?.zoom_hotkeys_enabled(cfg!(windows)).build()?;
+            Ok(())
+        })
         .on_window_event(|window, event| match event {
             tauri::WindowEvent::CloseRequested { .. } => editing::save_on_close(tauri::Manager::app_handle(window)),
             // the files Graphics may ask for (graphics::dropped_file)
