@@ -508,6 +508,7 @@ fn main() {
             editing::add_to_lane,
             editing::add_text,
             editing::move_clip,
+            editing::move_clips,
             editing::extract_audio,
             editing::unlink_sound,
             editing::link_sound,

@@ -225,7 +225,7 @@ async function show(req) {
     const maxWidth = previewWidth();
     const buf = req.item != null
       ? await invoke('thumb', { item: req.item, seconds: Math.max(0, req.t), maxWidth })
-      : await invoke('frame', { seconds: req.t, maxWidth, quality: quality() });
+      : await invoke('frame', { seconds: req.t, maxWidth, quality: req.shuttle && quality() === 'auto' ? 'half' : quality() });
     const img = toImage(buf);
     if (c.width !== img.width || c.height !== img.height) { c.width = img.width; c.height = img.height; }
     c.getContext('2d').putImageData(img, 0, 0);
@@ -2271,7 +2271,8 @@ function drawStrips() {
     if (wave) drawWave(isMain(c) ? soundOf(c) : c, c, wave, viewL, viewR);
   }
   Thumbs.queue = [...new Set(need)];
-  pumpThumbs();
+  // a thumbnail is a decode of the video the player is reading: none while it plays
+  if (!S.playing) pumpThumbs();
 }
 /** Fits a lane canvas to the part of clip `g` that is on screen; returns [left, right] or null. */
 function fitPart(cv, g, viewL, viewR, h) {
@@ -2303,20 +2304,31 @@ function drawStrip(c, el, viewL, viewR, need) {
   // a picture per tile, its time quantized to a step about one tile long
   const rate = (g.sourceOut - g.sourceIn) / Math.max(1e-6, g.end - g.start);
   const tileDur = tileW / S.px * rate;
-  const q = [0.04, 0.1, 0.2, 0.5, 1, 2, 5, 10, 20, 30, 60, 120, 300, 600].find(s => s >= tileDur) || 600;
+  const steps = [0.04, 0.1, 0.2, 0.5, 1, 2, 5, 10, 20, 30, 60, 120, 300, 600];
+  const q = steps.find(s => s >= tileDur) || 600;
   const last = Math.max(0, (m ? m.duration : g.sourceOut) - frameStep());
   for (let k = Math.floor((a - L) / tileW); k * tileW < b - L; k++) {
     const src = Math.min(last, g.sourceIn + (k + 0.5) * tileDur);
     const key = `${c.item}:${+(Math.round(src / q) * q).toFixed(3)}`;
     const x = L + k * tileW - a;
-    const img = Thumbs.cache.get(key);
+    let img = Thumbs.cache.get(key);
+    if (img === undefined) {
+      need.push(key);
+      // until it comes, a picture near that time made for a wider zoom (the zoom before a pinch)
+      for (const s of steps) {
+        if (s <= q) continue;
+        const near = Thumbs.cache.get(`${c.item}:${+(Math.round(src / s) * s).toFixed(3)}`);
+        if (near) { img = near; break; }
+      }
+    }
     if (img) {
       drawCover(ctx, img, x, 0, tileW, h);
       ctx.fillStyle = 'rgba(0,0,0,.35)';
       ctx.fillRect(x + tileW - 1, 0, 1, h);
-    } else if (img === undefined) need.push(key);
+    }
   }
 }
+let waveColour = '';
 /** The sound clip `snd`'s waveform, drawn in clip `c`'s element (a main clip draws its sound's). */
 function drawWave(snd, c, cv, viewL, viewR) {
   const g = geom(c);
@@ -2330,7 +2342,7 @@ function drawWave(snd, c, cv, viewL, viewR) {
   // louder or quieter with the clip's volume, as it will sound
   const gain = Math.pow(10, (snd.props.volumeDb || 0) / 20);
   const rate = (g.sourceOut - g.sourceIn) / Math.max(1e-6, g.end - g.start);
-  ctx.fillStyle = getComputedStyle(document.documentElement).getPropertyValue('--sound-wave').trim() || '#46c99a';
+  ctx.fillStyle = waveColour || (waveColour = getComputedStyle(document.documentElement).getPropertyValue('--sound-wave').trim() || '#46c99a');
   const mid = h / 2;
   for (let x = 0; x < b - a; x++) {
     const t0 = g.sourceIn + (a - L + x) / S.px * rate, t1 = g.sourceIn + (a - L + x + 1) / S.px * rate;
@@ -2359,8 +2371,8 @@ async function pumpThumbs() {
         for (const k of Thumbs.cache.keys()) { Thumbs.cache.delete(k); if (--n <= 0) break; }
       }
       drawStripsSoon();
-      // while playing, the preview comes first
-      if (S.playing) await sleep(150);
+      // the player comes first: the rest wait until it stops
+      if (S.playing) break;
     }
   } finally {
     Thumbs.running = false;
@@ -3313,7 +3325,48 @@ function clipPointerDown(c, el, e) {
   };
   if (isCap(c)) captionDrag(c, el, e, after);
   else if (isMain(c)) reorderDrag(c, el, e, after);
+  else if (wasSelected && groupMembers().length > 1 && groupMembers().some(o => o.id === c.id)) groupDrag(c, el, e, after);
   else laneDrag(c, el, e, after);
+}
+/** The selected clips a drag moves together: lane clips, not the main track or its sound. */
+function groupMembers() {
+  const mains = new Set(mainClips().map(m => m.link).filter(l => l != null));
+  return [...S.sel].map(clipById).filter(o => o && !isMain(o) && !isCap(o) && !(o.link != null && mains.has(o.link)));
+}
+/** Several selected lane clips move along the timeline together, each on its own lane. */
+function groupDrag(c, el, e, after) {
+  const x0 = e.clientX, y0 = e.clientY;
+  const members = groupMembers();
+  const linked = new Set(members.map(o => o.link).filter(l => l != null));
+  const moving = visibleClips().filter(o => members.includes(o) || (o.link != null && linked.has(o.link) && !isMain(o)));
+  const ids = new Set(moving.map(o => o.id));
+  const targets = snapTargets(ids);
+  const grab = timeAt(e.clientX) - c.start, len = c.end - c.start;
+  const earliest = Math.min(...moving.map(o => o.start));
+  let started = false, shift = 0;
+  follow(e, ev => {
+    if (!started) {
+      if (Math.hypot(ev.clientX - x0, ev.clientY - y0) < 5) return;
+      started = true;
+      for (const o of moving) S.els.get(o.id)?.classList.add('dragging');
+    }
+    let start = timeAt(ev.clientX) - grab;
+    const a = nearest(start, ev, targets), b = nearest(start + len, ev, targets);
+    if (a !== null && (b === null || Math.abs(a - start) <= Math.abs(b - start - len))) { start = a; showSnap(a); }
+    else if (b !== null) { start = b - len; showSnap(b); }
+    else hideSnap();
+    shift = Math.max(snapFrame(start) - c.start, -earliest);
+    for (const o of moving) S.geom.set(o.id, { ...o, start: o.start + shift, end: o.end + shift });
+    layoutClips();
+    drawVisible();
+  }, cancelled => {
+    for (const o of moving) S.els.get(o.id)?.classList.remove('dragging');
+    S.geom.clear();
+    layoutClips();
+    drawVisible();
+    after(started);
+    if (started && !cancelled && Math.abs(shift) > 1e-6) edit('move_clips', { clips: members.map(o => o.id), seconds: shift });
+  });
 }
 function reorderDrag(c, el, e, after) {
   const x0 = e.clientX;
@@ -3585,6 +3638,7 @@ let raf = 0;
 function stopLoop() { cancelAnimationFrame(raf); raf = 0; }
 async function play() {
   if (!has()) return;
+  if (S.rate !== 1) stopShuttle();
   if (S.t >= dur() - frameStep()) S.t = 0;
   try {
     await invoke('play', { from: S.t, maxWidth: previewWidth(), quality: quality() });
@@ -3603,12 +3657,13 @@ async function play() {
     followPlayhead();
     showFrame(S.t);
     pollMeters();
-    if (!st.playing) { S.playing = false; setPlayIcon(); drawOverlay(); settleMeters(); return; }
+    if (!st.playing) { S.playing = false; setPlayIcon(); drawOverlay(); settleMeters(); drawVisible(); return; }
     raf = requestAnimationFrame(loop);
   };
   raf = requestAnimationFrame(loop);
 }
 async function pause() {
+  if (S.rate !== 1) { stopShuttle(); return; }
   stopLoop();
   S.playing = false;
   setPlayIcon();
@@ -3619,8 +3674,67 @@ async function pause() {
   } catch (e) { /* keep the last known time */ }
   updateTime();
   showFrame(S.t);
+  // the thumbnails skipped while playing
+  drawVisible();
 }
 function toggle() { (S.playing ? pause : play)(); }
+
+/* Shuttle (J K L, as in Premiere): L plays forward and each press doubles the speed (1×, 2×,
+   4×, 8×), J the same backward, K stops. 1× forward is the player with its sound; any other
+   speed runs the playhead on the wall clock and shows the frames it can, without sound. */
+S.rate = 1;
+let shuttleRaf = 0;
+async function shuttle(rate) {
+  if (!has()) return;
+  if (rate === 1) { if (!S.playing || S.rate !== 1) await play(); return; }
+  if (S.playing && S.rate === 1) await pause();
+  if (rate > 0 && S.t >= dur() - frameStep()) S.t = 0;
+  if (rate < 0 && S.t <= 0) S.t = dur();
+  const was = S.rate;
+  S.rate = rate;
+  S.playing = true;
+  setPlayIcon();
+  showRate();
+  if (was !== 1) return;
+  let from = S.t, t0 = performance.now(), r = rate;
+  const loop = now => {
+    if (S.rate === 1) return;
+    // a new speed carries on from where the playhead is
+    if (S.rate !== r) { from = S.t; t0 = now; r = S.rate; }
+    const t = Math.min(Math.max(from + r * (now - t0) / 1000, 0), dur());
+    S.t = t;
+    updateTime();
+    followPlayhead();
+    show({ t, shuttle: true });
+    if ((r > 0 && t >= dur()) || (r < 0 && t <= 0)) { stopShuttle(); return; }
+    shuttleRaf = requestAnimationFrame(loop);
+  };
+  shuttleRaf = requestAnimationFrame(loop);
+}
+function stopShuttle() {
+  cancelAnimationFrame(shuttleRaf);
+  shuttleRaf = 0;
+  if (S.rate === 1) return;
+  S.rate = 1;
+  S.playing = false;
+  S.t = clampT(snapFrame(S.t));
+  setPlayIcon();
+  showRate();
+  invoke('seek', { seconds: S.t }).catch(() => {});
+  updateTime();
+  showFrame(S.t);
+  drawVisible();
+}
+function shuttleOn(dir) {
+  const going = S.playing ? S.rate : 0;
+  const next = Math.sign(going) === dir ? Math.max(-8, Math.min(8, going * 2)) : dir;
+  shuttle(next);
+}
+function showRate() {
+  const n = $('#rate-note');
+  n.textContent = S.rate === 1 ? '' : `${S.rate < 0 ? '◀ ' : ''}${Math.abs(S.rate)}×${S.rate > 0 ? ' ▶' : ''}`;
+  n.hidden = S.rate === 1;
+}
 async function seek(t) {
   if (!has()) return;
   if (S.playing) await pause();
@@ -3834,8 +3948,43 @@ document.addEventListener('mousedown', e => { if (e.target.closest('button')) e.
 $('#ruler').addEventListener('pointerdown', e => scrubFrom(e, false));
 content().addEventListener('pointerdown', e => {
   if (e.target.closest('.clip, .ruler')) return;
-  scrubFrom(e, true);
+  boxSelect(e);
 });
+/* A drag on empty timeline draws a box: the clips it touches are selected (Ctrl or Shift adds them
+   to the selection). A click without a drag puts the playhead there and selects nothing. */
+function boxSelect(e) {
+  if (!has() || e.button !== 0) return;
+  const box = $('#sel-box'), con = content();
+  const add = e.ctrlKey || e.metaKey || e.shiftKey;
+  const before = add ? new Set(S.sel) : new Set();
+  S.sel0 = new Set(S.sel);
+  const x0 = e.clientX, y0 = e.clientY;
+  // the start in content coordinates, so it stays put when the timeline scrolls under the drag
+  const r0 = con.getBoundingClientRect();
+  const cx0 = x0 - r0.left, cy0 = y0 - r0.top;
+  let started = false;
+  follow(e, ev => {
+    if (!started && Math.hypot(ev.clientX - x0, ev.clientY - y0) < 5) return;
+    started = true;
+    const r = con.getBoundingClientRect();
+    const cx = ev.clientX - r.left, cy = ev.clientY - r.top;
+    const L = Math.min(cx0, cx), T = Math.max(26, Math.min(cy0, cy)), R = Math.max(cx0, cx), B = Math.max(26, Math.max(cy0, cy));
+    Object.assign(box.style, { left: L + 'px', top: T + 'px', width: (R - L) + 'px', height: (B - T) + 'px' });
+    box.hidden = false;
+    const ids = new Set(before);
+    for (const [id, el] of S.els) {
+      const q = el.getBoundingClientRect();
+      if (q.right > r.left + L && q.left < r.left + R && q.bottom > r.top + T && q.top < r.top + B) ids.add(id);
+    }
+    if (ids.size !== S.sel.size || [...ids].some(id => !S.sel.has(id))) select(ids);
+  }, cancelled => {
+    box.hidden = true;
+    if (started && cancelled) select(S.sel0);
+    if (started) return;
+    if (!add && (S.sel.size || S.cut != null)) select([]);
+    seek(snapTo(timeAt(e.clientX), e, cuts()));
+  });
+}
 scroller().addEventListener('scroll', () => {
   $('#heads-inner').style.transform = `translateY(${-scroller().scrollTop}px)`;
   drawVisible();
@@ -3898,11 +4047,14 @@ const FREEZE_SECONDS = 3;
 const nudge = n => (S.cut != null ? rollCut(S.cut, n) : nudgeSel(n));
 /** Every action a key can do: `keys` are the defaults; `once` acts once per press, not while held. */
 const ACTIONS = [
-  { group: 'Playback', id: 'play', label: 'Play or pause', keys: ['Space', 'K'], fn: () => toggle() },
+  { group: 'Playback', id: 'play', label: 'Play or pause', keys: ['Space'], fn: () => toggle() },
+  { group: 'Playback', id: 'shuttle-on', label: 'Play forward; press again to go faster (2×, 4×, 8×)', keys: ['L'], once: true, fn: () => shuttleOn(1) },
+  { group: 'Playback', id: 'shuttle-stop', label: 'Stop', keys: ['K'], once: true, fn: () => { if (S.playing) pause(); } },
+  { group: 'Playback', id: 'shuttle-back', label: 'Play backward; press again to go faster (2×, 4×, 8×)', keys: ['J'], once: true, fn: () => shuttleOn(-1) },
   { group: 'Playback', id: 'frame-back', label: 'Back one frame', keys: ['ArrowLeft'], fn: () => seekBy(-frameStep()) },
   { group: 'Playback', id: 'frame-on', label: 'Forward one frame', keys: ['ArrowRight'], fn: () => seekBy(frameStep()) },
-  { group: 'Playback', id: 'second-back', label: 'Back one second', keys: ['J'], fn: () => seekBy(-1) },
-  { group: 'Playback', id: 'second-on', label: 'Forward one second', keys: ['L'], fn: () => seekBy(1) },
+  { group: 'Playback', id: 'second-back', label: 'Back one second', keys: [], fn: () => seekBy(-1) },
+  { group: 'Playback', id: 'second-on', label: 'Forward one second', keys: [], fn: () => seekBy(1) },
   { group: 'Playback', id: 'five-back', label: 'Back five seconds', keys: ['Shift+ArrowLeft'], fn: () => seekBy(-5) },
   { group: 'Playback', id: 'five-on', label: 'Forward five seconds', keys: ['Shift+ArrowRight'], fn: () => seekBy(5) },
   { group: 'Playback', id: 'cut-back', label: 'Go to the previous cut', keys: ['ArrowUp'], fn: () => seekCut(-1) },

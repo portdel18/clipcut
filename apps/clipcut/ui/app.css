@@ -94,6 +94,7 @@ h2 { margin: 0 0 10px; font-size: 12px; font-weight: 700; letter-spacing: .08em;
 .empty { position: absolute; inset: 0; display: grid; place-content: center; justify-items: center; gap: 10px; color: var(--muted); }
 .empty p { margin: 0; font-size: 15px; }
 .transport { position: relative; display: flex; align-items: center; justify-content: center; gap: 16px; border-top: 1px solid var(--line); background: var(--panel); }
+.tc .rate { margin-left: 8px; padding: 1px 6px; border-radius: 4px; background: var(--accent); color: var(--accent-ink); font-weight: 700; }
 .tc { position: absolute; left: 14px; font-family: var(--mono); font-size: 12.5px; font-variant-numeric: tabular-nums; }
 .tc .tot { color: var(--faint); }
 .play { width: 34px; height: 34px; display: grid; place-items: center; border-radius: 50%; border: 0; background: var(--text); color: var(--bg); cursor: pointer; }
@@ -288,6 +289,7 @@ select:disabled { opacity: .5; }
 .clip .fade.out { right: 0; background: linear-gradient(to left, rgba(0, 0, 0, .6), transparent); clip-path: polygon(100% 100%, 100% 0, 0 0); }
 .snap-line { position: absolute; top: 0; bottom: 0; width: 1px; margin-left: -.5px; background: var(--accent); pointer-events: none; z-index: 7; }
 .insert-mark { position: absolute; top: 44px; height: 64px; width: 3px; margin-left: -1.5px; border-radius: 2px; background: var(--accent); pointer-events: none; z-index: 7; }
+.sel-box { position: absolute; z-index: 7; border: 1px solid var(--accent); border-radius: 3px; background: rgba(244, 196, 67, .12); pointer-events: none; }
 .drop-box { position: absolute; border: 2px dashed var(--accent); border-radius: 6px; background: rgba(244, 196, 67, .1); pointer-events: none; z-index: 7; }
 .clip .snd.off { opacity: .3; }
 .media-ghost.sound { width: 64px; }

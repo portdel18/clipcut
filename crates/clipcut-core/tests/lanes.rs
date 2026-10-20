@@ -128,6 +128,38 @@ fn overlays_carry_their_sound_and_move_as_one() {
 }
 
 #[test]
+fn a_box_selection_moves_together_in_one_step() {
+    let Some((mut s, music, video)) = setup() else { return };
+    let ids = s.add_to_lane(video, 0.5).unwrap();
+    let tune = s.add_to_lane(music, 2.0).unwrap()[0];
+    let v = s.timeline();
+    let pic = ids.iter().map(|i| by_id(&v, *i)).find(|c| c.track == "V2").unwrap();
+    let snd = ids.iter().map(|i| by_id(&v, *i)).find(|c| c.track.starts_with('A')).unwrap();
+    let tune_lane = by_id(&v, tune).track;
+    let main = on(&v, "V1");
+    // the picture, the music and a main clip are selected: the lane clips move, the main clip stays
+    s.move_clips(&[pic.id, tune, main[0].id], 1.0).unwrap();
+    let v = s.timeline();
+    assert!((by_id(&v, pic.id).start - 1.5).abs() < EPS, "{:?}", by_id(&v, pic.id));
+    assert!((by_id(&v, snd.id).start - 1.5).abs() < EPS, "its sound goes with it");
+    assert!((by_id(&v, tune).start - 3.0).abs() < EPS);
+    assert_eq!((by_id(&v, pic.id).track, by_id(&v, tune).track), ("V2".to_string(), tune_lane.clone()));
+    assert!(by_id(&v, main[0].id).start.abs() < EPS);
+    assert_eq!(v.undo_label.as_deref(), Some("Move"));
+    // one undo puts all of them back
+    s.undo().unwrap();
+    let v = s.timeline();
+    assert!((by_id(&v, pic.id).start - 0.5).abs() < EPS && (by_id(&v, tune).start - 2.0).abs() < EPS);
+    // the set stops at 0, keeping its spacing
+    s.move_clips(&[pic.id, tune], -10.0).unwrap();
+    let v = s.timeline();
+    assert!(by_id(&v, pic.id).start.abs() < EPS && (by_id(&v, tune).start - 1.5).abs() < EPS);
+    // the main track alone is not a lane selection
+    assert!(s.move_clips(&[main[0].id], 1.0).is_err());
+    assert!(s.move_clips(&[pic.id], f64::NAN).is_err());
+}
+
+#[test]
 fn text_is_added_styled_and_edited() {
     let Some((mut s, _, _)) = setup() else { return };
     let id = s.add_text(1.0, 2.0, "Mayor Jane Doe", &json!({"color": "#ffcc00", "stroke": true})).unwrap();
