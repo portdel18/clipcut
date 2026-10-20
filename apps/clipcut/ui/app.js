@@ -317,6 +317,8 @@ function stagePointerDown(e) {
   if (!r.width) return;
   const k = S.tl.width / r.width;
   const px = (e.clientX - r.left) * k, py = (e.clientY - r.top) * k;
+  // picking the colour to remove: this click is the colour
+  if (KY.picking) { e.preventDefault(); pickColourAt(px, py); return; }
   // a click picks the clip under the pointer; a drag moves the selected one
   let c = stageClip();
   const hit = clipAtPoint(px, py);
@@ -1266,6 +1268,160 @@ const ADJ = [
 ];
 /* A dragged adjustment sends its latest value; each drag is one undo step */
 let colWant = null, colBusy = false;
+/** Edits a dragged slider sends: only the latest wish per command waits while one runs. */
+const LATEST = new Map();
+async function latest(cmd, args) {
+  const busy = LATEST.has(cmd);
+  LATEST.set(cmd, args);
+  if (busy) return;
+  try {
+    while (LATEST.get(cmd)) {
+      const a = LATEST.get(cmd);
+      LATEST.set(cmd, null);
+      await edit(cmd, a);
+    }
+  } finally { LATEST.delete(cmd); }
+}
+/** A slider row for a custom edit: `send(value, merge)` while dragging (one undo step). */
+function customSlider(label, id, { min, max, step, unit, read, send, dp = null }) {
+  const row = document.createElement('label');
+  row.className = 'prop';
+  row.innerHTML = `<span>${label}</span><input type="range" min="${min}" max="${max}" step="${step}"><input type="number" step="${step}" title="${unit}">`;
+  const [range, num] = row.querySelectorAll('input');
+  range.id = id;
+  if (dp != null) num.dataset.dp = String(dp);
+  let k = nextKey(id);
+  range.addEventListener('input', () => { num.value = range.value; send(+range.value, k); });
+  range.addEventListener('change', () => { k = nextKey(id); range.blur(); });
+  num.addEventListener('change', () => { const v = clamp(+num.value, min, max); if (Number.isFinite(v)) { range.value = v; send(v, null); } });
+  controls.push({ el: range, read }, { el: num, read });
+  return row;
+}
+
+/* Two-mic recordings: how a clip's two sides play (Channel Mixer in the engine) */
+const CH = { levels: new Map() };
+const CH_MODES = [
+  ['stereo', 'As recorded', 'Play the two sides as they were recorded'],
+  ['left', 'Left mic', 'Play only the left side, in both ears'],
+  ['right', 'Right mic', 'Play only the right side, in both ears'],
+  ['mono', 'Both mics', 'Mix both sides into both ears: with one person on each side, both are heard everywhere'],
+];
+const chOf = c => { const snd = c && (soundOf(c) || c); return snd && snd.props.channels; };
+function channelControls(s, one, ids) {
+  const ch = chOf(one);
+  const seg = buttons(CH_MODES.map(([m, l, t]) => [l, t, () => setChannels(ids, m)]));
+  seg.id = 'ch-mode';
+  seg.classList.add('ch-mode');
+  controls.push({ el: seg, read: c => (chOf(c) || {}).mode, write: (el, v) => { [...el.children].forEach((b, i) => b.setAttribute('aria-pressed', String(CH_MODES[i][0] === v))); } });
+  s.appendChild(seg);
+  if (ch.mode === 'mono') {
+    const send = side => (v, merge) => {
+      const c = chOf(clipById(one.id));
+      latest('set_channels', { clips: ids, mode: 'mono', leftDb: side === 'l' ? v : c.leftDb, rightDb: side === 'r' ? v : c.rightDb, merge });
+    };
+    s.appendChild(customSlider('Left mic', 'ch-left', { min: -24, max: 0, step: 0.5, unit: 'dB', read: c => (chOf(c) || {}).leftDb, send: send('l'), dp: 0 }));
+    s.appendChild(customSlider('Right mic', 'ch-right', { min: -24, max: 0, step: 0.5, unit: 'dB', read: c => (chOf(c) || {}).rightDb, send: send('r'), dp: 0 }));
+  }
+  const hint = document.createElement('div');
+  hint.className = 'ch-hint';
+  hint.id = 'ch-hint';
+  s.appendChild(hint);
+  channelHint(one, ids);
+}
+/** The mode `m` for `ids`; Both mics starts with the two voices evened out when they were measured. */
+function setChannels(ids, m) {
+  const one = clipById(ids[0]);
+  const ch = chOf(one) || {};
+  const lv = CH.levels.get((soundOf(one) || one).id);
+  let l = 0, r = 0;
+  if (m === 'mono') {
+    if (ch.mode === 'mono') { l = ch.leftDb; r = ch.rightDb; } else if (lv && lv.evenLeftDb != null) { l = lv.evenLeftDb; r = lv.evenRightDb; }
+  }
+  return edit('set_channels', { clips: ids, mode: m, leftDb: l, rightDb: r, merge: null });
+}
+/** Measures the clip's sides once (per sound clip and trim) and says what it seems to need. */
+async function channelHint(one, ids) {
+  const snd = soundOf(one) || one;
+  const key = `${snd.id}:${snd.sourceIn}:${snd.sourceOut}`;
+  let lv = CH.levels.get(snd.id);
+  if (!lv || lv.key !== key) {
+    try { lv = { ...(await invoke('channel_levels', { clip: snd.id })), key }; } catch (_) { lv = { key, suggest: null }; }
+    CH.levels.set(snd.id, lv);
+  }
+  const box = $('#ch-hint');
+  const now = clipById(one.id);
+  if (!box || !now) return;
+  const mode = (chOf(now) || {}).mode;
+  box.innerHTML = '';
+  const say = (text, label, fn) => {
+    const p = document.createElement('p');
+    p.className = 'hint';
+    p.textContent = text;
+    box.appendChild(p);
+    if (label) box.appendChild(buttons([[label, text, fn]]));
+  };
+  if (lv.suggest === 'mono' && mode !== 'mono') say('Each side has its own voice. Mix both mics so each is heard in both ears?', 'Both mics', () => setChannels(ids, 'mono'));
+  else if ((lv.suggest === 'left' || lv.suggest === 'right') && mode !== lv.suggest) say(`Only the ${lv.suggest} side has sound. Play it in both ears?`, lv.suggest === 'left' ? 'Left mic' : 'Right mic', () => setChannels(ids, lv.suggest));
+  else if (mode === 'mono' && lv.leftVoiceDb != null && lv.rightVoiceDb != null) {
+    say(`The left voice is ${Math.abs(lv.leftVoiceDb - lv.rightVoiceDb).toFixed(1)} dB ${lv.leftVoiceDb >= lv.rightVoiceDb ? 'louder' : 'quieter'} than the right as recorded.`, 'Even out', () => edit('set_channels', { clips: ids, mode: 'mono', leftDb: lv.evenLeftDb, rightDb: lv.evenRightDb, merge: null }));
+  }
+}
+
+/* Remove a colour (green screen): the engine's Ultra Key on picture clips */
+const KY = { picking: null, color: '#00b140' };
+function keyControls(s, one, ids) {
+  const key = one.props.key;
+  const on = document.createElement('label');
+  on.className = 'check';
+  on.innerHTML = '<input type="checkbox" id="key-on"> Remove a colour (green screen)';
+  const box = on.querySelector('input');
+  box.checked = !!key;
+  box.addEventListener('change', () => box.checked ? setKey(ids, { color: KY.color }) : edit('set_key', { clips: ids, key: null, merge: null }));
+  s.appendChild(on);
+  const pick = buttons([['Pick from the video', 'Click the colour to remove in the player (Esc: stop)', () => startPicking(ids)]]);
+  pick.firstChild.id = 'key-pick';
+  if (!key) { s.appendChild(pick); return; }
+  const row = document.createElement('label');
+  row.className = 'prop';
+  row.innerHTML = '<span>Colour</span><input type="color" id="key-color">';
+  const col = row.querySelector('input');
+  col.addEventListener('input', () => setKey(ids, { color: col.value }, 'key-color'));
+  controls.push({ el: col, read: c => (c.props.key ? c.props.key.color : KY.color) });
+  s.appendChild(row);
+  s.appendChild(pick);
+  const strengths = [['gentle', 'Gentle', 'Keeps more of the picture: for a colour close to what stays'], ['normal', 'Normal', 'For an evenly lit screen'], ['strong', 'Strong', 'Removes more: for an unevenly lit screen']];
+  const seg = buttons(strengths.map(([k, l, t]) => [l, t, () => setKey(ids, { strength: k })]));
+  seg.id = 'key-strength';
+  controls.push({ el: seg, read: c => (c.props.key || {}).strength, write: (el, v) => { [...el.children].forEach((b, i) => b.setAttribute('aria-pressed', String(strengths[i][0] === v))); } });
+  s.appendChild(seg);
+  s.appendChild(customSlider('Soft edges', 'key-soften', { min: 0, max: 100, step: 1, unit: '%', read: c => (c.props.key || {}).soften, send: (v, m) => setKey(ids, { soften: v }, m) }));
+  s.appendChild(customSlider('Remove tint', 'key-spill', { min: 0, max: 100, step: 1, unit: '%', read: c => (c.props.key || {}).spill, send: (v, m) => setKey(ids, { spill: v }, m) }));
+}
+/** The key with `change` over the clip's current one (or the defaults). */
+function setKey(ids, change, merge = null) {
+  const cur = (clipById(ids[0]) || {}).props?.key || { color: KY.color, strength: 'normal', soften: 0, spill: 50 };
+  const key = { ...cur, ...change };
+  if (change.color) KY.color = change.color;
+  return latest('set_key', { clips: ids, key, merge });
+}
+function startPicking(ids) {
+  KY.picking = ids;
+  $('#stage').classList.add('picking');
+  toast('Click the colour to remove in the player');
+}
+function stopPicking() {
+  KY.picking = null;
+  $('#stage').classList.remove('picking');
+}
+async function pickColourAt(x, y) {
+  const ids = KY.picking;
+  stopPicking();
+  try {
+    const color = await invoke('pick_colour', { seconds: S.t, x, y });
+    await setKey(ids, { color });
+  } catch (e) { toast(e, true); }
+}
+
 async function queueColour(ids, values, merge) {
   if (colWant && colWant.merge === merge && String(colWant.clips) === String(ids)) Object.assign(colWant.values, values);
   else colWant = { clips: ids, values: { ...values }, merge };
@@ -2113,6 +2269,7 @@ function renderTools() {
   if (!S.tl) return;
   const cut = has() && cutTargets().length > 0;
   for (const id of ['#split-btn', '#delleft-btn', '#delright-btn']) $(id).disabled = !cut;
+  $('#freeze-btn').disabled = !has() || !visibleClips().some(c => c.track[0] === 'V' && c.kind === 'video' && !c.props.freeze && c.start <= S.t + 1e-6 && c.end > S.t);
   $('#delete-btn').disabled = S.sel.size === 0 && !transitionAt(S.cut);
   $('#undo-btn').disabled = !S.tl.canUndo;
   $('#redo-btn').disabled = !S.tl.canRedo;
@@ -2541,7 +2698,7 @@ function renderProps() {
     return;
   }
   const one = sel.length === 1 ? sel[0] : null;
-  const sig = one ? `${one.id}:${one.kind}:${isCap(one) || isMain(one)}:${!isCap(one) && hasSound(one)}:${keyTimes(one).length > 0}:${pictureClip(one)}:${S.kf && S.kf.clip === one.id ? S.kf.t : ''}` : `n${sel.length}`;
+  const sig = one ? `${one.id}:${one.kind}:${isCap(one) || isMain(one)}:${!isCap(one) && hasSound(one)}:${keyTimes(one).length > 0}:${pictureClip(one)}:${S.kf && S.kf.clip === one.id ? S.kf.t : ''}:${(chOf(one) || {}).mode || ''}:${!!one.props.key}` : `n${sel.length}`;
   $('#props-title').textContent = one ? (one.graphic ? 'Graphic' : one.title ? 'Title' : { text: 'Text', audio: 'Sound', image: 'Picture', caption: 'Caption' }[one.kind] || (isMain(one) ? 'Clip' : 'Overlay')) : sel.length ? `${sel.length} clips` : 'Project';
   if (sig === propsSig) { syncProps(one); return; }
   propsSig = sig;
@@ -2588,6 +2745,7 @@ function renderProps() {
     // fades of the clip's own sound (a main clip's too: its picture's edges are the transitions')
     s.appendChild(slider('Fade in', ids, 'fadeIn', { min: 0, max: 10, step: 0.1, unit: 's', read: c => (soundOf(c) || c).props.fadeIn }));
     s.appendChild(slider('Fade out', ids, 'fadeOut', { min: 0, max: 10, step: 0.1, unit: 's', read: c => (soundOf(c) || c).props.fadeOut }));
+    if (chOf(one)) channelControls(s, one, ids);
     if (!isMain(one)) {
       duckingControls(s, ids);
       beatControls(s, ids);
@@ -2601,6 +2759,7 @@ function renderProps() {
   }
   if (visual(one) || hasSound(one)) keyframeControls(section('Keyframes'), one);
   trimControls(section('Trim'), one);
+  if (pictureClip(one) && (one.kind === 'video' || one.kind === 'image') && !one.graphic && !one.title) keyControls(section('Remove a colour'), one, ids);
   if (pictureClip(one)) adjustControls(box, ids);
   if (one.kind !== 'text' && one.kind !== 'image') {
     const s = section('Speed');
@@ -2609,6 +2768,19 @@ function renderProps() {
     s.appendChild(seg);
     controls.push({ el: seg, read: c => c.props.speed, write: (el, v) => { [...el.children].forEach((b, i) => b.setAttribute('aria-pressed', String(Math.abs(presets[i] - v) < 0.5))); } });
     s.appendChild(slider('Speed', ids, 'speed', { min: 10, max: 400, step: 5, unit: '%', read: c => c.props.speed, live: false }));
+    const rev = buttons([['Reverse', 'Play the clip backwards', () => edit('set_reverse', { clips: ids, on: !clipById(one.id).props.reverse })]]);
+    rev.firstChild.id = 'reverse-btn';
+    controls.push({ el: rev, read: c => c.props.reverse, write: (el, v) => el.firstChild.setAttribute('aria-pressed', String(!!v)) });
+    s.appendChild(rev);
+    if (hasSound(one)) {
+      const kp = document.createElement('label');
+      kp.className = 'check';
+      kp.innerHTML = '<input type="checkbox" id="keep-pitch"> Keep the voice’s pitch at other speeds';
+      const cb = kp.querySelector('input');
+      cb.addEventListener('change', () => edit('set_keep_pitch', { clips: ids, on: cb.checked }));
+      controls.push({ el: cb, read: c => (soundOf(c) || c).props.keepPitch });
+      s.appendChild(kp);
+    }
   }
   syncProps(one);
 }
@@ -3473,6 +3645,7 @@ click('#open-btn', openProject);
 click('#undo-btn', undo);
 click('#redo-btn', redo);
 click('#split-btn', split);
+click('#freeze-btn', freezeFrame);
 click('#delleft-btn', () => splitKeep('right'));
 click('#delright-btn', () => splitKeep('left'));
 click('#delete-btn', deleteSelection);
@@ -3541,6 +3714,15 @@ scroller().addEventListener('wheel', e => {
   }
 }, { passive: false });
 
+/** Freezes the frame at the playhead: of the selected video clip under it, else the main track's. */
+async function freezeFrame() {
+  if (!has()) return;
+  const sel = selectedClips().find(c => c.track[0] === 'V' && c.kind === 'video' && c.start <= S.t + 1e-6 && c.end > S.t);
+  const r = await make('freeze', { seconds: S.t, clip: sel ? sel.id : null, length: FREEZE_SECONDS });
+  if (r) toast(`Frame frozen for ${FREEZE_SECONDS} seconds: trim the still to change how long`);
+}
+const FREEZE_SECONDS = 3;
+
 /* ---------- keyboard shortcuts: every action's keys, which the user can change ---------- */
 // a frame at a time (Shift: 10): the selected cut moves, else the selected lane clips
 const nudge = n => (S.cut != null ? rollCut(S.cut, n) : nudgeSel(n));
@@ -3558,6 +3740,7 @@ const ACTIONS = [
   { group: 'Playback', id: 'start', label: 'Go to the start', keys: ['Home'], fn: () => { seek(0); scrollToTime(0); } },
   { group: 'Playback', id: 'end', label: 'Go to the end', keys: ['End'], fn: () => { seek(Infinity); scrollToTime(dur()); } },
   { group: 'Editing', id: 'split', label: 'Split at the playhead', keys: ['S'], once: true, fn: () => split() },
+  { group: 'Editing', id: 'freeze', label: 'Freeze the frame at the playhead', keys: ['F'], once: true, fn: () => freezeFrame() },
   { group: 'Editing', id: 'delleft', label: 'Delete to the left of the playhead', keys: ['Q'], once: true, fn: () => splitKeep('right') },
   { group: 'Editing', id: 'delright', label: 'Delete to the right of the playhead', keys: ['W'], once: true, fn: () => splitKeep('left') },
   { group: 'Editing', id: 'delete', label: 'Delete the selection (clips, a keyframe, a transition or transcript words)', keys: ['Delete', 'Backspace'], once: true, fn: () => deleteSelection() },
@@ -3672,6 +3855,7 @@ invoke('load_shortcuts').then(useKeyChanges).catch(() => useKeyChanges({}));
 document.addEventListener('keydown', e => {
   if (!$('#graphics-view').hidden) { if (e.key === 'Escape') { e.preventDefault(); closeGraphics(); } return; }
   if (e.target.closest('input, textarea, select') || document.querySelector('dialog[open]') || S.dragging) return;
+  if (KY.picking && e.key === 'Escape') { e.preventDefault(); stopPicking(); return; }
   const combo = comboOf(e);
   const a = combo && KEYMAP.get(combo);
   if (!a || (a.when && !a.when())) return;

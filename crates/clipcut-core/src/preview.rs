@@ -33,8 +33,8 @@ pub fn preview_scale(w: u32, max_width: u32, quality: &str) -> f32 {
 /// Renders frames of the sequence as it was when the feed was made, from any thread.
 #[derive(Clone)]
 pub struct FrameFeed {
-    project: Arc<Project>,
-    sequence: ItemId,
+    pub(crate) project: Arc<Project>,
+    pub(crate) sequence: ItemId,
     provider: Arc<PoolProvider>,
     scale: f32,
     rate: FrameRate,

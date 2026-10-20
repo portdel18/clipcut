@@ -55,9 +55,28 @@ for text the words, font, size, bold and italic, alignment, colour, outline, box
 drag is one undo step. **Ratio** (under the player) turns the canvas into 9:16 for TikTok, Reels and
 Shorts, 1:1 or 4:5; clips are refitted to the new shape.
 
+**Two-mic recordings.** A clip recorded with a microphone on each side (one person on the left, one
+on the right) chooses how its sides play under Sound: **As recorded**, **Left mic** or **Right mic**
+(that side in both ears), or **Both mics** (both sides mixed into both ears), with a level for each
+mic. ClipCut measures the two sides and offers the fix: "Each side has its own voice" for two people,
+"Only the left side has sound" for one microphone, and **Even out** sets the louder voice down to the
+quieter one.
+
+**Speed, reverse, freeze.** Speed keeps the voice's pitch (switch it off under Speed for the tape
+effect); **Reverse** plays the clip backwards; **Freeze** (the toolbar, or `F`) puts a 3-second still of
+the frame at the playhead into the video and pushes the rest along (trim the still to change its
+length). The sound pauses during the freeze, so speech stays with its picture.
+
+**Remove a colour.** Under Properties, a video or picture clip can lose a green screen (or any flat
+colour): tick **Remove a colour**, or press **Pick from the video** and click the colour in the
+player. **Gentle**, **Normal** or **Strong** sets how much is removed, **Soft edges** feathers the
+cut, and **Remove tint** takes the screen's colour off hair and edges. Put the clip on a lane over
+the background it should stand on.
+
 | Key | What it does |
 |---|---|
 | `S` | Split at the playhead (only the selected clips, if any are selected) |
+| `F` | Freeze the frame at the playhead for 3 seconds |
 | `Q` / `W` | Split and delete everything to the left / right of the playhead in that clip |
 | `Delete` | Delete the selected clips; the main track closes up, lanes keep their gaps |
 | Drag a clip | Main track: move it to another place in the order. Lanes: move it in time or to another lane |

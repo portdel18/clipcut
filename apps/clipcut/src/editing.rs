@@ -831,3 +831,66 @@ pub fn poll_jobs(app: tauri::State<'_, App>) -> Option<TimelineView> {
 pub async fn set_proxies(on: bool, app: tauri::State<'_, App>) -> Result<TimelineView, String> {
     edit(&app, move |s| s.set_proxies(on)).await
 }
+
+/* ---------- sound sides, freeze, reverse, pitch, colour key ---------- */
+
+#[tauri::command]
+pub async fn set_channels(
+    clips: Vec<u64>,
+    mode: String,
+    left_db: f64,
+    right_db: f64,
+    merge: Option<String>,
+    app: tauri::State<'_, App>,
+) -> Result<TimelineView, String> {
+    edit(&app, move |s| s.set_channels(&clips, &mode, left_db, right_db, merge.as_deref())).await
+}
+
+/// Measures a clip's two sides (it decodes the sound, so it runs off the interface's thread).
+#[tauri::command]
+pub async fn channel_levels(clip: u64, app: tauri::State<'_, App>) -> Result<clipcut_core::ChannelLevels, String> {
+    let studio = app.studio.clone();
+    blocking(move || lock(&studio).channel_levels(clip).map_err(|e| e.to_string())).await
+}
+
+#[tauri::command]
+pub async fn freeze(seconds: f64, clip: Option<u64>, length: f64, app: tauri::State<'_, App>) -> Result<ClipResult, String> {
+    let (studio, player) = (app.studio.clone(), app.player.clone());
+    blocking(move || {
+        lock(&player).stop();
+        let mut s = lock(&studio);
+        let still = s.freeze(seconds, clip, length).map_err(|e| e.to_string())?;
+        Ok(ClipResult { timeline: s.timeline(), clips: vec![still] })
+    })
+    .await
+}
+
+#[tauri::command]
+pub async fn set_reverse(clips: Vec<u64>, on: bool, app: tauri::State<'_, App>) -> Result<TimelineView, String> {
+    edit(&app, move |s| s.set_reverse(&clips, on)).await
+}
+
+#[tauri::command]
+pub async fn set_keep_pitch(clips: Vec<u64>, on: bool, app: tauri::State<'_, App>) -> Result<TimelineView, String> {
+    edit(&app, move |s| s.set_keep_pitch(&clips, on)).await
+}
+
+/// A colour key as the interface sends it.
+#[derive(serde::Deserialize)]
+pub struct KeyArgs {
+    color: String,
+    strength: String,
+    soften: f64,
+    spill: f64,
+}
+
+#[tauri::command]
+pub async fn set_key(clips: Vec<u64>, key: Option<KeyArgs>, merge: Option<String>, app: tauri::State<'_, App>) -> Result<TimelineView, String> {
+    edit(&app, move |s| s.set_key(&clips, key.as_ref().map(|k| (k.color.as_str(), k.strength.as_str(), k.soften, k.spill)), merge.as_deref())).await
+}
+
+#[tauri::command]
+pub async fn pick_colour(seconds: f64, x: f64, y: f64, app: tauri::State<'_, App>) -> Result<String, String> {
+    let studio = app.studio.clone();
+    blocking(move || lock(&studio).pick_colour(seconds, x, y).map_err(|e| e.to_string())).await
+}

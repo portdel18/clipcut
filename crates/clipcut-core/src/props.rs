@@ -24,6 +24,10 @@ pub struct ClipProps {
     pub fade_out: f64,
     /// Music on a lane: how far it goes down under speech (dB), when it ducks.
     pub ducking: Option<f64>,
+    /// Sound with two channels: how its two sides play.
+    pub channels: Option<crate::channels::ChannelsView>,
+    /// Sound: keeps its pitch when played faster or slower.
+    pub keep_pitch: bool,
     /// Pictures and text: where the clip's centre sits, in canvas pixels.
     pub x: Option<f64>,
     pub y: Option<f64>,
@@ -34,9 +38,15 @@ pub struct ClipProps {
     pub opacity: Option<f64>,
     /// Percent: 100 plays at normal speed.
     pub speed: f64,
+    /// Plays backwards.
+    pub reverse: bool,
+    /// A still of one frame (a freeze).
+    pub freeze: bool,
     pub text: Option<TextProps>,
     /// Picture clips: adjustments and filter, once the clip has any.
     pub colour: Option<crate::colour::ColourView>,
+    /// Picture clips: the colour removed from them (green screen), when one is.
+    pub key: Option<crate::key::KeyView>,
 }
 
 /// A text clip's words and look (its first text layer).
@@ -113,10 +123,13 @@ pub(crate) fn clip_props(s: &filmcraft_engine::Session, q: &Sequence, track: &Tr
 
 /// [`clip_props`] with animated properties as they are at media time `at`.
 pub(crate) fn clip_props_at(s: &filmcraft_engine::Session, q: &Sequence, track: &Track, i: &TrackItem, at: Tick) -> (&'static str, ClipProps) {
-    let mut p = ClipProps { speed: (i.speed.abs() * 100.0 * 100.0).round() / 100.0, ..Default::default() };
+    let mut p = ClipProps { speed: (i.speed.abs() * 100.0 * 100.0).round() / 100.0, reverse: i.reverse, freeze: i.frame_hold.is_some(), ..Default::default() };
     if track.kind == TrackKind::Audio {
         p.volume_db = Some(float_at(effect(i, "volume"), "level", at).unwrap_or(0.0));
         p.ducking = crate::ducking::ducking_of(i);
+        let two = s.project.item(i.item).and_then(|it| it.as_media()).and_then(|m| m.info.audio_streams.get(i.audio_stream)).is_some_and(|a| a.channels >= 2);
+        p.channels = two.then(|| crate::channels::channels_of(i));
+        p.keep_pitch = crate::timing::keeps_pitch(i);
         for t in &track.transitions {
             if t.to == Some(i.id) && t.from.is_none() {
                 p.fade_in = t.duration.seconds();
@@ -143,6 +156,7 @@ pub(crate) fn clip_props_at(s: &filmcraft_engine::Session, q: &Sequence, track: 
     p.rotation = Some(float_at(motion, "rotation", at).unwrap_or(0.0));
     p.opacity = Some(float_at(effect(i, "opacity"), "opacity", at).unwrap_or(100.0));
     p.colour = crate::colour::colour_of(&i.effects);
+    p.key = crate::key::key_of(i);
     if kind == "text" {
         let l = effect(i, filmcraft_project::graphic::TEXT_LAYER);
         let style = text(l, "font_style").to_ascii_lowercase();
@@ -286,6 +300,7 @@ impl Studio {
                 let speed = speed.clamp(10.0, 1000.0);
                 let main = self.on_main(clip);
                 self.session.execute("clip.speedDuration", json!({"clips": [clip], "speed": speed, "ripple": main})).map_err(engine)?;
+                self.fit_pitch(&[clip])?;
                 if main {
                     self.pack_main()?;
                 }
