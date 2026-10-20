@@ -15,19 +15,22 @@ use std::mem::ManuallyDrop;
 use std::time::{Duration, Instant};
 
 use windows::Win32::Media::MediaFoundation::{
-    CODECAPI_AVEncCommonMaxBitRate, CODECAPI_AVEncCommonMeanBitRate, CODECAPI_AVEncCommonRateControlMode, CODECAPI_AVEncMPVDefaultBPictureCount,
-    CODECAPI_AVEncMPVGOPSize, ICodecAPI, IMFActivate, IMFMediaEventGenerator, IMFMediaType, IMFSample, IMFTransform, MEDIA_EVENT_GENERATOR_GET_EVENT_FLAGS,
-    METransformDrainComplete, METransformHaveOutput, METransformNeedInput, MF_E_NO_EVENTS_AVAILABLE, MF_E_NO_MORE_TYPES, MF_E_NOTACCEPTING,
-    MF_E_TRANSFORM_NEED_MORE_INPUT, MF_E_TRANSFORM_STREAM_CHANGE, MF_EVENT_FLAG_NO_WAIT, MF_MT_AVG_BITRATE, MF_MT_FRAME_RATE, MF_MT_FRAME_SIZE,
-    MF_MT_INTERLACE_MODE, MF_MT_MAJOR_TYPE, MF_MT_MPEG_SEQUENCE_HEADER, MF_MT_MPEG2_PROFILE, MF_MT_PIXEL_ASPECT_RATIO, MF_MT_SUBTYPE, MF_MT_TRANSFER_FUNCTION,
-    MF_MT_VIDEO_NOMINAL_RANGE, MF_MT_VIDEO_PRIMARIES, MF_MT_YUV_MATRIX, MF_TRANSFORM_ASYNC, MF_TRANSFORM_ASYNC_UNLOCK, MFMediaType_Video,
-    MFNominalRange_16_235, MFSampleExtension_CleanPoint, MFT_ENUM_HARDWARE_URL_Attribute, MFT_MESSAGE_COMMAND_DRAIN, MFT_MESSAGE_NOTIFY_BEGIN_STREAMING,
-    MFT_MESSAGE_NOTIFY_END_OF_STREAM, MFT_MESSAGE_NOTIFY_START_OF_STREAM, MFT_OUTPUT_DATA_BUFFER, MFT_OUTPUT_STREAM_PROVIDES_SAMPLES, MFVideoFormat_H264,
-    MFVideoFormat_NV12, MFVideoInterlace_Progressive, MFVideoPrimaries_BT709, MFVideoTransFunc_709, MFVideoTransferMatrix_BT709,
-    eAVEncCommonRateControlMode_CBR, eAVEncCommonRateControlMode_PeakConstrainedVBR,
+    CODECAPI_AVEncCommonMaxBitRate, CODECAPI_AVEncCommonMeanBitRate, CODECAPI_AVEncCommonQualityVsSpeed, CODECAPI_AVEncCommonRateControlMode,
+    CODECAPI_AVEncMPVDefaultBPictureCount, CODECAPI_AVEncMPVGOPSize, ICodecAPI, IMFActivate, IMFMediaEventGenerator, IMFMediaType, IMFSample, IMFTransform,
+    MEDIA_EVENT_GENERATOR_GET_EVENT_FLAGS, METransformDrainComplete, METransformHaveOutput, METransformNeedInput, MF_E_NO_EVENTS_AVAILABLE, MF_E_NO_MORE_TYPES,
+    MF_E_NOTACCEPTING, MF_E_TRANSFORM_NEED_MORE_INPUT, MF_E_TRANSFORM_STREAM_CHANGE, MF_EVENT_FLAG_NO_WAIT, MF_MT_AVG_BITRATE, MF_MT_FRAME_RATE,
+    MF_MT_FRAME_SIZE, MF_MT_INTERLACE_MODE, MF_MT_MAJOR_TYPE, MF_MT_MPEG_SEQUENCE_HEADER, MF_MT_MPEG2_PROFILE, MF_MT_PIXEL_ASPECT_RATIO, MF_MT_SUBTYPE,
+    MF_MT_TRANSFER_FUNCTION, MF_MT_VIDEO_NOMINAL_RANGE, MF_MT_VIDEO_PRIMARIES, MF_MT_YUV_MATRIX, MF_TRANSFORM_ASYNC, MF_TRANSFORM_ASYNC_UNLOCK,
+    MFMediaType_Video, MFNominalRange_16_235, MFSampleExtension_CleanPoint, MFT_ENUM_HARDWARE_URL_Attribute, MFT_MESSAGE_COMMAND_DRAIN,
+    MFT_MESSAGE_NOTIFY_BEGIN_STREAMING, MFT_MESSAGE_NOTIFY_END_OF_STREAM, MFT_MESSAGE_NOTIFY_START_OF_STREAM, MFT_OUTPUT_DATA_BUFFER,
+    MFT_OUTPUT_STREAM_PROVIDES_SAMPLES, MFVideoFormat_H264, MFVideoFormat_NV12, MFVideoInterlace_Progressive, MFVideoPrimaries_BT709, MFVideoTransFunc_709,
+    MFVideoTransferMatrix_BT709, eAVEncCommonRateControlMode_CBR, eAVEncCommonRateControlMode_PeakConstrainedVBR,
 };
 use windows::Win32::System::Variant::VARIANT;
 use windows::core::Interface;
+
+/// `CODECAPI_AVEncCommonQualityVsSpeed`: towards speed (0 fastest, 100 slowest and best).
+const QUALITY_VS_SPEED: u32 = 33;
 
 use super::gpu::ensure_com;
 use super::mft::{MfApi, friendly_name};
@@ -188,7 +191,7 @@ impl MfEncoder {
         Ok(enc)
     }
 
-    /// Rate control, key frame distance and no B-frames, through `ICodecAPI` where the MFT has it.
+    /// Rate control, key frame distance, no B-frames and a fast preset, through `ICodecAPI` where the MFT has it.
     /// Before the media types: some encoders read them only then. A setting an encoder refuses is
     /// logged; one that has no `ICodecAPI` at all keeps its defaults (and the bitrate of its type).
     fn set_codec_api(&self, cfg: &EncConfig) {
@@ -203,6 +206,9 @@ impl MfEncoder {
             (CODECAPI_AVEncCommonMaxBitRate, cfg.max_bitrate_kbps.saturating_mul(1000), "peak bitrate"),
             (CODECAPI_AVEncMPVGOPSize, cfg.keyint, "key frame distance"),
             (CODECAPI_AVEncMPVDefaultBPictureCount, 0, "B-frames"),
+            // 0 is fastest, 100 best: the rate control holds the bitrate either way, and at the
+            // export's bitrates the faster presets (Quick Sync's target usage 5-6) look the same
+            (CODECAPI_AVEncCommonQualityVsSpeed, QUALITY_VS_SPEED, "speed"),
         ];
         for (key, value, what) in settings {
             let v = VARIANT::from(value);

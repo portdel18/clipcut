@@ -126,7 +126,14 @@ pub struct ImageSequenceSource {
     frames: Vec<Option<String>>,
     loader: FrameLoader,
     cache: FrameCache<usize>,
+    /// The last few decoded files by content: a run of identical files (a title holding still,
+    /// rendered once per frame) decodes once and shares one frame, so a GPU renderer that keeps
+    /// uploads by frame uploads it once too.
+    recent: std::sync::Mutex<std::collections::VecDeque<(Arc<[u8]>, Arc<VideoFrame>)>>,
 }
+
+/// How many distinct files [`ImageSequenceSource`] remembers by content.
+const RECENT_FILES: usize = 4;
 
 impl ImageSequenceSource {
     /// `frames`: path per frame (`None`: missing). The first present frame is decoded now (size,
@@ -166,8 +173,10 @@ impl ImageSequenceSource {
             file_size: None,
         };
         let cache = FrameCache::new(256 << 20);
-        cache.insert(frames.iter().position(Option::is_some).unwrap_or(0), Arc::new(frame));
-        Ok(Self { info, frames, loader, cache })
+        let frame = Arc::new(frame);
+        cache.insert(frames.iter().position(Option::is_some).unwrap_or(0), frame.clone());
+        let recent = std::sync::Mutex::new(std::collections::VecDeque::from([(Arc::from(bytes), frame)]));
+        Ok(Self { info, frames, loader, cache, recent })
     }
 
     pub fn frame_count(&self) -> usize {
@@ -190,8 +199,16 @@ impl ImageSequenceSource {
         }
         let path = self.frames.get(i).and_then(|f| f.as_deref()).ok_or(MediaError::NoStream("video"))?;
         let bytes = (self.loader)(path).map_err(|e| MediaError::Io(format!("{path}: {e}")))?;
+        let same = self.recent.lock().unwrap_or_else(std::sync::PoisonError::into_inner).iter().find(|(b, _)| **b == *bytes).map(|(_, f)| f.clone());
+        if let Some(f) = same {
+            self.cache.insert(i, f.clone());
+            return Ok(f);
+        }
         let f = Arc::new(decode_frame(path, &bytes)?.0);
         self.cache.insert(i, f.clone());
+        let mut recent = self.recent.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        recent.push_front((Arc::from(bytes), f.clone()));
+        recent.truncate(RECENT_FILES);
         Ok(f)
     }
 }
@@ -306,6 +323,26 @@ mod tests {
         let mut out = std::io::Cursor::new(Vec::new());
         img.write_to(&mut out, image::ImageFormat::Png).unwrap();
         out.into_inner()
+    }
+
+    #[test]
+    fn identical_files_decode_once_and_share_a_frame() {
+        // frames 0-2 the same picture (a title holding still), 3 another, 4 the first again
+        let files: HashMap<String, Vec<u8>> =
+            [("a0", 10), ("a1", 10), ("a2", 10), ("a3", 99), ("a4", 10)].iter().map(|(n, v)| (n.to_string(), png(8, 6, *v))).collect();
+        let reads = Arc::new(Mutex::new(0usize));
+        let r = reads.clone();
+        let loader: FrameLoader = Arc::new(move |p: &str| {
+            *r.lock().unwrap() += 1;
+            Ok(files[p].clone())
+        });
+        let names = ["a0", "a1", "a2", "a3", "a4"].map(|n| Some(n.to_string())).to_vec();
+        let s = ImageSequenceSource::new("a", names, FrameRate::FPS_24, loader).unwrap();
+        let f: Vec<Arc<VideoFrame>> = (0..5).map(|i| s.decode(i).unwrap()).collect();
+        assert!(Arc::ptr_eq(&f[0], &f[1]) && Arc::ptr_eq(&f[1], &f[2]), "one frame for the hold");
+        assert!(!Arc::ptr_eq(&f[2], &f[3]));
+        assert!(Arc::ptr_eq(&f[0], &f[4]), "still remembered after another picture");
+        assert_eq!(f[3].width, 8);
     }
 
     #[test]

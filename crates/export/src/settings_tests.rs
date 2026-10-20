@@ -1334,3 +1334,31 @@ fn own_importer_reads_32_bit_flac_at_full_scale() {
         }
     }
 }
+
+#[test]
+fn an_nv12_encoder_gets_the_frames_as_nv12() {
+    let (project, sequence, sources) = matte([0.8, 0.3, 0.1, 1.0], 64, 36, None);
+    let settings = ExportSettings { gpu_rendering: GpuRendering::Off, ..Default::default() };
+    let mut pipe = pipeline::Pipeline::new(project.clone(), sequence, &settings, false).unwrap();
+    let (rgba, _) = pipe.frame(0, &sources);
+    assert_eq!(rgba.len(), 64 * 36 * 4);
+    pipe.set_nv12(true);
+    assert!(pipe.nv12);
+    let (nv12, _) = pipe.frame(0, &sources);
+    let mut want = Vec::new();
+    rgba_to_nv12(&rgba, 64, 36, &mut want);
+    assert_eq!(nv12, want, "the RGBA frame's NV12");
+    // the planar conversion's values, interleaved
+    let (mut y, mut u, mut v) = (Vec::new(), Vec::new(), Vec::new());
+    rgba_to_yuv420_8(&rgba, 64, 36, &mut y, &mut u, &mut v);
+    assert_eq!(&nv12[..64 * 36], &y[..]);
+    assert!(nv12[64 * 36..].chunks(2).zip(u.iter().zip(&v)).all(|(p, (a, b))| p[0] == *a && p[1] == *b));
+    // HDR exports stay as they are, and so would an odd size
+    let mut hdr = pipeline::Pipeline::new(project.clone(), sequence, &settings, true).unwrap();
+    hdr.set_nv12(true);
+    assert!(!hdr.nv12);
+    let odd = ExportSettings { frame_size: Some((63, 36)), ..settings.clone() };
+    let mut odd = pipeline::Pipeline::new(project, sequence, &odd, false).unwrap();
+    odd.set_nv12(true);
+    assert_eq!(odd.nv12, odd.w.is_multiple_of(2) && odd.h.is_multiple_of(2), "{}x{}", odd.w, odd.h);
+}

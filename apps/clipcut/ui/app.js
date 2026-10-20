@@ -3819,12 +3819,25 @@ async function exportClip() {
   $('#export-cancel').hidden = true;
   $('#export-close').hidden = false;
 }
+const fmtSecs = s => s < 60 ? `${s.toFixed(1)} s` : `${Math.floor(s / 60)} min ${Math.round(s % 60)} s`;
+/** Where an export's time went, from the counters before and after it: what drew and encoded the
+    pictures, and the slowest stages (worth sending along when an export is slow). */
+function exportDetail(a, b) {
+  const d = k => (b[k] || 0) - (a[k] || 0);
+  const gpu = d('gpuFrames'), cpu = d('cpuFrames'), hw = d('hardwareFrames');
+  const drawn = gpu && !cpu ? 'Pictures drawn on the graphics card' : gpu ? `Pictures drawn on the graphics card (${cpu} on the processor)` : 'Pictures drawn on the processor';
+  const enc = hw ? 'encoded on the graphics card' : "encoded by ClipCut's own encoder";
+  const names = { render: 'drawing', encode: 'encoding', convert: 'colour conversion', audio: 'sound', mux: 'writing', wait: 'waiting for pictures' };
+  const st = Object.entries(names).map(([k, n]) => [n, ((b.stages || {})[k] || 0) - ((a.stages || {})[k] || 0)]).filter(([, ms]) => ms >= 500).sort((x, y) => y[1] - x[1]);
+  return `${drawn}, ${enc}.` + (st.length ? ` Time: ${st.map(([n, ms]) => `${n} ${fmtSecs(ms / 1000)}`).join(', ')}.` : '');
+}
 /** Why the graphics card's encoder last failed (runExport's 'gpu-failed'). */
 const GPU_FAIL = { reason: '' };
 /** One export job, shown in the Export dialog: 'done', 'failed', 'cancelled', or 'gpu-failed'
  *  (the graphics card's encoder failed: worth trying again without it; GPU_FAIL says why). */
 async function runExport(path, choice, hardware, dlg) {
-  const before = await invoke('hardware_frames').catch(() => 0);
+  const before = await invoke('export_counters').catch(() => null);
+  $('#export-detail').textContent = '';
   let job;
   try {
     job = await invoke('export_as', { path, choice: choice.id, hardware });
@@ -3856,10 +3869,12 @@ async function runExport(path, choice, hardware, dlg) {
         $('#export-meta').className = 'meta err';
         return cancelled ? 'cancelled' : 'failed';
       }
-      const gpu = (await invoke('hardware_frames').catch(() => before)) > before;
+      const after = await invoke('export_counters').catch(() => null);
+      const secs = (performance.now() - t0) / 1000;
       $('#export-title').textContent = 'Export finished';
       $('#export-bar').style.width = '100%';
-      $('#export-meta').textContent = `Saved in ${((performance.now() - t0) / 1000).toFixed(1)} s${gpu ? ', encoded on the graphics card' : ''}.`;
+      $('#export-meta').textContent = `Saved in ${fmtSecs(secs)}${dur() > 0 ? ` (${(dur() / secs).toFixed(1)}× the video's own speed)` : ''}.`;
+      $('#export-detail').textContent = before && after ? exportDetail(before, after) : '';
       $('#export-meta').className = 'meta ok';
       $('#export-reveal').hidden = false;
       return 'done';

@@ -12,7 +12,7 @@ use filmcraft_time::FrameRate;
 use rayon::prelude::*;
 
 use crate::settings::{ExportEffects, Placement, Scaling, TextOverlay};
-use crate::{ExportError, ExportSettings, FrameRenderer, GpuRendering, Result, build_frame_renderer, note_gpu_fallback, note_gpu_frame};
+use crate::{ExportError, ExportSettings, FrameRenderer, GpuRendering, Rendered8, Result, build_frame_renderer, note_gpu_fallback, note_gpu_frame};
 
 /// Where the rendered picture lands in the output frame.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -136,6 +136,11 @@ pub(crate) struct Pipeline {
     /// Free the pool's float images when the export ends: a standalone export, not one part of a
     /// batch (`ExportSettings::part_of_batch`).
     trim_pool: bool,
+    /// The rendered picture is the output as it is (same size, nothing drawn over it, no limiter,
+    /// SDR without alpha): the renderer can make the output bytes itself.
+    direct: bool,
+    /// Frames are NV12 instead of RGBA8 (the encoder takes NV12: [`Pipeline::set_nv12`]).
+    pub nv12: bool,
 }
 
 impl Drop for Pipeline {
@@ -174,10 +179,20 @@ impl Pipeline {
             let h = u32::try_from(h).map_err(|_| ExportError::Unsupported("scaled picture height is too large".into()))?;
             filmcraft_project::validate_frame_size(w, h).map_err(ExportError::Unsupported)?;
         }
-        let (w, h) = filmcraft_render::output_size(q, geom.render_scale);
-        let w = u32::try_from(w).map_err(|_| ExportError::Unsupported("rendered picture width is too large".into()))?;
-        let h = u32::try_from(h).map_err(|_| ExportError::Unsupported("rendered picture height is too large".into()))?;
+        let (rw, rh) = filmcraft_render::output_size(q, geom.render_scale);
+        let w = u32::try_from(rw).map_err(|_| ExportError::Unsupported("rendered picture width is too large".into()))?;
+        let h = u32::try_from(rh).map_err(|_| ExportError::Unsupported("rendered picture height is too large".into()))?;
         filmcraft_project::validate_frame_size(w, h).map_err(ExportError::Unsupported)?;
+        let fx = &settings.effects;
+        let direct = (w, h) == (r.width, r.height)
+            && geom.content.is_none_or(|c| c == (rw, rh))
+            && geom.offset == (0, 0)
+            && !hdr_out
+            && !settings.keeps_alpha()
+            && !(fx.image_overlay.enabled && !fx.image_overlay.path.is_empty())
+            && !(fx.name_overlay.enabled && !fx.name_overlay.text.trim().is_empty())
+            && !fx.timecode_overlay.enabled
+            && !fx.video_limiter.enabled;
         let pipe = q.settings.color;
         let out_tf = hdr_out.then(|| filmcraft_color::OutputTransform::new(&pipe, pipe.working.output_space()));
         let opts = RenderOptions { scale: geom.render_scale, captions: settings.burn_captions, working_output: hdr_out, ..Default::default() };
@@ -221,19 +236,64 @@ impl Pipeline {
             out_tf,
             effects,
             overlay,
+            direct,
+            nv12: false,
         })
+    }
+
+    /// Hand the encoder NV12 frames when it `takes` them: SDR without alpha, even sizes.
+    pub fn set_nv12(&mut self, takes: bool) {
+        self.nv12 = takes && !self.hdr_out && !self.alpha && self.w.is_multiple_of(2) && self.h.is_multiple_of(2) && self.w > 0 && self.h > 0;
+    }
+
+    /// Bytes of one output frame: NV12 or RGBA8 (HDR frames are floats).
+    fn frame_len(&self, nv12: bool) -> usize {
+        let px = self.w as usize * self.h as usize;
+        if nv12 { px + (self.w as usize).div_ceil(2) * (self.h as usize).div_ceil(2) * 2 } else { px * 4 }
     }
 
     /// Output frame `f` as straight sRGB RGBA8 at the output size, or for HDR exports the encoded
     /// R'G'B' floats (3 per pixel).
     pub fn frame(&self, f: i64, sources: &dyn SourceProvider) -> (Vec<u8>, Vec<f32>) {
         let t = self.rate.tick_of(f);
+        let pool = self.renderer.as_ref().filter(|_| !filmcraft_render::plan::is_cpu_frame(&self.project, self.seq, t));
+        // nothing to do to the picture after rendering: the renderer makes the output bytes (on the
+        // GPU: resolved over black and read back as 8-bit, or converted to NV12 there as well)
+        if let Some(pool) = pool.filter(|_| self.direct) {
+            // the GPU's NV12 conversion takes widths that are a multiple of 4: RGBA8 otherwise
+            let gpu_nv12 = self.nv12 && self.w.is_multiple_of(4);
+            let asked = web_time::Instant::now();
+            let got = pool
+                .with(|r| {
+                    crate::note_lock_wait(asked.elapsed());
+                    r.render_8bit(&self.project, self.seq, t, self.opts, sources, gpu_nv12)
+                })
+                .flatten();
+            match got {
+                Some(Rendered8::Bytes(b)) if b.len() == self.frame_len(gpu_nv12) => {
+                    note_gpu_frame();
+                    if self.nv12 && !gpu_nv12 {
+                        let mut out = Vec::new();
+                        crate::rgba_to_nv12(&b, self.w as usize, self.h as usize, &mut out);
+                        return (out, Vec::new());
+                    }
+                    return (b, Vec::new());
+                }
+                Some(Rendered8::Image(img)) => {
+                    note_gpu_frame();
+                    return self.finish(img, t);
+                }
+                _ => {
+                    note_gpu_fallback();
+                    return self.finish(filmcraft_render::render_sequence(&self.project, self.seq, t, self.opts, sources), t);
+                }
+            }
+        }
         // The registered GPU renderer goes first; `None` (no adapter, a plan the GPU cannot
         // draw, any internal error) falls back to the CPU reference renderer below. A frame the
         // planner hands back as one CPU image anyway (an adjustment layer, a complex transition,
         // HDR) does not take a pooled renderer: it would render on the CPU inside the pool, as
         // many frames at a time as there are renderers instead of one per export thread.
-        let pool = self.renderer.as_ref().filter(|_| !filmcraft_render::plan::is_cpu_frame(&self.project, self.seq, t));
         let gpu = match pool {
             Some(pool) => {
                 let asked = web_time::Instant::now();
@@ -257,6 +317,12 @@ impl Pipeline {
                 filmcraft_render::render_sequence(&self.project, self.seq, t, self.opts, sources)
             }
         };
+        self.finish(img, t)
+    }
+
+    /// The rendered picture `img` of time `t` as the output frame: placed, overlays drawn,
+    /// limited, and as RGBA8 (NV12 for an NV12 encoder) or HDR floats.
+    fn finish(&self, img: Image, t: filmcraft_time::Tick) -> (Vec<u8>, Vec<f32>) {
         let mut img = self.place(img);
         self.overlays(&mut img, t);
         let lim = &self.effects.video_limiter;
@@ -279,6 +345,11 @@ impl Pipeline {
         filmcraft_frame::pool::recycle_f32(img.px);
         if lim.enabled {
             limit_rgba8(&mut rgba, lim.min_percent, lim.max_percent);
+        }
+        if self.nv12 {
+            let mut out = Vec::new();
+            crate::rgba_to_nv12(&rgba, self.w as usize, self.h as usize, &mut out);
+            return (out, Vec::new());
         }
         (rgba, Vec::new())
     }

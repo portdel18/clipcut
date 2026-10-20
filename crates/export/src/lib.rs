@@ -749,6 +749,18 @@ pub trait VideoEncoder: Send {
     fn pass_stats(&self) -> Option<filmcraft_h264enc::PassStats> {
         None
     }
+    /// Whether [`VideoEncoder::encode_nv12`] takes the pictures: the export then hands every
+    /// picture over as NV12 (converted on the GPU where it can), instead of RGBA8 for the encoder
+    /// to convert.
+    fn takes_nv12(&self) -> bool {
+        false
+    }
+    /// [`VideoEncoder::encode`] of an SDR picture given as NV12: `width` × `height` luma bytes,
+    /// then interleaved Cb Cr at half size, BT.709 limited range ([`rgba_to_nv12`]).
+    fn encode_nv12(&mut self, width: u32, height: u32, nv12: &[u8], index: u64) -> Result<Vec<EncodedPacket>> {
+        let _ = (width, height, nv12, index);
+        Err(ExportError::Unsupported("this encoder takes RGBA pictures".into()))
+    }
 }
 
 /// Audio encoder (AAC) plugged in by codec crates; PCM is built in.
@@ -921,6 +933,32 @@ pub trait FrameRenderer: Send {
         opts: filmcraft_render::RenderOptions,
         sources: &dyn SourceProvider,
     ) -> Option<filmcraft_render::Image>;
+
+    /// One frame of an 8-bit SDR export, opaque over black, the conversion done by the renderer:
+    /// [`Rendered8::Bytes`] holds straight sRGB RGBA8 (as
+    /// [`filmcraft_render::Image::over_black_rgba8`] makes it), or with `nv12` the NV12 of that
+    /// ([`rgba_to_nv12`]). A renderer that can't make them returns the float picture or `None`
+    /// (the CPU renders the frame), as [`FrameRenderer::render`] does.
+    fn render_8bit(
+        &mut self,
+        project: &Project,
+        seq: ItemId,
+        t: Tick,
+        opts: filmcraft_render::RenderOptions,
+        sources: &dyn SourceProvider,
+        nv12: bool,
+    ) -> Option<Rendered8> {
+        let _ = nv12;
+        self.render(project, seq, t, opts, sources).map(Rendered8::Image)
+    }
+}
+
+/// A frame from [`FrameRenderer::render_8bit`].
+pub enum Rendered8 {
+    /// The output bytes, in the format asked for, at the output size.
+    Bytes(Vec<u8>),
+    /// The frame as [`FrameRenderer::render`] returns it, for the export to convert.
+    Image(filmcraft_render::Image),
 }
 
 /// Builds the frame renderer for one export, or `None` when this host cannot (no adapter).
@@ -1575,6 +1613,39 @@ pub fn rgba_to_yuv420_8(rgba: &[u8], w: usize, h: usize, y: &mut Vec<u8>, u: &mu
         for cx in 0..cw {
             ur[cx] = (128.0 + 224.0 * us[cx] / cnt[cx]).round().clamp(1.0, 254.0) as u8;
             vr[cx] = (128.0 + 224.0 * vs[cx] / cnt[cx]).round().clamp(1.0, 254.0) as u8;
+        }
+    });
+}
+
+/// [`rgba_to_yuv420_8`] written as NV12 in one pass: `w` × `h` luma bytes, then the Cb Cr pairs
+/// interleaved, `w.div_ceil(2)` pairs a row.
+pub fn rgba_to_nv12(rgba: &[u8], w: usize, h: usize, out: &mut Vec<u8>) {
+    let (cw, ch) = (w.div_ceil(2), h.div_ceil(2));
+    out.resize(w * h + cw * ch * 2, 0);
+    if w == 0 || h == 0 || rgba.len() < w * h * 4 {
+        return;
+    }
+    let (y, uv) = out.split_at_mut(w * h);
+    y.par_chunks_mut(w * 2).zip(uv.par_chunks_mut(cw * 2)).enumerate().for_each(|(cy, (yr, uvr))| {
+        let rows = yr.len() / w;
+        let mut us = vec![0f32; cw];
+        let mut vs = vec![0f32; cw];
+        let mut cnt = vec![0f32; cw];
+        for dy in 0..rows {
+            let row = cy * 2 + dy;
+            let src = &rgba[row * w * 4..(row + 1) * w * 4];
+            for x in 0..w {
+                let (r, g, b) = (src[x * 4] as f32 / 255.0, src[x * 4 + 1] as f32 / 255.0, src[x * 4 + 2] as f32 / 255.0);
+                let yy = 0.2126 * r + 0.7152 * g + 0.0722 * b;
+                yr[dy * w + x] = (16.0 + 219.0 * yy).round().clamp(1.0, 254.0) as u8;
+                us[x / 2] += (b - yy) / 1.8556;
+                vs[x / 2] += (r - yy) / 1.5748;
+                cnt[x / 2] += 1.0;
+            }
+        }
+        for cx in 0..cw {
+            uvr[cx * 2] = (128.0 + 224.0 * us[cx] / cnt[cx]).round().clamp(1.0, 254.0) as u8;
+            uvr[cx * 2 + 1] = (128.0 + 224.0 * vs[cx] / cnt[cx]).round().clamp(1.0, 254.0) as u8;
         }
     });
 }

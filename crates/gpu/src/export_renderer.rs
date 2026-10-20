@@ -115,7 +115,8 @@ impl ExportRenderer {
                 let options = wgpu::RequestAdapterOptions { power_preference: wgpu::PowerPreference::HighPerformance, ..Default::default() };
                 let adapter = pollster::block_on(instance.request_adapter(&options)).ok()?;
                 // a software adapter (WARP, llvmpipe) composites slower than the CPU renderer
-                if adapter.get_info().device_type == wgpu::DeviceType::Cpu {
+                // (`FILMCRAFT_GPU_SOFTWARE=1` lets tests run the GPU path on one, such as lavapipe)
+                if adapter.get_info().device_type == wgpu::DeviceType::Cpu && std::env::var_os("FILMCRAFT_GPU_SOFTWARE").is_none() {
                     log::info!("GPU export: only a software adapter ({}); exports render on the CPU", adapter.get_info().name);
                     return None;
                 }
@@ -159,6 +160,38 @@ impl ExportRenderer {
             FramePlan::Composite { .. } => None,
         }
     }
+
+    /// One frame of an 8-bit SDR export, opaque over black: the sRGB RGBA8 bytes, or with `nv12`
+    /// the NV12 bytes (BT.709 limited range), made and converted on the GPU; or the float picture
+    /// when the planner rendered this frame on the CPU anyway (the caller converts it); `None`
+    /// when this frame must go to the CPU renderer.
+    pub fn render_8bit(&mut self, project: &Project, seq: ItemId, t: Tick, opts: RenderOptions, sources: &dyn SourceProvider, nv12: bool) -> Option<Export8> {
+        let plan = plan_frame(project, seq, t, opts, sources);
+        match &plan {
+            FramePlan::Image(img) => Some(Export8::Image(img.clone())),
+            FramePlan::Layers { .. } => {
+                if device_failed() {
+                    return None;
+                }
+                let prep = prepare(&plan);
+                let (w, h, data) = self.compositor.render_export_8bit(&plan, Some(&prep), nv12)?;
+                if device_failed() {
+                    return None;
+                }
+                timing::add_frame();
+                Some(Export8::Bytes { w, h, data })
+            }
+            FramePlan::Composite { .. } => None,
+        }
+    }
+}
+
+/// What [`ExportRenderer::render_8bit`] made of a frame.
+pub enum Export8 {
+    /// RGBA8 or NV12 bytes of a `w` × `h` picture, as asked.
+    Bytes { w: u32, h: u32, data: Vec<u8> },
+    /// The frame as a float picture (premultiplied linear RGBA), rendered on the CPU.
+    Image(Image),
 }
 
 #[cfg(test)]
@@ -289,6 +322,40 @@ mod tests {
         let cpu = filmcraft_render::render_sequence(&p, seq, t, RenderOptions::default(), &m);
         let gpu = r.render(&p, seq, t, RenderOptions::default(), &m).expect("GPU rendered the frame");
         assert_parity(&cpu, &gpu, "transformed");
+    }
+
+    /// The 8-bit read-back is the float picture over black, and the GPU's NV12 is the CPU's
+    /// conversion of that picture (`filmcraft_export::rgba_to_nv12`, the encoders' input).
+    #[test]
+    fn eight_bit_and_nv12_match_cpu() {
+        let Some(mut r) = ExportRenderer::new() else {
+            eprintln!("SKIPPED (gpu export parity): no adapter");
+            return;
+        };
+        let (p, seq, m) = project(true);
+        let t = filmcraft_time::FrameRate::FPS_24.tick_of(10);
+        let cpu = filmcraft_render::render_sequence(&p, seq, t, RenderOptions::default(), &m);
+        let bytes = |nv12: bool, r: &mut ExportRenderer| match r.render_8bit(&p, seq, t, RenderOptions::default(), &m, nv12) {
+            Some(Export8::Bytes { w, h, data }) => (w as usize, h as usize, data),
+            _ => panic!("GPU bytes"),
+        };
+        let (w, h, rgba) = bytes(false, &mut r);
+        assert_eq!((w, h), (cpu.w, cpu.h));
+        assert_eq!(rgba.len(), w * h * 4);
+        let mut d: Vec<u8> = cpu.over_black_rgba8().iter().zip(&rgba).map(|(a, b)| a.abs_diff(*b)).collect();
+        d.sort_unstable();
+        let (p99, mean) = (d[d.len() * 99 / 100], d.iter().map(|v| f64::from(*v)).sum::<f64>() / d.len() as f64);
+        eprintln!("8-bit: GPU vs CPU over-black p99 {p99}, mean {mean:.3}");
+        assert!(p99 <= 6 && mean < 1.5, "8-bit read-back p99 {p99}, mean {mean:.3}");
+        let (_, _, nv12) = bytes(true, &mut r);
+        let mut want = Vec::new();
+        filmcraft_export::rgba_to_nv12(&rgba, w, h, &mut want);
+        assert_eq!(nv12.len(), want.len());
+        let off = nv12.iter().zip(&want).map(|(a, b)| a.abs_diff(*b)).max().unwrap_or(0);
+        eprintln!("NV12: GPU vs CPU conversion of the same picture, max {off}");
+        assert!(off <= 1, "NV12 differs by {off}");
+        // an odd size for the GPU conversion: no NV12 from it (the export converts on the CPU)
+        assert!(r.compositor.render_export_8bit(&filmcraft_render::plan::FramePlan::Image(Image::new(6, 4)), None, true).is_none());
     }
 
     #[test]

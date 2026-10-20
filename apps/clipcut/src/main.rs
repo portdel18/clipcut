@@ -169,6 +169,22 @@ fn hardware_frames() -> u64 {
     filmcraft_export::hw_encode_stats().frames
 }
 
+/// The export counters of this run, read before and after an export to say where its time went:
+/// pictures the graphics card encoded and composited, those composited on the processor, and each
+/// stage's time in milliseconds.
+#[tauri::command]
+fn export_counters() -> serde_json::Value {
+    let gpu = filmcraft_export::gpu_render_stats();
+    let stages: serde_json::Map<String, serde_json::Value> =
+        filmcraft_export::stage_times().into_iter().map(|(s, ns)| (s.name().to_string(), serde_json::json!(ns / 1_000_000))).collect();
+    serde_json::json!({
+        "hardwareFrames": filmcraft_export::hw_encode_stats().frames,
+        "gpuFrames": gpu.frames,
+        "cpuFrames": gpu.fallbacks,
+        "stages": stages,
+    })
+}
+
 #[tauri::command]
 fn export_status(job: u64, app: tauri::State<'_, App>) -> Option<JobStatus> {
     lock(&app.studio).job(job)
@@ -235,6 +251,21 @@ impl filmcraft_export::FrameRenderer for GpuFrameRenderer {
         sources: &dyn filmcraft_render::SourceProvider,
     ) -> Option<filmcraft_render::Image> {
         self.0.render(project, seq, t, opts, sources)
+    }
+
+    fn render_8bit(
+        &mut self,
+        project: &filmcraft_project::Project,
+        seq: filmcraft_project::ItemId,
+        t: filmcraft_time::Tick,
+        opts: filmcraft_render::RenderOptions,
+        sources: &dyn filmcraft_render::SourceProvider,
+        nv12: bool,
+    ) -> Option<filmcraft_export::Rendered8> {
+        Some(match self.0.render_8bit(project, seq, t, opts, sources, nv12)? {
+            filmcraft_gpu::Export8::Bytes { data, .. } => filmcraft_export::Rendered8::Bytes(data),
+            filmcraft_gpu::Export8::Image(img) => filmcraft_export::Rendered8::Image(img),
+        })
     }
 }
 
@@ -306,6 +337,7 @@ fn export_test(input: &str, output: &str, report: &str, mode: &str) -> i32 {
         let info = s.info().map_err(|e| e.to_string())?;
         s.set_canvas(info.width, info.height).map_err(|e| e.to_string())?;
         let frames0 = filmcraft_export::hw_encode_stats().frames;
+        let gpu0 = filmcraft_export::gpu_render_stats();
         let started = std::time::Instant::now();
         let job = s.export_as_with(output, "social", mode == "hardware").map_err(|e| format!("export: {e}"))?;
         loop {
@@ -327,6 +359,10 @@ fn export_test(input: &str, output: &str, report: &str, mode: &str) -> i32 {
         steps.insert("seconds".into(), serde_json::json!(secs));
         steps.insert("fps".into(), serde_json::json!(frames / secs.max(1e-6)));
         steps.insert("hardwareFrames".into(), serde_json::json!(filmcraft_export::hw_encode_stats().frames - frames0));
+        let gpu = filmcraft_export::gpu_render_stats();
+        steps.insert("gpuFrames".into(), serde_json::json!(gpu.frames - gpu0.frames));
+        steps.insert("cpuFrames".into(), serde_json::json!(gpu.fallbacks - gpu0.fallbacks));
+        steps.insert("stagesMs".into(), export_counters()["stages"].clone());
         steps.insert("exported".into(), serde_json::to_value(&back).unwrap_or_default());
         Ok(())
     })();
@@ -417,6 +453,7 @@ fn main() {
             export_choices,
             export_as,
             hardware_frames,
+            export_counters,
             cancel_export,
             reveal,
             note_problem,

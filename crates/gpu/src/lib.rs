@@ -43,8 +43,9 @@ pub mod export_renderer;
 pub mod fx;
 pub mod lut;
 pub mod mask;
+mod readout;
 mod transition;
-pub use export_renderer::ExportRenderer;
+pub use export_renderer::{Export8, ExportRenderer};
 pub use lut::GpuLut;
 pub use mask::GpuMask;
 
@@ -82,6 +83,10 @@ pub struct GpuCompositor {
     backdrop: Option<(wgpu::Texture, wgpu::TextureView, (u32, u32))>,
     output: Option<(wgpu::Texture, wgpu::TextureView, (u32, u32))>,
     accum_readback_buf: Option<(wgpu::Buffer, u64)>,
+    /// The 8-bit export's NV12 conversion and read-back buffers (`None` on a device without
+    /// compute shaders). Made with the compositor: its error scope must not interleave with
+    /// another thread's on the shared device.
+    readout: Option<readout::Readout>,
     uploads: HashMap<(usize, u32, u32), Uploaded>,
     clock: u64,
     dummy: wgpu::TextureView,
@@ -418,6 +423,7 @@ impl GpuCompositor {
             backdrop: None,
             output: None,
             accum_readback_buf: None,
+            readout: readout::Readout::new(device),
             uploads: HashMap::new(),
             clock: 0,
             dummy,
@@ -978,6 +984,45 @@ impl GpuCompositor {
         self.queue.submit([enc.finish()]);
         export_renderer::timing::add_submit(t.elapsed());
         self.map_accumulator(size)
+    }
+
+    /// Export rendering for 8-bit SDR outputs: `plan` composited and resolved over black to sRGB
+    /// RGBA8 (what [`filmcraft_render::Image::over_black_rgba8`] makes of the float picture), read
+    /// back as RGBA8, or with `nv12` as NV12 (BT.709 limited range) converted on the GPU. None
+    /// where [`render_export_prepared`](Self::render_export_prepared) is None, for NV12 of a size
+    /// the conversion doesn't take (width a multiple of 4, even height) or a device without
+    /// compute shaders, and for a failed read-back.
+    pub fn render_export_8bit(&mut self, plan: &FramePlan, prep: Option<&PreparedPlan>, nv12: bool) -> Option<(u32, u32, Vec<u8>)> {
+        if matches!(plan, FramePlan::Composite { .. }) {
+            return None;
+        }
+        let (w, h) = match plan {
+            FramePlan::Layers { width, height, .. } => (*width as u32, *height as u32),
+            FramePlan::Image(img) => (img.w as u32, img.h as u32),
+            FramePlan::Composite { .. } => return None,
+        };
+        let (w, h) = (w.max(1), h.max(1));
+        if nv12 && (!w.is_multiple_of(4) || !h.is_multiple_of(2) || self.readout.is_none()) {
+            return None;
+        }
+        let t = std::time::Instant::now();
+        let (view, (w, h)) = self.render_plan(plan, prep, true, true);
+        let mut enc = self.device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("filmcraft-export-8bit") });
+        let (device, queue) = (self.device.clone(), self.queue.clone());
+        let tex = self.output.as_ref().map(|(t, _, _)| t.clone())?;
+        let ro = self.readout.as_mut()?;
+        if nv12 {
+            ro.record_nv12(&device, &queue, &mut enc, &view, w, h)?;
+            queue.submit([enc.finish()]);
+            export_renderer::timing::add_submit(t.elapsed());
+            let out = ro.take_nv12(&device)?;
+            return Some((w, h, out));
+        }
+        let row = ro.record_rgba(&device, &mut enc, &tex, w, h)?;
+        queue.submit([enc.finish()]);
+        export_renderer::timing::add_submit(t.elapsed());
+        let out = ro.take_rgba(&device, w, h, row)?;
+        Some((w, h, out))
     }
 
     /// Run the effect stage of a layer alone: `frame` decoded into its working image and `fx`
