@@ -76,6 +76,9 @@ pub struct MfEncoder {
     wanted: u32,
     /// Output ready (`METransformHaveOutput`) not taken yet.
     ready: u32,
+    /// Packets out and output format changes so far (for error messages).
+    outputs: u64,
+    changes: u32,
     width: u32,
     height: u32,
     duration: i64,
@@ -141,6 +144,8 @@ impl MfEncoder {
             out_size: 0,
             wanted: 0,
             ready: 0,
+            outputs: 0,
+            changes: 0,
             width: cfg.width,
             height: cfg.height,
             duration,
@@ -406,7 +411,10 @@ impl MfEncoder {
         Ok(())
     }
 
-    /// One packet, or `None` when the MFT needs more input.
+    /// One packet, or `None` when the MFT needs more input. An asynchronous MFT may be asked for
+    /// output only once per `METransformHaveOutput`: after a format change (Intel Quick Sync makes
+    /// one on its first output) it sends another, and asking again before that is refused
+    /// (E_UNEXPECTED), so the change gives `None` there.
     fn output(&mut self, api: &MfApi) -> Result<Option<Packet>, String> {
         for _ in 0..4 {
             let sample = if self.provides_samples { None } else { Some(api.empty_sample(self.out_size)?.0) };
@@ -421,11 +429,21 @@ impl MfEncoder {
             match r {
                 Ok(()) => {
                     let sample = sample.ok_or_else(|| format!("{}: produced no sample", self.name))?;
+                    self.outputs = self.outputs.saturating_add(1);
                     return self.packet(&sample).map(Some);
                 }
                 Err(e) if e.code() == MF_E_TRANSFORM_NEED_MORE_INPUT => return Ok(None),
-                Err(e) if e.code() == MF_E_TRANSFORM_STREAM_CHANGE => self.renegotiate()?,
-                Err(e) => return Err(format!("{}: ProcessOutput failed: {e}", self.name)),
+                Err(e) if e.code() == MF_E_TRANSFORM_STREAM_CHANGE => {
+                    self.renegotiate()?;
+                    self.changes = self.changes.saturating_add(1);
+                    if self.events.is_some() {
+                        return Ok(None);
+                    }
+                }
+                Err(e) => {
+                    let mode = if self.events.is_some() { "asynchronous" } else { "synchronous" };
+                    return Err(format!("{}: ProcessOutput failed: {e} (after {} pictures, {} format changes, {mode})", self.name, self.outputs, self.changes));
+                }
             }
         }
         Err(format!("{}: keeps changing its output format", self.name))
