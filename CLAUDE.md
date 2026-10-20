@@ -96,6 +96,14 @@ remote `upstream`). Read `README.md` for what it is and the roadmap.
   `Studio::delete_keyframes` / `move_keyframes` (every property keyed at that time, the sound's
   volume too). A main clip's own fades are one-sided transitions on its A1 sound (`fade_alone`), and
   `transitions::lay_out` keeps them on the clip's edges through main-track edits.
+- After a property's last keyframe it goes back to its first keyframe's value: one more keyframe a
+  frame later that `returns.rs` keeps (listed in a clip marker named "ClipCut return", hidden from
+  `keys_of`/`keyframes_at`). Every keyframe edit runs inside `with_returns` (take them off, edit,
+  put them back); a new keyframe edit must too. `hold` in that marker turns them off
+  (`Studio::set_hold`). Ducked music's volume gets none.
+- Extract Audio (`Studio::extract_audio`, `lanes.rs`) unlinks a clip's sound and moves a main
+  clip's to a sound lane. Captions over words that play only on a lane stay on that lane's clip
+  (`lane_sound` in `captions.rs`).
 - Disk is tight here: `rm -rf target/debug/incremental` when a build fails with "no space left".
 - Interface copy: plain words from the user's side, errors that say what went wrong and how to fix it.
   One dark theme from the tokens at the top of `ui/app.css`; amber (`--accent`) marks the active thing.

@@ -266,6 +266,18 @@ pub async fn add_text(seconds: f64, duration: f64, text: String, style: serde_js
 }
 
 #[tauri::command]
+pub async fn extract_audio(clip: u64, app: tauri::State<'_, App>) -> Result<ClipResult, String> {
+    let (studio, player) = (app.studio.clone(), app.player.clone());
+    blocking(move || {
+        lock(&player).stop();
+        let mut s = lock(&studio);
+        let sound = s.extract_audio(clip).map_err(|e| e.to_string())?;
+        Ok(ClipResult { timeline: s.timeline(), clips: vec![sound] })
+    })
+    .await
+}
+
+#[tauri::command]
 pub async fn move_clip(clip: u64, lane: String, seconds: f64, app: tauri::State<'_, App>) -> Result<TimelineView, String> {
     edit(&app, move |s| s.move_clip(clip, &lane, seconds)).await
 }
@@ -519,6 +531,11 @@ pub async fn delete_keyframes(clip: u64, seconds: f64, app: tauri::State<'_, App
 #[tauri::command]
 pub async fn move_keyframes(clip: u64, from: f64, to: f64, app: tauri::State<'_, App>) -> Result<TimelineView, String> {
     edit(&app, move |s| s.move_keyframes(clip, from, to)).await
+}
+
+#[tauri::command]
+pub async fn set_hold(clip: u64, hold: bool, app: tauri::State<'_, App>) -> Result<TimelineView, String> {
+    edit(&app, move |s| s.set_hold(clip, hold)).await
 }
 
 #[tauri::command]

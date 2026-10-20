@@ -51,9 +51,14 @@ fn own_keys(track: &Track, item: &TrackItem) -> Vec<KeyTrack> {
             if !p.is_animated() {
                 return None;
             }
+            // the way back after the last keyframe is ClipCut's own (`returns`): not shown
+            let shown: Vec<&filmcraft_project::Keyframe> = p.keyframes.iter().filter(|k| !crate::returns::is_return(item, eff, param, k.time)).collect();
+            if shown.is_empty() {
+                return None;
+            }
             Some(KeyTrack {
                 prop,
-                times: p.keyframes.iter().map(|k| timeline_at(item, k.time).seconds()).collect(),
+                times: shown.iter().map(|k| timeline_at(item, k.time).seconds()).collect(),
                 smooth: p.keyframes.iter().any(|k| k.interp != filmcraft_project::Interpolation::Linear),
             })
         })
@@ -126,10 +131,12 @@ impl Studio {
         let before = keys_of(q, track, item).iter().find(|k| k.prop == prop).map_or(0, |k| k.times.len());
         let label = format!("Keyframe {}", capital(prop));
         self.group(&label, |s| {
-            for c in &targets {
-                s.session.execute("effects.addKeyframe", json!({"clip": c, "effect": eff, "param": param, "time": t.0})).map_err(engine)?;
-            }
-            Ok(())
+            s.with_returns(&[clip], |s| {
+                for c in &targets {
+                    s.session.execute("effects.addKeyframe", json!({"clip": c, "effect": eff, "param": param, "time": t.0})).map_err(engine)?;
+                }
+                Ok(())
+            })
         })?;
         let (q, track, item) = self.find(clip)?;
         let after = keys_of(q, track, item).iter().find(|k| k.prop == prop).map_or(0, |k| k.times.len());
@@ -160,7 +167,12 @@ impl Studio {
                 if !p.is_animated() {
                     continue;
                 }
-                found.extend(p.keyframes.iter().filter(|k| (timeline_at(i, k.time).0 - t.0).abs() <= half.0).map(|k| (c, *eff, *param, k.time)));
+                found.extend(
+                    p.keyframes
+                        .iter()
+                        .filter(|k| (timeline_at(i, k.time).0 - t.0).abs() <= half.0 && !crate::returns::is_return(i, eff, param, k.time))
+                        .map(|k| (c, *eff, *param, k.time)),
+                );
             }
         }
         Ok(found)
@@ -174,10 +186,12 @@ impl Studio {
             return Err(Error::Invalid("there is no keyframe there".into()));
         }
         self.group("Delete Keyframe", |s| {
-            for (c, eff, param, mt) in keys {
-                s.session.execute("effects.deleteKeyframe", json!({"clip": c, "effect": eff, "param": param, "mediaTime": mt.0})).map_err(engine)?;
-            }
-            Ok(())
+            s.with_returns(&[clip], |s| {
+                for (c, eff, param, mt) in keys {
+                    s.session.execute("effects.deleteKeyframe", json!({"clip": c, "effect": eff, "param": param, "mediaTime": mt.0})).map_err(engine)?;
+                }
+                Ok(())
+            })
         })
     }
 
@@ -197,14 +211,16 @@ impl Studio {
             moves.push((c, eff, param, mt, i.source_time_at(to.clamp(i.start, last))));
         }
         self.group("Move Keyframe", |s| {
-            for (c, eff, param, mt, dest) in moves {
-                if dest != mt {
-                    s.session
-                        .execute("effects.moveKeyframe", json!({"clip": c, "effect": eff, "param": param, "mediaTime": mt.0, "to": dest.0}))
-                        .map_err(engine)?;
+            s.with_returns(&[clip], |s| {
+                for (c, eff, param, mt, dest) in moves {
+                    if dest != mt {
+                        s.session
+                            .execute("effects.moveKeyframe", json!({"clip": c, "effect": eff, "param": param, "mediaTime": mt.0, "to": dest.0}))
+                            .map_err(engine)?;
+                    }
                 }
-            }
-            Ok(())
+                Ok(())
+            })
         })
     }
 
@@ -232,10 +248,13 @@ impl Studio {
             return Err(Error::Invalid("this clip has no keyframes yet".into()));
         }
         self.group(if smooth { "Smooth Keyframes" } else { "Steady Keyframes" }, |s| {
-            for op in ops {
-                s.session.execute("effects.setInterpolation", op).map_err(engine)?;
-            }
-            Ok(())
+            s.with_returns(&[clip], |s| {
+                for op in ops {
+                    // the way back (`returns`) is off while this runs: its keyframe is not there
+                    let _ = s.session.execute("effects.setInterpolation", op);
+                }
+                Ok(())
+            })
         })
     }
 }

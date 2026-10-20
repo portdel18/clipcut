@@ -232,6 +232,11 @@ impl Studio {
             return Err(Error::Invalid("nothing to change".into()));
         }
         let label = props.as_object().and_then(|o| o.keys().find(|k| *k != "at")).map(|k| label_for(k)).unwrap_or("Change");
+        // a value set at a time on an animated property is a keyframe: the way back after the last
+        // one follows it (`returns`)
+        if props.get("at").is_some() {
+            return self.group_follow(label, merge, |s| s.with_returns(clips, |s| s.apply_props(clips, props)));
+        }
         // speed moves the main track, and the captions follow it
         self.group_follow(label, merge, |s| s.apply_props(clips, props))
     }
