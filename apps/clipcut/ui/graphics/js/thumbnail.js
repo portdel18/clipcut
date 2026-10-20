@@ -318,8 +318,57 @@ async function setImage(which, f) {
     media[which] = await loadImageFile(f); media[which + 'Name'] = f.name;
     if (which === 'photo') { th.panX = 0; th.panY = 0; binds.zoom.set(1); }
     mediaUI(); thRefresh();
-  } catch (err) { toast('That file couldn’t be opened as an image. Try a JPEG, PNG, or WebP.'); }
+    return true;
+  } catch (err) { toast('That file couldn’t be opened as an image. Try a JPEG, PNG, or WebP.'); return false; }
 }
+// the app's own stills (ClipCut: a frame of its video) come in as the photo
+window.CS.hosted.onPhoto(f => setImage('photo', f));
+
+/* A frame of a video as the photo: the video plays in a dialog, the slider picks the frame */
+const FR = { url: null, name: '', fps: 30 };
+const frVideo = $('#frame-video');
+function fmtAt(t) { const m = Math.floor(t / 60); return `${m}:${(t - m * 60).toFixed(2).padStart(5, '0')}`; }
+async function openFramePicker(f) {
+  if (FR.url) URL.revokeObjectURL(FR.url);
+  FR.url = URL.createObjectURL(f);
+  FR.name = f.name.replace(/\.[^.]+$/, '');
+  frVideo.src = FR.url;
+  try {
+    await new Promise((res, rej) => { frVideo.onloadeddata = res; frVideo.onerror = () => rej(new Error('bad')); });
+  } catch (_) { toast('That video couldn’t be opened here. Try an MP4 (H.264) or WebM file.'); return; }
+  const r = $('#frame-time');
+  r.max = String(Math.max(0, frVideo.duration - 0.001));
+  r.value = String(Math.min(frVideo.duration / 2, 1));
+  frVideo.currentTime = +r.value;
+  $('#frame-at').textContent = fmtAt(+r.value);
+  $('#frame-name').textContent = f.name;
+  $('#frame-dlg').showModal();
+}
+function seekFrame(t) {
+  const r = $('#frame-time');
+  t = Math.min(Math.max(0, t), +r.max);
+  r.value = String(t);
+  frVideo.currentTime = t;
+  $('#frame-at').textContent = fmtAt(t);
+}
+$('#frame-time').addEventListener('input', e => seekFrame(+e.target.value));
+$('#frame-prev').addEventListener('click', () => seekFrame(frVideo.currentTime - 1 / FR.fps));
+$('#frame-next').addEventListener('click', () => seekFrame(frVideo.currentTime + 1 / FR.fps));
+$('#frame-cancel').addEventListener('click', () => $('#frame-dlg').close());
+$('#frame-dlg').addEventListener('close', () => { frVideo.removeAttribute('src'); frVideo.load(); if (FR.url) { URL.revokeObjectURL(FR.url); FR.url = null; } });
+$('#frame-use').addEventListener('click', async () => {
+  const c = document.createElement('canvas');
+  c.width = frVideo.videoWidth; c.height = frVideo.videoHeight;
+  if (!c.width || !c.height) { toast('That frame couldn’t be read. Move the slider a little and try again.'); return; }
+  c.getContext('2d').drawImage(frVideo, 0, 0);
+  const blob = await new Promise(res => c.toBlob(res, 'image/png'));
+  if (!blob) { toast('That frame couldn’t be read. Move the slider a little and try again.'); return; }
+  const name = `${FR.name} ${fmtAt(frVideo.currentTime).replace(':', '.')}.png`;
+  $('#frame-dlg').close();
+  setImage('photo', new File([blob], name, { type: 'image/png' }));
+});
+$('#th-photo-video').addEventListener('click', () => $('#th-video-file').click());
+$('#th-video-file').addEventListener('change', e => { const f = e.target.files[0]; e.target.value = ''; if (f) openFramePicker(f); });
 for (const which of ['photo', 'inset']) {
   $(`#th-${which}-file`).addEventListener('change', e => { const f = e.target.files[0]; e.target.value = ''; if (f) setImage(which, f); });
 }
@@ -329,8 +378,10 @@ thViewer.addEventListener('dragover', e => { if ([...e.dataTransfer.items].some(
 thViewer.addEventListener('dragleave', () => thViewer.classList.remove('dropping'));
 thViewer.addEventListener('drop', e => {
   e.preventDefault(); thViewer.classList.remove('dropping');
-  const f = [...e.dataTransfer.files].find(x => x.type.startsWith('image/'));
-  if (f) setImage('photo', f); else toast('Drop an image file (JPEG, PNG, or WebP).');
+  const files = [...e.dataTransfer.files];
+  const f = files.find(x => x.type.startsWith('image/'));
+  const v = files.find(x => x.type.startsWith('video/'));
+  if (f) setImage('photo', f); else if (v) openFramePicker(v); else toast('Drop an image file (JPEG, PNG, or WebP), or a video to pick a frame from.');
 });
 function mediaUI() {
   for (const which of ['photo', 'inset']) {

@@ -1611,11 +1611,13 @@
           <div class="field">
             <div class="btn-row">
               <button class="btn" id="th-photo-pick" type="button">Choose photo</button>
+              <button class="btn" id="th-photo-video" type="button">From a video…</button>
               <button class="btn small" id="th-photo-clear" type="button" hidden>Remove</button>
             </div>
             <span class="fname" id="th-photo-name"></span>
             <input type="file" id="th-photo-file" accept="image/*" hidden>
-            <p class="hint">Drag the preview to move the photo; scroll to zoom. You can also drop an image on the preview.</p>
+            <input type="file" id="th-video-file" accept="video/*" hidden>
+            <p class="hint">Drag the preview to move the photo; scroll to zoom. You can also drop an image on the preview, or a video to pick one of its frames.</p>
           </div>
           <div class="row2">
             <div class="field"><label class="lbl" for="th-zoom">Zoom</label>
@@ -1965,6 +1967,24 @@
       <button class="btn" id="render-cancel">Cancel</button>
       <button class="btn" id="render-close" hidden>Done</button>
       <button class="btn primary" id="render-save" hidden>Download again</button>
+    </div>
+  </div>
+</dialog>
+
+<!-- A frame of a video, for the thumbnail's photo -->
+<dialog class="dlg" id="frame-dlg" aria-labelledby="frame-title">
+  <div class="dlg-in">
+    <h2 id="frame-title">Pick a frame</h2>
+    <div class="frame-stage"><video id="frame-video" muted playsinline preload="auto"></video></div>
+    <div class="field">
+      <label for="frame-time">Frame</label>
+      <input type="range" id="frame-time" min="0" max="1" step="0.001" value="0">
+      <div class="frame-meta"><button class="btn small" id="frame-prev" type="button" title="One frame back">◀</button><span class="mono" id="frame-at">0:00.00</span><button class="btn small" id="frame-next" type="button" title="One frame on">▶</button></div>
+    </div>
+    <p class="hint" id="frame-name"></p>
+    <div class="dlg-actions">
+      <button class="btn" id="frame-cancel" type="button">Cancel</button>
+      <button class="btn primary" id="frame-use" type="button">Use this frame</button>
     </div>
   </div>
 </dialog>

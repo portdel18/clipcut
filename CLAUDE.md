@@ -107,6 +107,9 @@ remote `upstream`). Read `README.md` for what it is and the roadmap.
   speed edit must call it); a clip marker "ClipCut pitch" turns it off. Freeze is the engine's
   Insert Frame Hold Segment after a razor of the clip and its sound, then `pack_main`. Remove a
   colour (`key.rs`) is Ultra Key; `pick_colour` renders the frame without keys.
+- Stills: `Studio::still_source` names the media frame under the playhead; `still_png` /
+  `save_still` (`src/graphics.rs`) encode it at the file's own size from `Studio::stills` (originals,
+  never proxies), and Thumbnails gets it through `CS.hosted.photo`.
 - Keys: every shortcut is an entry of `ACTIONS` in `app.js` (id, default `keys`, `fn`); the keydown
   handler looks presses up by `comboOf(e)` ("Ctrl+Shift+Z": letters by layout, other keys by
   `e.code`). A new shortcut is a new entry, never a key test in the handler. The user's changes are
