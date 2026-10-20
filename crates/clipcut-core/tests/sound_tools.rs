@@ -284,3 +284,42 @@ fn a_still_comes_from_the_clip_s_own_media_at_full_size() {
     assert!(s.still_source(0.5, Some(ids[1])).is_err(), "not under the playhead");
     assert!(s.still_source(99.0, None).is_err());
 }
+
+/// How periodic the left side is around `t` at period `p` samples: the normalised autocorrelation
+/// at one period (1 for a steady tone; noise and smearing take it down). Read in 1024-sample
+/// blocks, as the player reads.
+fn periodicity(s: &Studio, t: f64, p: usize) -> f64 {
+    let feed = s.audio_feed().unwrap();
+    let rate = f64::from(feed.sample_rate);
+    let at = (t * rate) as i64;
+    let mut left = Vec::new();
+    for b in 0..24 {
+        left.extend(feed.mix(at + b * 1024, 1024).iter().step_by(2).map(|v| f64::from(*v)));
+    }
+    let (mut xy, mut xx, mut yy) = (0.0, 1e-12, 1e-12);
+    for i in 0..left.len() - p {
+        xy += left[i] * left[i + p];
+        xx += left[i] * left[i];
+        yy += left[i + p] * left[i + p];
+    }
+    xy / (xx * yy).sqrt()
+}
+
+#[test]
+fn a_faster_voice_stays_clean() {
+    // a voice-like sound: a 150 Hz voice with its harmonics, swelling three times a second
+    let voice = "aevalsrc=(0.3*sin(2*PI*150*t)+0.2*sin(2*PI*300*t)+0.12*sin(2*PI*450*t)+0.08*sin(2*PI*750*t))*(0.6+0.4*sin(2*PI*3*t))";
+    let Some(path) = clip("ch-voice", voice, voice) else { return };
+    let mut s = Studio::new();
+    s.add_clip(path.to_str().unwrap()).unwrap();
+    let id = main(&s.timeline())[0];
+    let own = periodicity(&s, 0.3, 320);
+    for speed in [150.0, 200.0, 75.0] {
+        s.set_props(&[id], &serde_json::json!({"speed": speed}), None).unwrap();
+        let at = 0.3 * 100.0 / speed;
+        let p = periodicity(&s, at, 320);
+        eprintln!("at {speed}%: periodicity {p:.4} (the clip's own {own:.4})");
+        assert!(p > 0.97 && p > own - 0.02, "at {speed}%: periodicity {p:.4} (the clip's own {own:.4})");
+        assert!((pitch(&s, at + 0.2) - 150.0).abs() < 6.0, "at {speed}%: {} Hz", pitch(&s, at + 0.2));
+    }
+}
