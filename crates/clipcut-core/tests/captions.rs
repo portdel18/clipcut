@@ -290,46 +290,128 @@ fn exports_burn_the_captions_in() {
     let _ = std::fs::remove_file(&out);
 }
 
+/// The extracted sound `sound` sits on a lane, linked to `picture`, in step with it.
+fn in_step(s: &Studio, picture: u64, sound: u64) {
+    let v = s.timeline();
+    let (p, a) = (v.clips.iter().find(|c| c.id == picture).unwrap(), v.clips.iter().find(|c| c.id == sound).unwrap());
+    assert!(a.track.starts_with('A') && a.track != "A1", "{a:?}");
+    assert!(a.link.is_some() && a.link == p.link, "linked: {p:?} {a:?}");
+    assert!((a.start - p.start).abs() < 1e-6 && (a.end - p.end).abs() < 1e-6, "in step: {p:?} {a:?}");
+}
+
 #[test]
-fn extracted_sound_stays_put_with_its_captions() {
+fn extracted_sound_stays_linked_and_in_the_transcript() {
     let Some(mut s) = captioned() else { return };
     let before = caps(&s);
+    let words = |s: &Studio| s.words().into_iter().map(|w| w.text).collect::<Vec<_>>();
+    let all = words(&s);
+    assert_eq!(all.len(), 12);
     let main = main_track(&s);
     let second = main[1].clone();
     let sound = s.extract_audio(second.id).unwrap();
     let v = s.timeline();
     assert_eq!(v.undo_label.as_deref(), Some("Extract Audio"));
-    let snd = v.clips.iter().find(|c| c.id == sound).unwrap();
-    assert_eq!(snd.track, "A2", "{snd:?}");
-    assert!((snd.start - second.start).abs() < 1e-6 && (snd.end - second.end).abs() < 1e-6, "same place: {snd:?}");
-    assert!(snd.link.is_none() && v.clips.iter().find(|c| c.id == second.id).unwrap().link.is_none(), "no longer linked");
-    assert!(!v.clips.iter().any(|c| c.track == "A1" && c.start >= 2.0 - 1e-6), "the main track's sound there is gone");
+    assert_eq!(v.clips.iter().find(|c| c.id == sound).unwrap().track, "A2");
+    in_step(&s, second.id, sound);
+    assert!(!v.clips.iter().any(|c| c.track == "A1" && c.start >= 2.0 - 1e-6), "the main track's sound there moved");
+    assert_eq!(words(&s), all, "its words stay in the transcript");
     assert_eq!(caps(&s), before, "the captions stay over the words");
-    // it is a clip of its own now; the first clip's sound can be extracted from the sound itself
-    assert!(s.extract_audio(sound).is_err());
-    let first_sound = v.clips.iter().find(|c| c.track == "A1" && c.start < 0.1).unwrap().id;
+    assert!(s.extract_audio(sound).is_err(), "it is on a lane already");
+    assert!(s.extract_audio(second.id).is_err());
 
-    // deleting the first clip moves the picture up, but the sound and its captions stay
+    // the main track's edits take the sound along
     s.delete(&[main[0].id]).unwrap();
-    let v = s.timeline();
-    assert!(v.clips.iter().find(|c| c.id == second.id).unwrap().start.abs() < 1e-6, "the picture moved up");
-    assert!((v.clips.iter().find(|c| c.id == sound).unwrap().start - 2.0).abs() < 1e-6, "the sound stayed");
-    let c = caps(&s);
-    assert_eq!(c.len(), before.len() / 2, "{c:#?}");
-    assert!(c.iter().all(|x| x.start >= 2.0 - 1e-6) && c.iter().any(|x| x.text.contains("Hello")), "{c:#?}");
+    assert!(s.timeline().clips.iter().find(|c| c.id == second.id).unwrap().start.abs() < 1e-6, "the picture moved up");
+    in_step(&s, second.id, sound);
+    assert_eq!(words(&s), all[6..].to_vec());
     assert_tidy(&s);
     s.undo().unwrap();
-    s.undo().unwrap();
-    let v = s.timeline();
-    assert!(v.clips.iter().find(|c| c.id == sound).is_some_and(|c| c.track == "A1" && c.link.is_some()), "one undo step puts it back");
+    in_step(&s, second.id, sound);
     assert_eq!(caps(&s), before);
 
-    let picked = s.extract_audio(first_sound).unwrap();
-    assert_eq!(picked, first_sound);
-    assert_eq!(s.timeline().clips.into_iter().find(|c| c.id == first_sound).unwrap().track, "A2");
-    // a picture without sound has none to extract
-    assert!(s.extract_audio(main[0].id).is_err());
-    assert!(s.extract_audio(987_654).is_err());
+    s.reorder(second.id, 0).unwrap();
+    in_step(&s, second.id, sound);
+    assert_eq!(words(&s)[..6], all[6..]);
+    s.undo().unwrap();
+
+    // a word cut out of the transcript goes from the picture and its sound
+    s.cut_words(6, 6).unwrap();
+    let v = s.timeline();
+    let pic: Vec<_> = v.clips.iter().filter(|c| c.track == "V1" && c.start >= 2.0 - 1e-6).collect();
+    let snd: Vec<_> = v.clips.iter().filter(|c| c.track == "A2").collect();
+    assert_eq!(pic.len(), snd.len(), "{pic:#?} {snd:#?}");
+    for (p, a) in pic.iter().zip(&snd) {
+        assert!(a.link.is_some() && a.link == p.link && (a.start - p.start).abs() < 1e-6 && (a.end - p.end).abs() < 1e-6, "{p:?} {a:?}");
+    }
+    assert_eq!(words(&s).len(), 11, "{:?}", words(&s));
+    assert!(!words(&s)[6..].contains(&"Hello".to_string()));
+    assert_tidy(&s);
+    s.undo().unwrap();
+    in_step(&s, second.id, sound);
+
+    // a split and a trim of the picture cut and trim the sound too
+    s.split(3.0, &[]).unwrap();
+    let v = s.timeline();
+    assert_eq!(v.clips.iter().filter(|c| c.track == "A2").count(), 2);
+    for p in v.clips.iter().filter(|c| c.track == "V1" && c.start >= 2.0 - 1e-6) {
+        let a = v.clips.iter().find(|a| a.track == "A2" && a.link.is_some() && a.link == p.link).unwrap();
+        assert!((a.start - p.start).abs() < 1e-6 && (a.end - p.end).abs() < 1e-6, "{p:?} {a:?}");
+    }
+    s.undo().unwrap();
+    s.trim(second.id, true, 0.5).unwrap();
+    in_step(&s, second.id, sound);
+    s.undo().unwrap();
+
+    // a freeze holds the picture and pauses the sound for it
+    s.freeze(2.5, None, 1.0).unwrap();
+    let v = s.timeline();
+    for p in v.clips.iter().filter(|c| c.track == "V1" && c.link.is_some()) {
+        if let Some(a) = v.clips.iter().find(|a| a.track == "A2" && a.link == p.link) {
+            assert!((a.start - p.start).abs() < 1e-6 && (a.end - p.end).abs() < 1e-6, "{p:?} {a:?}");
+        }
+    }
+    assert_eq!(words(&s), all, "{:?}", words(&s));
+    s.undo().unwrap();
+    in_step(&s, second.id, sound);
+
+    // deleting the sound alone leaves the picture, silent
+    s.delete(&[sound]).unwrap();
+    let v = s.timeline();
+    assert!(v.clips.iter().all(|c| c.id != sound) && v.clips.iter().any(|c| c.id == second.id && c.start > 1.9));
+    assert_eq!(words(&s), all[..6].to_vec());
+    s.undo().unwrap();
+    in_step(&s, second.id, sound);
+
+    // moving it to another lane keeps it in step
+    s.move_clip(sound, "A3", 0.4).unwrap();
+    let v = s.timeline();
+    assert_eq!(v.clips.iter().find(|c| c.id == sound).unwrap().track, "A3");
+    in_step(&s, second.id, sound);
+    s.undo().unwrap();
+
+    // unlinked, it is a clip of its own: out of the transcript, and edits leave it where it is
+    s.unlink_sound(sound).unwrap();
+    let v = s.timeline();
+    assert_eq!(v.undo_label.as_deref(), Some("Unlink"));
+    assert!(v.clips.iter().find(|c| c.id == sound).unwrap().link.is_none() && v.clips.iter().find(|c| c.id == second.id).unwrap().link.is_none());
+    assert_eq!(words(&s), all[..6].to_vec());
+    assert_eq!(caps(&s), before, "the captions stay on the sound");
+    assert!(s.unlink_sound(sound).is_err());
+    s.delete(&[main[0].id]).unwrap();
+    assert!((s.timeline().clips.iter().find(|c| c.id == sound).unwrap().start - 2.0).abs() < 1e-6, "the sound stayed");
+    assert!(s.link_sound(sound).is_err(), "no longer in step with its picture");
+    s.undo().unwrap();
+
+    // and linked back
+    s.link_sound(sound).unwrap();
+    in_step(&s, second.id, sound);
+    assert_eq!(words(&s), all);
+    assert!(s.link_sound(sound).is_err(), "linked already");
+    assert!(s.link_sound(main[0].id).is_err(), "a picture isn't a sound");
+    assert!(s.unlink_sound(987_654).is_err());
+    // a picture without its sound has none to extract
+    s.unlink_sound(sound).unwrap();
+    assert!(s.extract_audio(second.id).is_err());
 }
 
 #[test]

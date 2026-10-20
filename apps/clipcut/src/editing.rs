@@ -313,6 +313,16 @@ pub async fn extract_audio(clip: u64, app: tauri::State<'_, App>) -> Result<Clip
 }
 
 #[tauri::command]
+pub async fn unlink_sound(clip: u64, app: tauri::State<'_, App>) -> Result<TimelineView, String> {
+    edit(&app, move |s| s.unlink_sound(clip)).await
+}
+
+#[tauri::command]
+pub async fn link_sound(clip: u64, app: tauri::State<'_, App>) -> Result<TimelineView, String> {
+    edit(&app, move |s| s.link_sound(clip)).await
+}
+
+#[tauri::command]
 pub async fn move_clip(clip: u64, lane: String, seconds: f64, app: tauri::State<'_, App>) -> Result<TimelineView, String> {
     edit(&app, move |s| s.move_clip(clip, &lane, seconds)).await
 }

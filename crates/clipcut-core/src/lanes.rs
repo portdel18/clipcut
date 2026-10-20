@@ -36,6 +36,23 @@ pub(crate) fn parse_lane(name: &str) -> Option<(Lane, usize)> {
     n.checked_sub(1).map(|i| (lane, i))
 }
 
+/// The links of the main track's pictures: sound with one of them belongs to the main track, on
+/// whichever sound track it sits (Extract Audio keeps a main clip's sound linked on a lane).
+pub(crate) fn main_links(q: &Sequence) -> std::collections::HashSet<u64> {
+    q.video_tracks.first().map(|t| t.items.iter().filter_map(|i| i.link).collect()).unwrap_or_default()
+}
+
+/// Whether sound clip `c` is the main track's: on its sound track, or linked to one of its pictures.
+pub(crate) fn is_main_sound(q: &Sequence, links: &std::collections::HashSet<u64>, c: &filmcraft_project::TrackItem) -> bool {
+    q.audio_tracks.first().is_some_and(|t| t.items.iter().any(|i| i.id == c.id)) || c.link.is_some_and(|l| links.contains(&l))
+}
+
+/// The timeline time at which sound `a` (of the same media as picture `v`) is in step with it.
+fn in_step(v: &filmcraft_project::TrackItem, a: &filmcraft_project::TrackItem) -> Tick {
+    let speed = v.speed.abs().max(1e-6);
+    Tick(v.start.0.saturating_add(((a.source_in.0 - v.source_in.0) as f64 / speed).round() as i64))
+}
+
 fn tracks(q: &Sequence, lane: Lane) -> &[filmcraft_project::Track] {
     if lane == Lane::Video { &q.video_tracks } else { &q.audio_tracks }
 }
@@ -159,13 +176,20 @@ impl Studio {
                     .into(),
             ));
         }
-        let shift = Tick(t.0 - item.start.0);
+        // the main track's sound on a lane keeps time with its picture: it only changes lane
+        let main_link = item.link.is_some_and(|l| main_links(q).contains(&l));
+        let shift = if main_link { Tick::ZERO } else { Tick(t.0 - item.start.0) };
         let partners: Vec<_> = item
             .link
             .map(|l| {
-                q.all_tracks().flat_map(|tr| tr.items.iter().filter(move |i| i.link == Some(l) && i.id.0 != clip).map(move |i| (tr.id, i.clone()))).collect()
+                q.all_tracks()
+                    .flat_map(|tr| tr.items.iter().filter(move |i| i.link == Some(l) && i.id.0 != clip).map(move |i| (tr.id, i.clone())))
+                    .collect::<Vec<_>>()
             })
-            .unwrap_or_default();
+            .unwrap_or_default()
+            .into_iter()
+            .filter(|_| !main_link)
+            .collect();
         let ids: Vec<u64> = std::iter::once(clip).chain(partners.iter().map(|(_, i)| i.id.0)).collect();
         // nothing may start before 0: the whole set stops there
         let earliest = partners.iter().map(|(_, i)| i.start).chain([item.start]).min().unwrap_or(item.start);
@@ -192,58 +216,128 @@ impl Studio {
     }
 
     /// Extract Audio, CapCut-style: clip `clip`'s own sound (or `clip` itself, when it is that
-    /// sound) becomes a clip of its own on a sound lane at the same time, no longer linked to the
-    /// picture, so it can be trimmed, moved and faded apart from it. Main-track edits leave it where
-    /// it is, like any lane clip, and captions over its words stay on it. Returns the sound clip.
-    /// One undo step.
+    /// sound) moves from the main track's sound to a sound lane at the same time, to see and fade
+    /// it on its own. It stays linked to the picture, so the main track's edits (cuts, trims,
+    /// moves, the transcript) still take both; [`Studio::unlink_sound`] parts them. Returns the
+    /// sound clip. One undo step.
     pub fn extract_audio(&mut self, clip: u64) -> Result<u64> {
         let q = self.session.active_sequence().ok_or(Error::NothingOpen)?;
         let (track, item) =
             q.find_item(ClipId(clip)).map(|(tr, i)| (tr, i.clone())).ok_or_else(|| Error::Invalid("that clip is no longer on the timeline".into()))?;
         let is_sound = q.track(track).is_some_and(|t| t.kind == TrackKind::Audio);
-        let partners: Vec<(filmcraft_project::TrackId, filmcraft_project::TrackItem)> = item
-            .link
-            .map(|l| {
-                q.all_tracks().flat_map(|tr| tr.items.iter().filter(move |i| i.link == Some(l) && i.id.0 != clip).map(move |i| (tr.id, i.clone()))).collect()
-            })
-            .unwrap_or_default();
-        let has_picture = |tid: filmcraft_project::TrackId| q.track(tid).is_some_and(|t| t.kind == TrackKind::Video);
-        let (sound, sound_track) = if is_sound {
-            if !partners.iter().any(|(t, _)| has_picture(*t)) {
-                return Err(Error::Invalid("this sound is already a clip of its own".into()));
-            }
-            (item.clone(), track)
+        let sound = if is_sound {
+            item.clone()
         } else {
-            let mut own: Vec<_> = partners.iter().filter(|(t, _)| !has_picture(*t)).collect();
-            own.sort_by_key(|(_, i)| i.start);
-            let (t, i) = own.first().ok_or_else(|| Error::Invalid("this clip has no sound of its own to extract".into()))?;
-            (i.clone(), *t)
+            let mut own: Vec<_> =
+                item.link.map(|l| q.audio_tracks.iter().flat_map(|t| t.items.iter()).filter(|i| i.link == Some(l)).cloned().collect()).unwrap_or_default();
+            own.sort_by_key(|i| i.start);
+            own.into_iter().next().ok_or_else(|| Error::Invalid("this clip has no sound of its own to extract".into()))?
         };
-        let on_main = q.audio_tracks.first().is_some_and(|t| t.id == sound_track);
-        let link = sound.link;
+        let on_main = q.audio_tracks.first().is_some_and(|t| t.items.iter().any(|i| i.id == sound.id));
+        if !on_main {
+            let why = if sound.link.is_none() { "this sound is already a clip of its own" } else { "this sound is already on a sound lane of its own" };
+            return Err(Error::Invalid(why.into()));
+        }
         self.group_follow("Extract Audio", None, |s| {
+            s.unlock_lanes()?;
+            let dest = s.free_lane(Lane::Audio, sound.start, sound.end(), &[])?;
             s.session
-                .edit_sequence("Extract Audio", |q, _, _| {
+                .execute(
+                    "timeline.move",
+                    json!({"moves": [{"clip": sound.id.0, "track": lane_name(Lane::Audio, dest), "time": sound.start.0}], "linked": false}),
+                )
+                .map_err(engine)?;
+            Ok(sound.id.0)
+        })
+    }
+
+    /// Parts clip `clip` (a picture or its sound) from the clips linked to it: each is then
+    /// trimmed, moved and cut on its own, and sound on a lane leaves the transcript. One undo step.
+    pub fn unlink_sound(&mut self, clip: u64) -> Result<()> {
+        let q = self.session.active_sequence().ok_or(Error::NothingOpen)?;
+        let (_, item) = q.find_item(ClipId(clip)).ok_or_else(|| Error::Invalid("that clip is no longer on the timeline".into()))?;
+        let link = item.link.ok_or_else(|| Error::Invalid("this clip isn't linked to another".into()))?;
+        self.group("Unlink", |s| {
+            s.session
+                .edit_sequence("Unlink", |q, _, _| {
                     for t in q.video_tracks.iter_mut().chain(q.audio_tracks.iter_mut()) {
-                        for i in t.items.iter_mut().filter(|i| link.is_some() && i.link == link) {
+                        for i in t.items.iter_mut().filter(|i| i.link == Some(link)) {
                             i.link = None;
                         }
                     }
                     Ok(())
                 })
-                .map_err(engine)?;
-            if on_main {
-                s.unlock_lanes()?;
-                let dest = s.free_lane(Lane::Audio, sound.start, sound.end(), &[])?;
-                s.session
-                    .execute(
-                        "timeline.move",
-                        json!({"moves": [{"clip": sound.id.0, "track": lane_name(Lane::Audio, dest), "time": sound.start.0}], "linked": false}),
-                    )
-                    .map_err(engine)?;
-            }
-            Ok(sound.id.0)
+                .map_err(engine)
         })
+    }
+
+    /// The picture sound clip `clip` (on a lane, linked to nothing) can be linked back to: one of
+    /// the same media, in step with it, with no sound of its own.
+    pub(crate) fn picture_for(&self, clip: u64) -> Option<u64> {
+        let q = self.session.active_sequence()?;
+        let (track, a) = q.find_item(ClipId(clip))?;
+        if q.track(track)?.kind != TrackKind::Audio || a.link.is_some() || q.audio_tracks.first().is_some_and(|t| t.id == track) {
+            return None;
+        }
+        let half = Tick(q.settings.frame_rate.frame_duration().0 / 2);
+        let sound_of = |l: Option<u64>| l.is_some_and(|l| q.audio_tracks.iter().flat_map(|t| &t.items).any(|i| i.link == Some(l)));
+        q.video_tracks
+            .iter()
+            .flat_map(|t| t.items.iter())
+            .find(|v| v.item == a.item && !sound_of(v.link) && (in_step(v, a).0 - a.start.0).abs() <= half.0 && v.start < a.end() && a.start < v.end())
+            .map(|v| v.id.0)
+    }
+
+    /// Links sound clip `clip` back to its picture ([`Studio::picture_for`]), as Extract Audio
+    /// leaves them. One undo step.
+    pub fn link_sound(&mut self, clip: u64) -> Result<()> {
+        let picture = self.picture_for(clip).ok_or_else(|| Error::Invalid("there is no picture of this sound in step with it to link it to".into()))?;
+        self.group_follow("Link", None, |s| {
+            s.session
+                .edit_sequence("Link", |q, ctx, _| {
+                    let old = q.find_item(ClipId(picture)).and_then(|(_, v)| v.link);
+                    let l = old.unwrap_or_else(|| ctx.alloc());
+                    for id in [picture, clip] {
+                        if let Some((_, i)) = q.find_item_mut(ClipId(id)) {
+                            i.link = Some(l);
+                        }
+                    }
+                    Ok(())
+                })
+                .map_err(engine)
+        })
+    }
+
+    /// Puts the main track's sound that sits on lanes back in step with its pictures, after an
+    /// edit of the main track moved them (lanes don't ripple). Part of [`Studio::group_follow`].
+    pub(crate) fn keep_sound_in_step(&mut self) -> Result<()> {
+        let Some(q) = self.session.active_sequence() else { return Ok(()) };
+        let Some(main) = q.video_tracks.first() else { return Ok(()) };
+        let mut moves = Vec::new();
+        for v in main.items.iter() {
+            let Some(l) = v.link else { continue };
+            for (k, t) in q.audio_tracks.iter().enumerate().skip(1) {
+                for a in t.items.iter().filter(|a| a.link == Some(l) && a.item == v.item) {
+                    let at = in_step(v, a);
+                    if at != a.start {
+                        moves.push((a.id.0, k, at, a.duration));
+                    }
+                }
+            }
+        }
+        if moves.is_empty() {
+            return Ok(());
+        }
+        let ids: Vec<u64> = moves.iter().map(|m| m.0).collect();
+        let mut out = Vec::new();
+        for (id, k, at, d) in moves {
+            let at = Tick(at.0.max(0));
+            let dest = if self.lane_free(Lane::Audio, k, at, at + d, &ids) { k } else { self.free_lane(Lane::Audio, at, at + d, &ids)? };
+            out.push(json!({"clip": id, "track": lane_name(Lane::Audio, dest), "time": at.0}));
+        }
+        self.unlock_lanes()?;
+        self.session.execute("timeline.move", json!({"moves": out, "linked": false})).map_err(engine)?;
+        Ok(())
     }
 
     fn lane_free(&self, lane: Lane, index: usize, start: Tick, end: Tick, except: &[u64]) -> bool {
@@ -285,11 +379,14 @@ impl Studio {
         Ok(())
     }
 
-    /// Whether a clip is on the main track (or is the main track's sound).
+    /// Whether a clip is on the main track (or is the main track's sound, on a lane too).
     pub(crate) fn on_main(&self, clip: u64) -> bool {
         let Some(q) = self.session.active_sequence() else { return false };
-        let main = |tr: Option<&filmcraft_project::Track>| tr.is_some_and(|t| t.items.iter().any(|i| i.id.0 == clip));
-        main(q.video_tracks.first()) || main(q.audio_tracks.first())
+        if q.video_tracks.first().is_some_and(|t| t.items.iter().any(|i| i.id.0 == clip)) {
+            return true;
+        }
+        let links = main_links(q);
+        q.audio_tracks.iter().flat_map(|t| t.items.iter()).find(|i| i.id.0 == clip).is_some_and(|i| is_main_sound(q, &links, i))
     }
 
     /// Mutes a lane's sound or hides its picture (`on` false), or brings it back.

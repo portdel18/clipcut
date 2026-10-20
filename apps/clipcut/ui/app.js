@@ -108,6 +108,8 @@ const mainClips = () => S.tl ? S.tl.clips.filter(c => c.track === 'V1').sort(byS
 const visibleClips = () => S.tl ? S.tl.clips.filter(c => c.track !== 'A1') : [];
 const clipById = id => S.tl && (S.tl.clips.find(c => c.id === id) || capClips().find(c => c.id === id));
 const isMain = c => c.track === 'V1';
+/** Sound on a lane that Extract Audio took from a main-track clip and is still linked to it. */
+const isMainSound = c => c.track[0] === 'A' && !!c.link && S.tl.clips.some(v => v.track === 'V1' && v.link === c.link);
 const laneKind = c => c.track[0] === 'A' ? 'audio' : 'video';
 const laneNo = id => parseInt(id.slice(1), 10) || 0;
 /** The captions, shaped like clips for the timeline (lane `C1`). */
@@ -322,6 +324,8 @@ function stagePointerDown(e) {
   if (KY.picking) { e.preventDefault(); pickColourAt(px, py); return; }
   // a click picks the clip under the pointer; a drag moves the selected one
   let c = stageClip();
+  // a corner of the selected clip's frame: dragging it scales the clip about its centre
+  if (c && cornerAt(c, px, py, k)) { e.preventDefault(); scaleDrag(c, e, k); return; }
   const hit = clipAtPoint(px, py);
   if (hit && (!c || hit.id !== c.id)) { select([hit.id]); c = hit; }
   if (!c) { if (S.sel.size || S.cut != null) select([]); return; }
@@ -340,6 +344,34 @@ function stagePointerDown(e) {
     if (guides.y) y = S.tl.height / 2;
     queueProps([c.id], { x: Math.round(x), y: Math.round(y) }, key);
   }, () => { guides = { x: false, y: false }; drawOverlay(); }, { scroll: false });
+}
+/** Whether canvas point (x, y) is on a corner square of clip `c`'s frame (`k`: canvas px per screen px). */
+function cornerAt(c, x, y, k) {
+  const b = boxOf(c), reach = 10 * k;
+  return [[-1, -1], [1, -1], [-1, 1], [1, 1]].some(([sx, sy]) => {
+    const u = sx * b.w / 2, v = sy * b.h / 2;
+    const cx = b.x + u * Math.cos(b.r) - v * Math.sin(b.r), cy = b.y + u * Math.sin(b.r) + v * Math.cos(b.r);
+    return Math.hypot(x - cx, y - cy) <= reach;
+  });
+}
+/** Drags a corner: the clip scales about its centre with the pointer's distance from it. Near the
+    size that fills the frame's width or height, it snaps there (Shift: no snapping). */
+function scaleDrag(c, e, k) {
+  const r = $('#preview').getBoundingClientRect();
+  const b0 = boxOf(c), s0 = liveClip(c).props.scale || 100;
+  const at = ev => [(ev.clientX - r.left) * k - b0.x, (ev.clientY - r.top) * k - b0.y];
+  const d0 = Math.max(1, Math.hypot(...at(e)));
+  const key = nextKey('scale');
+  follow(e, ev => {
+    let scale = s0 * Math.hypot(...at(ev)) / d0;
+    if (S.snap && !ev.shiftKey) {
+      // the scales at which the frame is exactly as wide, or as tall, as the picture
+      const fits = [S.tl.width / (b0.w / s0), S.tl.height / (b0.h / s0)];
+      const near = fits.find(f => Math.abs(f - scale) / f < 0.03);
+      if (near) scale = near;
+    }
+    queueProps([c.id], { scale: Math.round(clamp(scale, 1, 2000) * 10) / 10 }, key);
+  }, () => drawOverlay(), { scroll: false });
 }
 let wheelKey = null, wheelTimer = 0;
 function stageWheel(e) {
@@ -2849,15 +2881,24 @@ function renderProps() {
     s.appendChild(slider('Fade in', ids, 'fadeIn', { min: 0, max: 10, step: 0.1, unit: 's', read: c => (soundOf(c) || c).props.fadeIn }));
     s.appendChild(slider('Fade out', ids, 'fadeOut', { min: 0, max: 10, step: 0.1, unit: 's', read: c => (soundOf(c) || c).props.fadeOut }));
     if (chOf(one)) channelControls(s, one, ids);
-    if (!isMain(one)) {
+    if (!isMain(one) && !isMainSound(one)) {
       duckingControls(s, ids);
       beatControls(s, ids);
     }
-    // a picture's own sound can become a clip of its own on a sound lane
+    // a picture's own sound can go on a sound lane, still linked to it, and be parted from it
     const pic = one.track[0] === 'V' ? one : one.link && S.tl.clips.find(v => v.link === one.link && v.track[0] === 'V');
-    if (pic && ids.length === 1) {
-      s.appendChild(buttons([['Extract audio', 'Put this clip’s sound on a sound lane as a clip of its own, to trim, move and fade it apart from the picture', () => make('extract_audio', { clip: one.id })]]));
-      s.lastChild.firstChild.id = 'extract-audio';
+    const snd = one.track[0] === 'A' ? one : soundOf(one);
+    if (pic && snd && ids.length === 1) {
+      if (snd.track === 'A1') {
+        s.appendChild(buttons([['Extract audio', 'Put this clip’s sound on a sound lane under it, still linked to the picture: cuts, trims and the transcript take both', () => make('extract_audio', { clip: one.id })]]));
+        s.lastChild.firstChild.id = 'extract-audio';
+      } else {
+        s.appendChild(buttons([['Unlink from picture', 'Part the sound from its picture, to move and cut it on its own (its words leave the transcript)', () => edit('unlink_sound', { clip: one.id })]]));
+        s.lastChild.firstChild.id = 'unlink-sound';
+      }
+    } else if (one.track[0] === 'A' && one.track !== 'A1' && !one.link && ids.length === 1 && pictureInStep(one)) {
+      s.appendChild(buttons([['Link to picture', 'Link this sound back to its picture, so they cut and move together again', () => edit('link_sound', { clip: one.id })]]));
+      s.lastChild.firstChild.id = 'link-sound';
     }
   }
   if (visual(one) || hasSound(one)) keyframeControls(section('Keyframes'), one);
@@ -2874,6 +2915,14 @@ function renderProps() {
     const rev = buttons([['Reverse', 'Play the clip backwards', () => edit('set_reverse', { clips: ids, on: !clipById(one.id).props.reverse })]]);
     rev.firstChild.id = 'reverse-btn';
     controls.push({ el: rev, read: c => c.props.reverse, write: (el, v) => el.firstChild.setAttribute('aria-pressed', String(!!v)) });
+    if (one.kind === 'video' && one.track[0] === 'V' && !one.props.freeze) {
+      const fr = document.createElement('button');
+      fr.id = 'freeze-prop';
+      fr.textContent = 'Freeze frame';
+      fr.title = `Hold the frame at the playhead for ${FREEZE_SECONDS} seconds`;
+      fr.addEventListener('click', () => freezeFrame());
+      rev.appendChild(fr);
+    }
     s.appendChild(rev);
     if (hasSound(one)) {
       const kp = document.createElement('label');
@@ -2886,6 +2935,12 @@ function renderProps() {
     }
   }
   syncProps(one);
+}
+/** Sound on a lane that its picture's clip plays in step with (and has no sound of its own). */
+function pictureInStep(a) {
+  const half = 0.5 / (S.tl.fps || 30);
+  return S.tl.clips.some(v => v.track[0] === 'V' && v.item === a.item && Math.abs(v.start - a.start) <= half && Math.abs(v.sourceIn - a.sourceIn) <= half
+    && !(v.link && S.tl.clips.some(x => x.track[0] === 'A' && x.link === v.link)));
 }
 /** A caption's words and times (its look is the Captions tab's, for all of them). */
 function captionControls(box, c) {
@@ -3761,6 +3816,12 @@ $('#zoom').addEventListener('input', zoomFromSlider);
 $('#zoom').addEventListener('change', e => e.target.blur());
 $('#ratio').addEventListener('change', e => setRatio(e.target.value));
 $('#stage').addEventListener('pointerdown', stagePointerDown);
+// the corner squares show they resize
+$('#stage').addEventListener('pointermove', e => {
+  const c = has() && !S.playing ? stageClip() : null, r = $('#preview').getBoundingClientRect();
+  const k = r.width ? S.tl.width / r.width : 1;
+  $('#stage').classList.toggle('corner', !!c && cornerAt(c, (e.clientX - r.left) * k, (e.clientY - r.top) * k, k));
+});
 $('#stage').addEventListener('wheel', stageWheel, { passive: false });
 // buttons don't keep the focus, so Space and the editing keys always reach the timeline
 document.addEventListener('mousedown', e => { if (e.target.closest('button')) e.preventDefault(); });

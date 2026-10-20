@@ -123,9 +123,13 @@ remote `upstream`). Read `README.md` for what it is and the roadmap.
 - Find and replace (`replace.rs`): the search runs over the main words joined by spaces;
   `findMatches` in `app.js` must keep the same rules as `find_in`, since Replace sends the match's
   number. It rewrites the media transcripts (`transcript.set`) and the captions in one step.
-- Extract Audio (`Studio::extract_audio`, `lanes.rs`) unlinks a clip's sound and moves a main
-  clip's to a sound lane. Captions over words that play only on a lane stay on that lane's clip
-  (`lane_sound` in `captions.rs`).
+- Extract Audio (`Studio::extract_audio`, `lanes.rs`) moves a main clip's sound to a sound lane and
+  keeps it linked: sound linked to a main picture is the main track's wherever it sits
+  (`main_links` / `is_main_sound`: `main_words`, `main_sound`, `on_main` count it), and
+  `keep_sound_in_step` (in `group_follow`) puts it back in step after main-track edits, since lanes
+  don't ripple. `unlink_sound` parts it (it leaves the transcript); `link_sound` joins it back to a
+  picture it is in step with. Captions over words that play only on an unlinked lane clip stay on
+  it (`lane_sound` in `captions.rs`).
 - Disk is tight here: `rm -rf target/debug/incremental` when a build fails with "no space left".
 - Interface copy: plain words from the user's side, errors that say what went wrong and how to fix it.
   One dark theme from the tokens at the top of `ui/app.css`; amber (`--accent`) marks the active thing.

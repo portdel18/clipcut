@@ -35,7 +35,12 @@ impl Studio {
                 i.link.and_then(|l| q.audio_tracks.iter().flat_map(|t| &t.items).find(|a| a.link == Some(l)).map(|a| a.id))
             };
             let Some(id) = id else { continue };
-            if q.audio_tracks.first().is_some_and(|t| t.items.iter().any(|a| a.id == id)) {
+            if q.audio_tracks
+                .iter()
+                .flat_map(|t| &t.items)
+                .find(|a| a.id == id)
+                .is_some_and(|a| crate::lanes::is_main_sound(q, &crate::lanes::main_links(q), a))
+            {
                 return Err(Error::Invalid("the main track's sound is what music ducks under: select the music on a lane below it".into()));
             }
             v.push(id.0);

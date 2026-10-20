@@ -27,6 +27,7 @@ use filmcraft_time::{Tick, TimeRange};
 use serde::Serialize;
 use serde_json::{Value, json};
 
+use crate::lanes::{is_main_sound, main_links};
 use crate::{Error, Result, Studio, engine};
 
 /// The caption track as the timeline and the Captions tab show it.
@@ -143,13 +144,16 @@ pub(crate) struct Held {
     auto: bool,
 }
 
-/// The main track's sound clips (audio track 1), in order.
+/// The main track's sound clips (audio track 1, and its pictures' sound extracted to lanes), in
+/// order.
 fn main_sound(q: &Sequence) -> Vec<&TrackItem> {
+    let links = main_links(q);
     let mut v: Vec<&TrackItem> = q
         .audio_tracks
-        .first()
-        .map(|t| t.items.iter().filter(|i| i.enabled && !i.reverse && i.speed > 0.0 && i.frame_hold.is_none()).collect())
-        .unwrap_or_default();
+        .iter()
+        .flat_map(|t| t.items.iter())
+        .filter(|i| i.enabled && !i.reverse && i.speed > 0.0 && i.frame_hold.is_none() && is_main_sound(q, &links, i))
+        .collect();
     v.sort_by_key(|i| i.start);
     v
 }
@@ -184,9 +188,13 @@ fn hex(c: [u8; 4]) -> String {
     format!("#{:02x}{:02x}{:02x}", c[0], c[1], c[2])
 }
 
-/// The main track's words, in order.
+/// The main track's words, in order: heard on its sound track, or on lanes from its pictures'
+/// extracted sound (sound unlinked from them is a clip of its own and isn't in the transcript).
 pub(crate) fn main_words(q: &Sequence, p: &filmcraft_project::Project) -> Vec<SeqWord> {
-    tx::sequence_words(q, &p.transcripts).into_iter().filter(|w| w.track == 0).collect()
+    let links = main_links(q);
+    let main: std::collections::HashSet<ClipId> =
+        q.audio_tracks.iter().flat_map(|t| t.items.iter()).filter(|i| is_main_sound(q, &links, i)).map(|i| i.id).collect();
+    tx::sequence_words(q, &p.transcripts).into_iter().filter(|w| main.contains(&w.clip)).collect()
 }
 
 /// Transcribes media on any thread (see [`Studio::transcribe_job`]).
@@ -584,6 +592,7 @@ impl Studio {
         let transitions = self.hold_transitions();
         self.group_merge(label, merge, |s| {
             let r = f(s)?;
+            s.keep_sound_in_step()?;
             s.place_transitions(transitions)?;
             if let Some(h) = held {
                 s.place_captions(h)?;

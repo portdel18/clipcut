@@ -509,6 +509,8 @@ fn main() {
             editing::add_text,
             editing::move_clip,
             editing::extract_audio,
+            editing::unlink_sound,
+            editing::link_sound,
             editing::load_shortcuts,
             editing::save_shortcuts,
             editing::set_props,
