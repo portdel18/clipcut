@@ -420,7 +420,11 @@ impl Studio {
         let main_ids: Vec<u64> = self
             .session
             .active_sequence()
-            .map(|q| q.video_tracks.first().into_iter().chain(q.audio_tracks.first()).flat_map(|t| t.items.iter().map(|i| i.id.0)).collect())
+            .map(|q| {
+                let links = crate::lanes::main_links(q);
+                let sound = q.audio_tracks.iter().flat_map(|t| t.items.iter()).filter(|i| crate::lanes::is_main_sound(q, &links, i));
+                q.video_tracks.first().into_iter().flat_map(|t| t.items.iter()).chain(sound).map(|i| i.id.0).collect()
+            })
             .unwrap_or_default();
         self.group_follow(label, None, |st| {
             st.unlock_lanes()?;
@@ -470,10 +474,39 @@ impl Studio {
         if clips.is_empty() {
             return Err(Error::Invalid("select a clip to delete".into()));
         }
+        // extracted sound deleted without its picture goes alone: the picture keeps playing, silent
+        let alone: Vec<u64> = self
+            .session
+            .active_sequence()
+            .map(|q| {
+                let pictures: Vec<u64> =
+                    q.video_tracks.first().map(|t| t.items.iter().filter(|i| clips.contains(&i.id.0)).filter_map(|i| i.link).collect()).unwrap_or_default();
+                let links = crate::lanes::main_links(q);
+                q.audio_tracks
+                    .iter()
+                    .skip(1)
+                    .flat_map(|t| t.items.iter())
+                    .filter(|i| clips.contains(&i.id.0) && i.link.is_some_and(|l| links.contains(&l) && !pictures.contains(&l)))
+                    .map(|i| i.id.0)
+                    .collect()
+            })
+            .unwrap_or_default();
         // the main track closes up; clips on lanes leave their place empty, as in CapCut
-        let (main, lanes): (Vec<u64>, Vec<u64>) = clips.iter().partition(|c| self.on_main(**c));
+        let (main, lanes): (Vec<u64>, Vec<u64>) = clips.iter().partition(|c| !alone.contains(c) && self.on_main(**c));
         self.group_follow("Delete", None, |s| {
             s.unlock_lanes()?;
+            if !alone.is_empty() {
+                s.session
+                    .edit_sequence("Delete", |q, _, _| {
+                        for t in q.audio_tracks.iter_mut() {
+                            for i in t.items.iter_mut().filter(|i| alone.contains(&i.id.0)) {
+                                i.link = None;
+                            }
+                        }
+                        Ok(())
+                    })
+                    .map_err(engine)?;
+            }
             if !lanes.is_empty() {
                 s.session.execute("edit.clear", json!({"clips": lanes})).map_err(engine)?;
             }
