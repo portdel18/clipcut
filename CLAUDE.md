@@ -51,8 +51,9 @@ remote `upstream`). Read `README.md` for what it is and the roadmap.
 - Selection: Ctrl/Shift-click adds a clip; a drag on empty timeline draws a box (`boxSelect`), a
   click there moves the playhead. Dragging one of several selected lane clips moves them all
   (`groupDrag` → `Studio::move_clips`, one undo step; the main track and its sound stay put).
-- Shuttle (J K L): `shuttle(rate)`; 1× forward is the real player with sound, other speeds run the
-  playhead on the wall clock (`S.rate`) and show frames silently. Timeline thumbnails are a decode
+- Shuttle (J K L): each press steps through `SHUTTLE` (1, 1.25, 1.5, 1.75, 2, 3… 8) via
+  `shuttle(rate)`; 1× forward is the real player with sound, other speeds run the playhead on the
+  wall clock (`S.rate`) and show frames silently. Timeline thumbnails are a decode
   of the same video, so none are fetched while playing (`pumpThumbs`): tiles borrow a cached
   picture from a wider zoom until it stops.
 - Edits stop playback (the player plays a snapshot of the sequence), except mixer changes:
