@@ -87,7 +87,11 @@ remote `upstream`). Read `README.md` for what it is and the roadmap.
 - Exports ask the engine for `gpuRendering` and `hardwareEncoding` `auto` (`export_as`); the GPU
   renderer never takes a software adapter. They are bound by the one-at-a-time H.264 encoder
   (`export/src/job.rs` stage clocks: `tests/export_speed.rs`, run with `--ignored --nocapture`);
-  burnt-in captions are rendered once each (`captions::burn::cached_caption`).
+  burnt-in captions are rendered once each (`captions::burn::cached_caption`). On Windows the
+  hardware H.264 encoders are NVENC, then Media Foundation's encoder MFTs (`platform/src/
+  media_foundation/encode.rs` and `export.rs`: Intel Quick Sync, AMD...); `FILMCRAFT_MF_SOFTWARE_ENCODER=1`
+  lets Microsoft's software MFT stand in (Windows CI's `--export-test` step). A hardware encoder
+  failing partway makes the interface export again with `hardware: false`.
 - Keyframes: a diamond on the timeline singles one out (`S.kf`); Delete and dragging go to
   `Studio::delete_keyframes` / `move_keyframes` (every property keyed at that time, the sound's
   volume too). A main clip's own fades are one-sided transitions on its A1 sound (`fade_alone`), and

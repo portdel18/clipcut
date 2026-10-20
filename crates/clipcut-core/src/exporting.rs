@@ -118,11 +118,18 @@ impl Studio {
     /// Exports the whole video to `path` the way export choice `choice` says (one of
     /// [`Studio::export_choices`]). Returns the job id.
     pub fn export_as(&mut self, path: &str, choice: &str) -> Result<u64> {
+        self.export_as_with(path, choice, true)
+    }
+
+    /// [`Studio::export_as`], with the graphics card's encoder allowed (`hardware`) or not (the
+    /// software encoder only: the retry after a hardware encoder failed partway).
+    pub fn export_as_with(&mut self, path: &str, choice: &str, hardware: bool) -> Result<u64> {
         let c = self.export_choices()?.into_iter().find(|c| c.id == choice).ok_or_else(|| Error::Invalid(format!("there is no export called “{choice}”")))?;
         let fps = self.info()?.fps;
         // the GPU composites and encodes where the machine has one that can (a real adapter;
         // NVENC for H.264); everything else falls back to the CPU, frame by frame
-        let mut p = json!({"path": path, "burnCaptions": self.burn_captions(), "gpuRendering": "auto", "hardwareEncoding": "auto"});
+        let hw = if hardware { "auto" } else { "off" };
+        let mut p = json!({"path": path, "burnCaptions": self.burn_captions(), "gpuRendering": "auto", "hardwareEncoding": hw});
         match c.id {
             "sound" => p["format"] = json!("wav"),
             "master" => p["format"] = json!("prores"),

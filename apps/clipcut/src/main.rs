@@ -157,8 +157,15 @@ fn export_choices(app: tauri::State<'_, App>) -> Result<Vec<clipcut_core::Export
 }
 
 #[tauri::command]
-fn export_as(path: String, choice: String, app: tauri::State<'_, App>) -> Result<u64, String> {
-    lock(&app.studio).export_as(&path, &choice).map_err(|e| e.to_string())
+fn export_as(path: String, choice: String, hardware: Option<bool>, app: tauri::State<'_, App>) -> Result<u64, String> {
+    lock(&app.studio).export_as_with(&path, &choice, hardware.unwrap_or(true)).map_err(|e| e.to_string())
+}
+
+/// Pictures the graphics card's encoder has encoded in this run (read before and after an export:
+/// whether it encoded that one).
+#[tauri::command]
+fn hardware_frames() -> u64 {
+    filmcraft_export::hw_encode_stats().frames
 }
 
 #[tauri::command]
@@ -257,12 +264,63 @@ fn self_test(input: &str, output: &str, report: &str) -> i32 {
     if result.is_ok() && wrote { 0 } else { 1 }
 }
 
+/// `--export-test <in> <out> <report.json> <hardware|software>`: a TikTok-size export of `in` as
+/// the Export dialog makes it, the graphics card's encoder allowed or not; the report says how long
+/// it took, how many pictures the hardware path encoded, and what the file reopens as (CI compares
+/// the two).
+fn export_test(input: &str, output: &str, report: &str, mode: &str) -> i32 {
+    let t0 = std::time::Instant::now();
+    let mut steps = serde_json::Map::new();
+    let result = (|| -> Result<(), String> {
+        let mut s = Studio::new();
+        s.add_clip(input).map_err(|e| format!("add: {e}"))?;
+        let info = s.info().map_err(|e| e.to_string())?;
+        s.set_canvas(info.width, info.height).map_err(|e| e.to_string())?;
+        let frames0 = filmcraft_export::hw_encode_stats().frames;
+        let started = std::time::Instant::now();
+        let job = s.export_as_with(output, "social", mode == "hardware").map_err(|e| format!("export: {e}"))?;
+        loop {
+            let st = s.job(job).ok_or("export: the job disappeared")?;
+            if st.finished {
+                if let Some(e) = st.error {
+                    return Err(format!("export: {e}"));
+                }
+                break;
+            }
+            if started.elapsed().as_secs() > 1800 {
+                return Err("export: still running after 30 minutes".into());
+            }
+            std::thread::sleep(std::time::Duration::from_millis(100));
+        }
+        let secs = started.elapsed().as_secs_f64();
+        let back = Studio::new().open_clip(output).map_err(|e| format!("reopen export: {e}"))?;
+        let frames = back.frames as f64;
+        steps.insert("seconds".into(), serde_json::json!(secs));
+        steps.insert("fps".into(), serde_json::json!(frames / secs.max(1e-6)));
+        steps.insert("hardwareFrames".into(), serde_json::json!(filmcraft_export::hw_encode_stats().frames - frames0));
+        steps.insert("exported".into(), serde_json::to_value(&back).unwrap_or_default());
+        Ok(())
+    })();
+    steps.insert("mode".into(), serde_json::json!(mode));
+    steps.insert("ok".into(), serde_json::json!(result.is_ok()));
+    steps.insert("error".into(), serde_json::json!(result.as_ref().err()));
+    steps.insert("totalSeconds".into(), serde_json::json!(t0.elapsed().as_secs_f64()));
+    let text = serde_json::to_string_pretty(&serde_json::Value::Object(steps)).unwrap_or_default();
+    let wrote = std::fs::write(report, &text).is_ok();
+    println!("{text}");
+    if result.is_ok() && wrote { 0 } else { 1 }
+}
+
 fn main() {
     register_engine_accelerators();
     let args: Vec<String> = std::env::args_os().skip(1).map(|a| a.to_string_lossy().into_owned()).collect();
     if args.first().map(String::as_str) == Some("--self-test") {
         let get = |i: usize| args.get(i).map(String::as_str).unwrap_or("");
         std::process::exit(self_test(get(1), get(2), get(3)));
+    }
+    if args.first().map(String::as_str) == Some("--export-test") {
+        let get = |i: usize| args.get(i).map(String::as_str).unwrap_or("");
+        std::process::exit(export_test(get(1), get(2), get(3), get(4)));
     }
     if args.first().map(String::as_str) == Some("--caption-test") {
         let get = |i: usize| args.get(i).map(String::as_str).unwrap_or("");
@@ -315,6 +373,7 @@ fn main() {
             export_status,
             export_choices,
             export_as,
+            hardware_frames,
             cancel_export,
             reveal,
             updates::check_update,

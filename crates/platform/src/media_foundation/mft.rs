@@ -17,8 +17,8 @@ use windows::Win32::Graphics::Direct3D11::ID3D11Device;
 use windows::Win32::Media::MediaFoundation::{
     IMFActivate, IMFDXGIDeviceManager, IMFMediaBuffer, IMFMediaType, IMFSample, IMFTransform, MF_E_NO_MORE_TYPES, MF_E_NOTACCEPTING,
     MF_E_TRANSFORM_NEED_MORE_INPUT, MF_E_TRANSFORM_STREAM_CHANGE, MF_MT_FRAME_SIZE, MF_MT_INTERLACE_MODE, MF_MT_MAJOR_TYPE, MF_MT_MINIMUM_DISPLAY_APERTURE,
-    MF_MT_SUBTYPE, MF_SA_D3D11_AWARE, MF_TRANSFORM_ASYNC, MF_VERSION, MFMediaType_Video, MFT_CATEGORY_VIDEO_DECODER, MFT_ENUM_FLAG, MFT_ENUM_FLAG_ASYNCMFT,
-    MFT_ENUM_FLAG_HARDWARE, MFT_ENUM_FLAG_SORTANDFILTER, MFT_ENUM_FLAG_SYNCMFT, MFT_FRIENDLY_NAME_Attribute, MFT_MESSAGE_COMMAND_DRAIN,
+    MF_MT_SUBTYPE, MF_SA_D3D11_AWARE, MF_TRANSFORM_ASYNC, MF_VERSION, MFMediaType_Video, MFT_CATEGORY_VIDEO_DECODER, MFT_CATEGORY_VIDEO_ENCODER, MFT_ENUM_FLAG,
+    MFT_ENUM_FLAG_ASYNCMFT, MFT_ENUM_FLAG_HARDWARE, MFT_ENUM_FLAG_SORTANDFILTER, MFT_ENUM_FLAG_SYNCMFT, MFT_FRIENDLY_NAME_Attribute, MFT_MESSAGE_COMMAND_DRAIN,
     MFT_MESSAGE_COMMAND_FLUSH, MFT_MESSAGE_NOTIFY_BEGIN_STREAMING, MFT_MESSAGE_NOTIFY_START_OF_STREAM, MFT_MESSAGE_SET_D3D_MANAGER, MFT_OUTPUT_DATA_BUFFER,
     MFT_OUTPUT_STREAM_PROVIDES_SAMPLES, MFT_REGISTER_TYPE_INFO, MFVideoFormat_NV12, MFVideoFormat_P010, MFVideoInterlace_Progressive,
 };
@@ -114,7 +114,7 @@ impl MfApi {
         Ok(manager)
     }
 
-    fn media_type(&self) -> Result<IMFMediaType, String> {
+    pub(super) fn media_type(&self) -> Result<IMFMediaType, String> {
         let mut raw = std::ptr::null_mut();
         // SAFETY: the out-pointer refers to a live local.
         let hr = unsafe { (self.create_media_type)(&mut raw) };
@@ -150,13 +150,41 @@ impl MfApi {
         Ok(sample)
     }
 
+    /// An empty sample with one system-memory buffer of `len` bytes.
+    pub(super) fn empty_sample(&self, len: u32) -> Result<(IMFSample, IMFMediaBuffer), String> {
+        let mut raw = std::ptr::null_mut();
+        // SAFETY: the out-pointer refers to a live local.
+        let hr = unsafe { (self.create_memory_buffer)(len, &mut raw) };
+        let buffer: IMFMediaBuffer = made(hr, raw, "MFCreateMemoryBuffer")?;
+        let mut raw = std::ptr::null_mut();
+        // SAFETY: the out-pointer refers to a live local.
+        let hr = unsafe { (self.create_sample)(&mut raw) };
+        let sample: IMFSample = made(hr, raw, "MFCreateSample")?;
+        // SAFETY: plain COM call on live interfaces.
+        unsafe { sample.AddBuffer(&buffer) }.map_err(|e| format!("cannot add a buffer to a sample: {e}"))?;
+        Ok((sample, buffer))
+    }
+
     /// The decoder MFTs taking input of `subtype`, hardware ones first, as activation objects.
     fn decoders(&self, subtype: GUID) -> Result<Vec<IMFActivate>, String> {
         let input = MFT_REGISTER_TYPE_INFO { guidMajorType: MFMediaType_Video, guidSubtype: subtype };
+        self.transforms(MFT_CATEGORY_VIDEO_DECODER, Some(&input), None)
+    }
+
+    /// The video encoder MFTs taking `input` and making `output` (both subtypes), hardware ones
+    /// first, as activation objects.
+    pub(super) fn encoders(&self, input: GUID, output: GUID) -> Result<Vec<IMFActivate>, String> {
+        let i = MFT_REGISTER_TYPE_INFO { guidMajorType: MFMediaType_Video, guidSubtype: input };
+        let o = MFT_REGISTER_TYPE_INFO { guidMajorType: MFMediaType_Video, guidSubtype: output };
+        self.transforms(MFT_CATEGORY_VIDEO_ENCODER, Some(&i), Some(&o))
+    }
+
+    fn transforms(&self, category: GUID, input: Option<&MFT_REGISTER_TYPE_INFO>, output: Option<&MFT_REGISTER_TYPE_INFO>) -> Result<Vec<IMFActivate>, String> {
         let flags = MFT_ENUM_FLAG(MFT_ENUM_FLAG_SYNCMFT.0 | MFT_ENUM_FLAG_ASYNCMFT.0 | MFT_ENUM_FLAG_HARDWARE.0 | MFT_ENUM_FLAG_SORTANDFILTER.0);
         let (mut list, mut count) = (std::ptr::null_mut::<*mut c_void>(), 0u32);
-        // SAFETY: the type info and the out-pointers refer to live locals.
-        let hr = unsafe { (self.enum_transforms)(MFT_CATEGORY_VIDEO_DECODER, flags.0 as u32, &input, std::ptr::null(), &mut list, &mut count) };
+        let ptr = |t: Option<&MFT_REGISTER_TYPE_INFO>| t.map_or(std::ptr::null(), |t| t as *const MFT_REGISTER_TYPE_INFO);
+        // SAFETY: the type infos (or nulls) and the out-pointers refer to live locals.
+        let hr = unsafe { (self.enum_transforms)(category, flags.0 as u32, ptr(input), ptr(output), &mut list, &mut count) };
         if hr.is_err() {
             return Err(format!("MFTEnumEx failed ({hr:?})"));
         }
@@ -413,7 +441,7 @@ pub fn describe(api: &MfApi, subtype: GUID) -> Vec<String> {
         .collect()
 }
 
-fn friendly_name(a: &IMFActivate) -> Option<String> {
+pub(super) fn friendly_name(a: &IMFActivate) -> Option<String> {
     // SAFETY: a plain COM call; `GetAllocatedString` returns a CoTaskMem string that the
     // returned `PWSTR` wrapper does not free, so it is freed here after copying.
     unsafe {
