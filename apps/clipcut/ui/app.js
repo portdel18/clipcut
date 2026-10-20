@@ -3679,8 +3679,8 @@ async function pause() {
 }
 function toggle() { (S.playing ? pause : play)(); }
 
-/* Shuttle (J K L, as in Premiere): L plays forward and each press doubles the speed (1×, 2×,
-   4×, 8×), J the same backward, K stops. 1× forward is the player with its sound; any other
+/* Shuttle (J K L, as in Premiere): L plays forward and each press goes one step faster
+   (`SHUTTLE`: 1×, 1.25×, 1.5×, 1.75×, 2×, 3×… 8×), J the same backward, K stops. 1× forward is the player with its sound; any other
    speed runs the playhead on the wall clock and shows the frames it can, without sound. */
 S.rate = 1;
 let shuttleRaf = 0;
@@ -3725,9 +3725,15 @@ function stopShuttle() {
   showFrame(S.t);
   drawVisible();
 }
+// J and L step through these speeds, one per press (the last one holds)
+const SHUTTLE = [1, 1.25, 1.5, 1.75, 2, 3, 4, 5, 6, 8];
 function shuttleOn(dir) {
   const going = S.playing ? S.rate : 0;
-  const next = Math.sign(going) === dir ? Math.max(-8, Math.min(8, going * 2)) : dir;
+  let next = dir;
+  if (Math.sign(going) === dir) {
+    const at = SHUTTLE.findIndex(r => r >= Math.abs(going) - 1e-9);
+    next = dir * SHUTTLE[Math.min(at < 0 ? SHUTTLE.length - 1 : at + 1, SHUTTLE.length - 1)];
+  }
   shuttle(next);
 }
 function showRate() {
@@ -4048,9 +4054,9 @@ const nudge = n => (S.cut != null ? rollCut(S.cut, n) : nudgeSel(n));
 /** Every action a key can do: `keys` are the defaults; `once` acts once per press, not while held. */
 const ACTIONS = [
   { group: 'Playback', id: 'play', label: 'Play or pause', keys: ['Space'], fn: () => toggle() },
-  { group: 'Playback', id: 'shuttle-on', label: 'Play forward; press again to go faster (2×, 4×, 8×)', keys: ['L'], once: true, fn: () => shuttleOn(1) },
+  { group: 'Playback', id: 'shuttle-on', label: 'Play forward; press again to go faster (1.25×, 1.5×, 1.75×, 2×, 3×…)', keys: ['L'], once: true, fn: () => shuttleOn(1) },
   { group: 'Playback', id: 'shuttle-stop', label: 'Stop', keys: ['K'], once: true, fn: () => { if (S.playing) pause(); } },
-  { group: 'Playback', id: 'shuttle-back', label: 'Play backward; press again to go faster (2×, 4×, 8×)', keys: ['J'], once: true, fn: () => shuttleOn(-1) },
+  { group: 'Playback', id: 'shuttle-back', label: 'Play backward; press again to go faster (1.25×, 1.5×, 1.75×, 2×, 3×…)', keys: ['J'], once: true, fn: () => shuttleOn(-1) },
   { group: 'Playback', id: 'frame-back', label: 'Back one frame', keys: ['ArrowLeft'], fn: () => seekBy(-frameStep()) },
   { group: 'Playback', id: 'frame-on', label: 'Forward one frame', keys: ['ArrowRight'], fn: () => seekBy(frameStep()) },
   { group: 'Playback', id: 'second-back', label: 'Back one second', keys: [], fn: () => seekBy(-1) },
