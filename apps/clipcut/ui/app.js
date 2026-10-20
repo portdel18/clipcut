@@ -94,6 +94,7 @@ const ICON = {
   music: svg('<path d="M9 18V6l10-2v12"/><circle cx="6.5" cy="18" r="2.5"/><circle cx="16.5" cy="16" r="2.5"/>'),
   plus: svg('<path d="M12 5v14M5 12h14"/>'),
   transition: svg('<path d="M3 6l9 6-9 6zM21 6l-9 6 9 6z"/>'),
+  camera: svg('<path d="M4 8h3l2-3h6l2 3h3v11H4z"/><circle cx="12" cy="13" r="3.5"/>'),
 };
 const has = () => !!(S.tl && S.tl.hasSequence);
 const dur = () => has() ? S.tl.duration : 0;
@@ -490,6 +491,16 @@ function renderMedia() {
       + `<button class="add">${ICON.plus}</button>`
       + '<div class="meta"><span></span><span class="dur"></span></div>';
     card.querySelector('.meta span').textContent = m.name;
+    if (video && !m.unreadable) {
+      const st = document.createElement('button');
+      st.className = 'still';
+      st.innerHTML = ICON.camera;
+      st.title = `Take a still of ${m.name}: for Thumbnails or as a PNG`;
+      st.setAttribute('aria-label', st.title);
+      st.addEventListener('pointerdown', e => e.stopPropagation());
+      st.addEventListener('click', e => { e.stopPropagation(); openStill(m.item, Math.min(1, m.duration / 2)); });
+      card.appendChild(st);
+    }
     if (m.proxy) { const b = document.createElement('span'); b.className = 'proxy-tag'; b.textContent = 'Proxy'; b.title = 'Has a small copy for smooth playback'; card.appendChild(b); }
     if (m.unreadable) { const b = document.createElement('span'); b.className = 'proxy-tag bad'; b.textContent = 'No picture'; b.title = m.unreadable; card.title = `${m.path}\n${m.unreadable}`; card.appendChild(b); }
     card.querySelector('.dur').textContent = fmtLen(m.duration);
@@ -497,7 +508,7 @@ function renderMedia() {
     add.title = video ? 'Add to the end of the main track' : 'Add below the main track, at the playhead';
     add.setAttribute('aria-label', `Add ${m.name}`);
     add.addEventListener('click', e => { e.stopPropagation(); video ? appendMedia(m.item) : addSoundAtPlayhead(m.item); });
-    card.addEventListener('pointerdown', e => { if (!e.target.closest('.add') && e.button === 0) startMediaDrag(m, e); });
+    card.addEventListener('pointerdown', e => { if (!e.target.closest('.add, .still') && e.button === 0) startMediaDrag(m, e); });
     card.addEventListener('dblclick', () => video ? appendMedia(m.item) : addSoundAtPlayhead(m.item));
     if (video) { paintMediaThumb(m, card.querySelector('canvas')); list.appendChild(card); } else sounds.appendChild(card);
   }
@@ -949,6 +960,92 @@ function wireFind() {
   $('#find-open').onclick = openFind;
 }
 
+/* Stills: a frame of a video file at its own size, for Thumbnails or as a PNG */
+const ST = { item: null, t: 0, name: '', fps: 30, len: 0, want: null, busy: false };
+/** The still at the playhead: of the selected clip under it, else the main track's. */
+async function stillAtPlayhead() {
+  if (!has()) return;
+  const sel = selectedClips().find(c => c.track[0] === 'V' && (c.kind === 'video' || c.kind === 'image') && c.start <= S.t + 1e-6 && c.end > S.t);
+  let src;
+  try { src = await invoke('still_source', { seconds: S.t, clip: sel ? sel.id : null }); } catch (e) { toast(e, true); return; }
+  openStill(src.item, src.seconds);
+}
+function openStill(item, t) {
+  const m = mediaOf(item);
+  if (!m) return;
+  ST.item = item;
+  ST.len = m.duration;
+  ST.name = m.name.replace(/\.[^.]+$/, '');
+  ST.fps = m.fps || (S.tl && S.tl.fps) || 30;
+  const r = $('#still-time');
+  r.max = String(Math.max(0, m.duration - 1 / ST.fps));
+  $('#still-title').textContent = `Still from ${m.name}`;
+  $('#still-time').disabled = m.kind === 'image';
+  stillSeek(t);
+  if (!$('#still-dlg').open) $('#still-dlg').showModal();
+}
+const fmtAt = t => { const mm = Math.floor(t / 60); return `${mm}:${(t - mm * 60).toFixed(2).padStart(5, '0')}`; };
+/** The still's name, as Thumbnails and the Save dialog show it. */
+const stillName = () => { const mm = Math.floor(ST.t / 60); return `${ST.name} ${String(mm).padStart(2, '0')}m${(ST.t - mm * 60).toFixed(2).padStart(5, '0')}s.png`; };
+function stillSeek(t) {
+  ST.t = Math.min(Math.max(0, t), +$('#still-time').max || 0);
+  $('#still-time').value = String(ST.t);
+  $('#still-at').textContent = fmtAt(ST.t);
+  stillPaint();
+}
+/** Shows the frame (only the latest wish waits while one is drawn). */
+async function stillPaint() {
+  ST.want = ST.t;
+  if (ST.busy) return;
+  ST.busy = true;
+  try {
+    while (ST.want != null) {
+      const t = ST.want;
+      ST.want = null;
+      try {
+        const img = toImage(await invoke('thumb', { item: ST.item, seconds: t, maxWidth: 960 }));
+        const c = $('#still-view');
+        c.width = img.width; c.height = img.height;
+        c.getContext('2d').putImageData(img, 0, 0);
+      } catch (_) { /* the next one */ }
+    }
+  } finally { ST.busy = false; }
+}
+async function stillToThumbnails() {
+  const { item, t } = ST, name = stillName();
+  $('#still-dlg').close();
+  let bytes;
+  try { bytes = await invoke('still_png', { item, seconds: t }); } catch (e) { toast(e, true); return; }
+  await openGraphics(null);
+  const w = graphicsWin();
+  if (!w || !w.CS || !w.CS.hosted.photo) { toast('Graphics did not load: try again.', true); return; }
+  const took = await w.CS.hosted.photo(new w.File([bytes], name, { type: 'image/png' }));
+  if (!took) { toast('Thumbnails could not open the still.', true); return; }
+  $('#graphics-note').innerHTML = 'Thumbnails, with the still as its photo. <b>Save</b> puts the picture where you choose.';
+}
+async function stillSave() {
+  const { item, t } = ST, name = stillName();
+  $('#still-dlg').close();
+  try {
+    const path = await invoke('save_still', { item, seconds: t, name });
+    if (path) toast(`Saved ${path.split(/[\\/]/).pop()}`);
+  } catch (e) { toast(e, true); }
+}
+function wireStill() {
+  $('#still-time').addEventListener('input', e => stillSeek(+e.target.value));
+  $('#still-prev').onclick = () => stillSeek(ST.t - 1 / ST.fps);
+  $('#still-next').onclick = () => stillSeek(ST.t + 1 / ST.fps);
+  $('#still-cancel').onclick = () => $('#still-dlg').close();
+  $('#still-thumb').onclick = stillToThumbnails;
+  $('#still-save').onclick = stillSave;
+  $('#still-btn').onclick = stillAtPlayhead;
+  $('#still-dlg').addEventListener('keydown', e => {
+    if (e.target.closest('input[type="range"]')) return;
+    if (e.key === 'ArrowLeft') { e.preventDefault(); stillSeek(ST.t - 1 / ST.fps); }
+    if (e.key === 'ArrowRight') { e.preventDefault(); stillSeek(ST.t + 1 / ST.fps); }
+  });
+}
+
 /* ---------- Graphics: Clip Studio over the editor; its graphics come in as clips ---------- */
 const TOOL_NAMES = { ul: 'Underline', mp: 'Map', sp: 'Split screen', sz: 'Scroll zoom', tl: 'Timeline', nm: 'Numbers', au: 'Audiogram', lt: 'Lower third' };
 const GR = { loaded: null, batch: false };
@@ -976,6 +1073,11 @@ window.__clipcutHost = {
     toast(replace != null ? 'Graphic updated' : 'Graphic added at the playhead');
   },
   abort: job => { invoke('graphic_abort', { job }).catch(() => {}); },
+  // Thumbnails' background-removal model: ClipCut downloads it once and keeps it (src/cutout.rs)
+  async model(name, progress) {
+    const off = await listen('cutout-model', e => { try { progress?.(e.payload.done, e.payload.total); } catch (_) {} });
+    try { return await invoke('cutout_model', { name }); } finally { off(); }
+  },
   // a thumbnail, a rendered video or presets Graphics would download: the Save dialog, then the file
   async save(blob, name) {
     let path;
@@ -2269,6 +2371,7 @@ function renderTools() {
   if (!S.tl) return;
   const cut = has() && cutTargets().length > 0;
   for (const id of ['#split-btn', '#delleft-btn', '#delright-btn']) $(id).disabled = !cut;
+  $('#still-btn').disabled = !has();
   $('#freeze-btn').disabled = !has() || !visibleClips().some(c => c.track[0] === 'V' && c.kind === 'video' && !c.props.freeze && c.start <= S.t + 1e-6 && c.end > S.t);
   $('#delete-btn').disabled = S.sel.size === 0 && !transitionAt(S.cut);
   $('#undo-btn').disabled = !S.tl.canUndo;
@@ -3638,6 +3741,7 @@ listen('caption-progress', e => {
 });
 wireTranscript();
 wireFind();
+wireStill();
 click('#play-btn', toggle);
 click('#export-btn', exportClip);
 click('#new-btn', newProject);
@@ -3740,6 +3844,7 @@ const ACTIONS = [
   { group: 'Playback', id: 'start', label: 'Go to the start', keys: ['Home'], fn: () => { seek(0); scrollToTime(0); } },
   { group: 'Playback', id: 'end', label: 'Go to the end', keys: ['End'], fn: () => { seek(Infinity); scrollToTime(dur()); } },
   { group: 'Editing', id: 'split', label: 'Split at the playhead', keys: ['S'], once: true, fn: () => split() },
+  { group: 'Editing', id: 'still', label: 'Take a still at the playhead (for Thumbnails or as a PNG)', keys: [], fn: () => stillAtPlayhead() },
   { group: 'Editing', id: 'freeze', label: 'Freeze the frame at the playhead', keys: ['F'], once: true, fn: () => freezeFrame() },
   { group: 'Editing', id: 'delleft', label: 'Delete to the left of the playhead', keys: ['Q'], once: true, fn: () => splitKeep('right') },
   { group: 'Editing', id: 'delright', label: 'Delete to the right of the playhead', keys: ['W'], once: true, fn: () => splitKeep('left') },

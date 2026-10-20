@@ -169,6 +169,7 @@
         <svg viewBox="0 0 24 24" id="play-icon" aria-hidden="true"><path d="M8 5v14l11-7z"/></svg>
       </button>
       <div class="t-right">
+        <button class="tool" id="still-btn" disabled data-tip="Still: this frame, for Thumbnails or as a PNG" data-keys="still" aria-label="Still"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 8h3l2-3h6l2 3h3v11H4z"/><circle cx="12" cy="13" r="3.5"/></svg></button>
         <label class="ratio" title="What TikTok, Reels or Shorts cover on a 9:16 video, or the safe zones (only in the player, never exported)">
           <select id="guide" aria-label="Overlay in the player">
             <option value="none">No overlay</option>
@@ -264,6 +265,18 @@
     <button class="btn" id="about-check">Check for updates</button>
     <button class="btn primary" id="about-install" hidden>Update and restart</button>
     <button class="btn" id="about-close">Close</button>
+  </div>
+</dialog>
+<dialog class="dlg wide" id="still-dlg" aria-labelledby="still-title">
+  <h2 id="still-title">Still</h2>
+  <canvas class="still-view" id="still-view" width="640" height="360"></canvas>
+  <label class="prop wide still-time"><span>Frame</span><input type="range" id="still-time" min="0" max="1" step="0.001" value="0"></label>
+  <div class="still-meta"><button class="tool" id="still-prev" title="One frame back (←)" aria-label="One frame back"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 6l-6 6 6 6"/></svg></button><span class="mono" id="still-at">0:00.00</span><button class="tool" id="still-next" title="One frame on (→)" aria-label="One frame on"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg></button></div>
+  <p class="dlg-text" id="still-note">The picture comes from the video file at its own size, without text or captions.</p>
+  <div class="dlg-actions">
+    <button class="btn" id="still-cancel">Cancel</button>
+    <button class="btn" id="still-save">Save as PNG…</button>
+    <button class="btn primary" id="still-thumb">Open in Thumbnails</button>
   </div>
 </dialog>
 <dialog class="dlg wide keys-dlg" id="keys-dlg" aria-labelledby="keys-title">

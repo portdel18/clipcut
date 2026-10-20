@@ -1611,11 +1611,17 @@
           <div class="field">
             <div class="btn-row">
               <button class="btn" id="th-photo-pick" type="button">Choose photo</button>
+              <button class="btn" id="th-photo-video" type="button">From a video…</button>
               <button class="btn small" id="th-photo-clear" type="button" hidden>Remove</button>
             </div>
             <span class="fname" id="th-photo-name"></span>
             <input type="file" id="th-photo-file" accept="image/*" hidden>
-            <p class="hint">Drag the preview to move the photo; scroll to zoom. You can also drop an image on the preview.</p>
+            <div class="btn-row th-photo-has" hidden>
+              <button class="btn" id="th-photo-cut" type="button" title="Take the background off the photo (an AI model on this computer: nothing is uploaded)">Remove background</button>
+            </div>
+            <p class="hint cut-status" id="th-photo-cutnote" hidden></p>
+            <input type="file" id="th-video-file" accept="video/*" hidden>
+            <p class="hint">Drag the preview to move the photo; scroll to zoom. You can also drop an image on the preview, or a video to pick one of its frames.</p>
           </div>
           <div class="row2">
             <div class="field"><label class="lbl" for="th-zoom">Zoom</label>
@@ -1751,6 +1757,10 @@
             </div>
             <span class="fname" id="th-inset-name"></span>
             <input type="file" id="th-inset-file" accept="image/*" hidden>
+            <div class="btn-row th-inset-has" hidden>
+              <button class="btn" id="th-inset-cut" type="button" title="Take the background off the inset (an AI model on this computer: nothing is uploaded)">Remove background</button>
+            </div>
+            <p class="hint cut-status" id="th-inset-cutnote" hidden></p>
             <p class="hint">A face, logo, or document. Drag it on the preview to place it; scroll over it to resize.</p>
           </div>
           <div class="th-inset-only group">
@@ -1969,6 +1979,25 @@
   </div>
 </dialog>
 
+<input type="file" id="th-model-file" accept=".onnx" hidden>
+<!-- A frame of a video, for the thumbnail's photo -->
+<dialog class="dlg" id="frame-dlg" aria-labelledby="frame-title">
+  <div class="dlg-in">
+    <h2 id="frame-title">Pick a frame</h2>
+    <div class="frame-stage"><video id="frame-video" muted playsinline preload="auto"></video></div>
+    <div class="field">
+      <label for="frame-time">Frame</label>
+      <input type="range" id="frame-time" min="0" max="1" step="0.001" value="0">
+      <div class="frame-meta"><button class="btn small" id="frame-prev" type="button" title="One frame back">◀</button><span class="mono" id="frame-at">0:00.00</span><button class="btn small" id="frame-next" type="button" title="One frame on">▶</button></div>
+    </div>
+    <p class="hint" id="frame-name"></p>
+    <div class="dlg-actions">
+      <button class="btn" id="frame-cancel" type="button">Cancel</button>
+      <button class="btn primary" id="frame-use" type="button">Use this frame</button>
+    </div>
+  </div>
+</dialog>
+
 <!-- Setup & help dialog -->
 <dialog class="dlg" id="help-dlg" aria-labelledby="help-title">
   <div class="dlg-in">
@@ -2006,6 +2035,7 @@
 <!-- App scripts: core first, then one file per tool, then app.js which wires the tabs and boots everything. -->
 <script src="libs.js"></script>
 <script src="js/core.js"></script>
+<script src="js/cutout.js"></script>
 <script src="js/platforms.js"></script>
 <script src="js/underline.js"></script>
 <script src="js/boundaries.js"></script>

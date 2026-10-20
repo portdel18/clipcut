@@ -405,3 +405,13 @@ h3.sub { margin: 12px 0 6px; font-size: 11px; font-weight: 600; color: var(--mut
 .stage.picking, .stage.picking canvas { cursor: crosshair; }
 .ch-hint { display: grid; gap: 6px; }
 .ch-hint:empty { display: none; }
+
+/* Still: a frame of a video, for Thumbnails or as a PNG */
+.still-view { display: block; width: 100%; height: auto; aspect-ratio: 16 / 9; object-fit: contain; border-radius: 8px; background: #000; margin: 0 0 10px; }
+.still-time { margin: 0 0 6px; }
+.still-meta { display: flex; align-items: center; justify-content: center; gap: 10px; font-family: var(--mono); color: var(--muted); }
+.still-meta .tool svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+#still-btn svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linejoin: round; }
+.media-card .still { position: absolute; top: 6px; left: 6px; width: 26px; height: 26px; display: none; place-items: center; border: 0; border-radius: 6px; background: rgba(0, 0, 0, .6); color: #fff; cursor: pointer; }
+.media-card:hover .still, .media-card .still:focus-visible { display: grid; }
+.media-card .still svg { width: 15px; height: 15px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linejoin: round; }

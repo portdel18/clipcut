@@ -12,6 +12,7 @@
 
 mod ahead;
 mod captioning;
+mod cutout;
 mod editing;
 mod graphics;
 mod playback;
@@ -350,6 +351,10 @@ fn main() {
         let get = |i: usize| args.get(i).map(String::as_str).unwrap_or("");
         std::process::exit(export_test(get(1), get(2), get(3), get(4)));
     }
+    if args.first().map(String::as_str) == Some("--model-test") {
+        let get = |i: usize| args.get(i).map(String::as_str).unwrap_or("");
+        std::process::exit(cutout::model_test(get(1), get(2)));
+    }
     if args.first().map(String::as_str) == Some("--caption-test") {
         let get = |i: usize| args.get(i).map(String::as_str).unwrap_or("");
         std::process::exit(captioning::caption_test(get(1), get(2), get(3), get(4), get(5)));
@@ -420,6 +425,10 @@ fn main() {
             updates::open_releases,
             updates::update_test,
             graphics::dropped_file,
+            graphics::still_source,
+            cutout::cutout_model,
+            graphics::still_png,
+            graphics::save_still,
             graphics::save_graphic_file,
             graphics::write_graphic_file,
             editing::timeline,

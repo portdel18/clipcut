@@ -51,7 +51,8 @@ if (!FONTS[th.font]) th.font = TH_DEFAULT.font;
 const toolTh = $('#tool-th');
 const thCanvas = $('#th-canvas'), thViewer = $('#th-viewer'), thMonitor = $('#th-monitor');
 const mctx = document.createElement('canvas').getContext('2d');
-const media = { photo: null, photoName: '', inset: null, insetName: '' };   // never stored
+const media = { photo: null, photoName: '', photoFull: null, inset: null, insetName: '', insetFull: null };   // never stored (…Full: as it was before Remove background)
+let cutBusy = false, cutWaiting = null;   // Remove background running; which picture a chosen model file is for
 let thL = null;
 
 /* ---------- layout ---------- */
@@ -315,11 +316,60 @@ bindSeg('th-format', th.out, 'format', () => thChanged('out.format'));
 
 async function setImage(which, f) {
   try {
-    media[which] = await loadImageFile(f); media[which + 'Name'] = f.name;
+    media[which] = await loadImageFile(f); media[which + 'Name'] = f.name; media[which + 'Full'] = null; cutNote(which, '');
     if (which === 'photo') { th.panX = 0; th.panY = 0; binds.zoom.set(1); }
     mediaUI(); thRefresh();
-  } catch (err) { toast('That file couldn’t be opened as an image. Try a JPEG, PNG, or WebP.'); }
+    return true;
+  } catch (err) { toast('That file couldn’t be opened as an image. Try a JPEG, PNG, or WebP.'); return false; }
 }
+// the app's own stills (ClipCut: a frame of its video) come in as the photo
+window.CS.hosted.onPhoto(f => setImage('photo', f));
+
+/* A frame of a video as the photo: the video plays in a dialog, the slider picks the frame */
+const FR = { url: null, name: '', fps: 30 };
+const frVideo = $('#frame-video');
+function fmtAt(t) { const m = Math.floor(t / 60); return `${m}:${(t - m * 60).toFixed(2).padStart(5, '0')}`; }
+async function openFramePicker(f) {
+  if (FR.url) URL.revokeObjectURL(FR.url);
+  FR.url = URL.createObjectURL(f);
+  FR.name = f.name.replace(/\.[^.]+$/, '');
+  frVideo.src = FR.url;
+  try {
+    await new Promise((res, rej) => { frVideo.onloadeddata = res; frVideo.onerror = () => rej(new Error('bad')); });
+  } catch (_) { toast('That video couldn’t be opened here. Try an MP4 (H.264) or WebM file.'); return; }
+  const r = $('#frame-time');
+  r.max = String(Math.max(0, frVideo.duration - 0.001));
+  r.value = String(Math.min(frVideo.duration / 2, 1));
+  frVideo.currentTime = +r.value;
+  $('#frame-at').textContent = fmtAt(+r.value);
+  $('#frame-name').textContent = f.name;
+  $('#frame-dlg').showModal();
+}
+function seekFrame(t) {
+  const r = $('#frame-time');
+  t = Math.min(Math.max(0, t), +r.max);
+  r.value = String(t);
+  frVideo.currentTime = t;
+  $('#frame-at').textContent = fmtAt(t);
+}
+$('#frame-time').addEventListener('input', e => seekFrame(+e.target.value));
+$('#frame-prev').addEventListener('click', () => seekFrame(frVideo.currentTime - 1 / FR.fps));
+$('#frame-next').addEventListener('click', () => seekFrame(frVideo.currentTime + 1 / FR.fps));
+$('#frame-cancel').addEventListener('click', () => $('#frame-dlg').close());
+$('#frame-dlg').addEventListener('close', () => { frVideo.removeAttribute('src'); frVideo.load(); if (FR.url) { URL.revokeObjectURL(FR.url); FR.url = null; } });
+$('#frame-use').addEventListener('click', async () => {
+  const c = document.createElement('canvas');
+  c.width = frVideo.videoWidth; c.height = frVideo.videoHeight;
+  if (!c.width || !c.height) { toast('That frame couldn’t be read. Move the slider a little and try again.'); return; }
+  c.getContext('2d').drawImage(frVideo, 0, 0);
+  const blob = await new Promise(res => c.toBlob(res, 'image/png'));
+  if (!blob) { toast('That frame couldn’t be read. Move the slider a little and try again.'); return; }
+  const name = `${FR.name} ${fmtAt(frVideo.currentTime).replace(':', '.')}.png`;
+  $('#frame-dlg').close();
+  setImage('photo', new File([blob], name, { type: 'image/png' }));
+});
+$('#th-photo-video').addEventListener('click', () => $('#th-video-file').click());
+$('#th-video-file').addEventListener('change', e => { const f = e.target.files[0]; e.target.value = ''; if (f) openFramePicker(f); });
 for (const which of ['photo', 'inset']) {
   $(`#th-${which}-file`).addEventListener('change', e => { const f = e.target.files[0]; e.target.value = ''; if (f) setImage(which, f); });
 }
@@ -329,19 +379,73 @@ thViewer.addEventListener('dragover', e => { if ([...e.dataTransfer.items].some(
 thViewer.addEventListener('dragleave', () => thViewer.classList.remove('dropping'));
 thViewer.addEventListener('drop', e => {
   e.preventDefault(); thViewer.classList.remove('dropping');
-  const f = [...e.dataTransfer.files].find(x => x.type.startsWith('image/'));
-  if (f) setImage('photo', f); else toast('Drop an image file (JPEG, PNG, or WebP).');
+  const files = [...e.dataTransfer.files];
+  const f = files.find(x => x.type.startsWith('image/'));
+  const v = files.find(x => x.type.startsWith('video/'));
+  if (f) setImage('photo', f); else if (v) openFramePicker(v); else toast('Drop an image file (JPEG, PNG, or WebP), or a video to pick a frame from.');
 });
 function mediaUI() {
   for (const which of ['photo', 'inset']) {
     $(`#th-${which}-name`).textContent = media[which + 'Name'];
     $(`#th-${which}-clear`).hidden = !media[which];
+    document.querySelector(`.th-${which}-has`).hidden = !media[which];
+    const b = $(`#th-${which}-cut`);
+    b.textContent = media[which + 'Full'] ? 'Put background back' : 'Remove background';
+    b.disabled = cutBusy;
   }
 }
+
+/* Remove background: the photo or inset through the cut-out model (CS.cutout); the picture as it was
+   is kept, so the background can come back */
+function cutNote(which, text, chooseFile = false) {
+  const n = $(`#th-${which}-cutnote`);
+  n.hidden = !text;
+  n.textContent = text || '';
+  if (chooseFile) {
+    const b = document.createElement('button');
+    b.className = 'btn small'; b.type = 'button'; b.textContent = 'Choose model file';
+    b.addEventListener('click', () => { cutWaiting = which; $('#th-model-file').click(); });
+    n.append(' ', b);
+  }
+}
+async function toggleCut(which) {
+  if (cutBusy || !media[which]) return;
+  if (media[which + 'Full']) {
+    media[which] = media[which + 'Full']; media[which + 'Full'] = null;
+    cutNote(which, ''); mediaUI(); thRefresh();
+    return;
+  }
+  cutBusy = true; mediaUI();
+  const src = media[which];
+  const t0 = performance.now();
+  try {
+    cutNote(which, 'Getting the background model ready…');
+    const img = await window.CS.cutout(src, (done, total, phase) => {
+      if (phase === 'start') cutNote(which, 'Removing the background… (a few seconds on a graphics card, up to half a minute without one)');
+      else cutNote(which, `Downloading the background model, once: ${Math.round(done / 1e6)} of ${Math.round(total / 1e6)} MB`);
+    });
+    if (media[which] !== src) return; // another picture was chosen meanwhile
+    media[which + 'Full'] = src;
+    media[which] = img;
+    cutNote(which, `Background removed in ${((performance.now() - t0) / 1000).toFixed(1)} s. Hair and soft edges may need a plainer background colour behind them.`);
+    thRefresh();
+  } catch (e) {
+    cutNote(which, e.message || String(e), !!e.needsFile);
+  } finally { cutBusy = false; mediaUI(); }
+}
+$('#th-photo-cut').addEventListener('click', () => toggleCut('photo'));
+$('#th-inset-cut').addEventListener('click', () => toggleCut('inset'));
+$('#th-model-file').addEventListener('change', async e => {
+  const f = e.target.files[0]; e.target.value = '';
+  const which = cutWaiting || 'photo';
+  cutWaiting = null;
+  if (!f) return;
+  try { await window.CS.cutout.useFile(f); cutNote(which, 'Model ready.'); toggleCut(which); } catch (err) { cutNote(which, err.message, true); }
+});
 $('#th-photo-pick').addEventListener('click', () => pickImage('photo'));
 $('#th-inset-pick').addEventListener('click', () => pickImage('inset'));
-$('#th-photo-clear').addEventListener('click', () => { media.photo = null; media.photoName = ''; mediaUI(); thRefresh(); });
-$('#th-inset-clear').addEventListener('click', () => { media.inset = null; media.insetName = ''; selInset = false; mediaUI(); thRefresh(); });
+$('#th-photo-clear').addEventListener('click', () => { media.photo = null; media.photoFull = null; media.photoName = ''; cutNote('photo', ''); mediaUI(); thRefresh(); });
+$('#th-inset-clear').addEventListener('click', () => { media.inset = null; media.insetFull = null; media.insetName = ''; selInset = false; cutNote('inset', ''); mediaUI(); thRefresh(); });
 $('#th-recenter').addEventListener('click', () => { th.panX = 0; th.panY = 0; binds.zoom.set(1); thRefresh(); });
 
 // Drag on the preview: the inset picture moves when you grab it; anywhere else pans the photo. Scroll zooms the photo.

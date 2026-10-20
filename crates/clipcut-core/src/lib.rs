@@ -284,6 +284,42 @@ impl Studio {
         Thumbs { project: self.session.project.clone(), provider: self.session.media.provider(self.session.project.clone(), self.session.services.clone()) }
     }
 
+    /// [`Studio::thumbs`] from the original files, never their proxies: stills at full quality.
+    pub fn stills(&self) -> Thumbs {
+        Thumbs {
+            project: self.session.project.clone(),
+            provider: self.session.media.full_res_provider(self.session.project.clone(), self.session.services.clone()),
+        }
+    }
+
+    /// The picture a still at `seconds` comes from: clip `clip` (or the main track's clip there),
+    /// as (media item, seconds into the media, a name for the still: the media's and the time).
+    pub fn still_source(&self, seconds: f64, clip: Option<u64>) -> Result<(u64, f64, String)> {
+        let t = self.frame_tick(seconds)?;
+        let q = self.session.active_sequence().ok_or(Error::NothingOpen)?;
+        let under = |i: &filmcraft_project::TrackItem| i.start <= t && t < i.end();
+        let item = match clip {
+            Some(c) => q
+                .find_item(filmcraft_project::ClipId(c))
+                .map(|(_, i)| i)
+                .filter(|i| under(i))
+                .ok_or_else(|| Error::Invalid("move the playhead over the clip to take a still of it".into()))?,
+            None => q
+                .video_tracks
+                .first()
+                .and_then(|tr| tr.items.iter().find(|i| under(i)))
+                .ok_or_else(|| Error::Invalid("move the playhead over a clip on the main track to take a still".into()))?,
+        };
+        let pi = self.session.project.item(item.item).ok_or_else(|| Error::Invalid("that clip's media is missing".into()))?;
+        if self.session.project.resolve_media(item.item).and_then(|(_, m, _)| m.info.video.as_ref()).is_none() {
+            return Err(Error::Invalid(format!("{} has no picture to take a still of", pi.name)));
+        }
+        let at = item.source_time_at(t).seconds().max(0.0);
+        let stem = std::path::Path::new(&pi.name).file_stem().and_then(|s| s.to_str()).unwrap_or("Still").to_string();
+        let (m, sec) = ((at / 60.0).floor() as i64, at % 60.0);
+        Ok((item.item.0, at, format!("{stem} {m:02}m{sec:05.2}s.png")))
+    }
+
     /// Starts exporting the whole sequence to `path` as a background job and returns its id. The
     /// format follows the extension: `.mp4` is H.264 with AAC, `.mov` ProRes, `.wav` sound only.
     pub fn export(&mut self, path: &str) -> Result<u64> {

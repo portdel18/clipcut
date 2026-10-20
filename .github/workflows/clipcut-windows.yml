@@ -117,6 +117,22 @@ jobs:
           }
           Remove-Item Env:\FILMCRAFT_MF_SOFTWARE_ENCODER -ErrorAction SilentlyContinue
 
+      - name: Background model cache (Thumbnails' Remove background)
+        uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}/cutout-models
+          key: clipcut-cutout-isnet-60920e99
+
+      - name: Background model download and checksum
+        shell: pwsh
+        run: |
+          # Remove background (Graphics > Thumbnails) downloads ISNet from rembg's release: it must be
+          # there, and be the file src/cutout.rs and Clip Studio's js/cutout.js pin (size and SHA-256)
+          $exe = @("target\release\ClipCut.exe", "target\release\clipcut.exe") | Where-Object { Test-Path $_ } | Select-Object -First 1
+          $p = Start-Process -FilePath $exe -ArgumentList "--model-test", "$env:RUNNER_TEMP\cutout-models", "model-report.json" -Wait -PassThru -NoNewWindow
+          Get-Content model-report.json
+          if ($p.ExitCode -ne 0) { throw "the background model couldn't be downloaded and checked" }
+
       - name: Speech model cache (Whisper tiny, for the captions test)
         uses: actions/cache@v4
         with:
