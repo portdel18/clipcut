@@ -178,6 +178,34 @@ fn cancel_export(job: u64, app: tauri::State<'_, App>) -> Result<(), String> {
     lock(&app.studio).cancel(job).map_err(|e| e.to_string())
 }
 
+/// The most the problems log keeps (older lines go first).
+const PROBLEMS_MAX: usize = 256 * 1024;
+
+/// Writes a problem the interface worked around (`what`: what failed, `detail`: its own words) to
+/// `problems.log` in ClipCut's log folder, with the time and version, so it can be sent along with a
+/// report. Returns the file's path.
+#[tauri::command]
+fn note_problem(what: String, detail: String, handle: tauri::AppHandle) -> Result<String, String> {
+    use tauri::Manager;
+    let dir = handle.path().app_log_dir().map_err(|e| e.to_string())?;
+    std::fs::create_dir_all(&dir).map_err(|e| format!("Couldn't make {}: {e}", dir.display()))?;
+    let path = dir.join("problems.log");
+    let secs = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
+    let clip = |s: &str, n: usize| s.chars().take(n).collect::<String>().replace(['\r', '\n'], " ");
+    let line = format!("[{secs} ClipCut {}] {}: {}\n", env!("CARGO_PKG_VERSION"), clip(&what, 200), clip(&detail, 4000));
+    let mut text = std::fs::read_to_string(&path).unwrap_or_default();
+    text.push_str(&line);
+    if text.len() > PROBLEMS_MAX {
+        let mut cut = text.len() - PROBLEMS_MAX;
+        while !text.is_char_boundary(cut) {
+            cut += 1;
+        }
+        text = text.split_off(cut);
+    }
+    std::fs::write(&path, text).map_err(|e| format!("Couldn't write {}: {e}", path.display()))?;
+    Ok(path.to_string_lossy().into_owned())
+}
+
 /// Shows `path` in the system's file manager.
 #[tauri::command]
 fn reveal(path: String) -> Result<(), String> {
@@ -386,6 +414,7 @@ fn main() {
             hardware_frames,
             cancel_export,
             reveal,
+            note_problem,
             updates::check_update,
             updates::install_update,
             updates::open_releases,

@@ -276,3 +276,29 @@ fn after_the_last_keyframe_a_clip_goes_straight_back_unless_it_holds() {
     assert!(loud(&s, 0.9) < loud_before * 0.2, "quiet near the last keyframe");
     assert!(loud(&s, 1.5) > loud_before * 0.8, "the sound comes back too: {} vs {loud_before}", loud(&s, 1.5));
 }
+
+#[test]
+fn a_fade_in_works_on_any_main_clip_and_next_to_a_transition() {
+    let Some((mut s, _)) = studio() else { return };
+    s.add_clip(clip("kf-white", "white").unwrap().to_str().unwrap()).unwrap();
+    s.add_clip(clip("kf-white", "white").unwrap().to_str().unwrap()).unwrap();
+    let m = main(&s.timeline());
+    let full = loud(&s, 3.0);
+    // the second clip, with a clip before it: its sound starts quiet
+    s.set_props(&[m[1]], &json!({"fadeIn": 1.0}), None).unwrap();
+    assert!(loud(&s, 2.1) < full * 0.4, "quiet just after the cut: {} vs {full}", loud(&s, 2.1));
+    assert!(loud(&s, 3.5) > full * 0.8);
+    assert!(loud(&s, 1.9) > full * 0.8, "the clip before is untouched: {}", loud(&s, 1.9));
+    // the last clip too
+    s.set_props(&[m[2]], &json!({"fadeIn": 0.5}), None).unwrap();
+    assert!(loud(&s, 4.1) < full * 0.5, "{}", loud(&s, 4.1));
+    assert!(loud(&s, 2.1) < full * 0.4, "the first fade stays: {}", loud(&s, 2.1));
+
+    // with a transition on the cut before it, the fade still starts quiet
+    s.undo().unwrap();
+    s.undo().unwrap();
+    s.set_transition(m[0], "mix", Some(0.5)).unwrap();
+    s.set_props(&[m[1]], &json!({"fadeIn": 1.0}), None).unwrap();
+    assert!(loud(&s, 2.1) < full * 0.4, "next to a transition: {}", loud(&s, 2.1));
+    assert!(loud(&s, 3.5) > full * 0.8);
+}
