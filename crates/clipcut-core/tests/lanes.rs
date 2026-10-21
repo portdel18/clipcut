@@ -118,10 +118,8 @@ fn overlays_carry_their_sound_and_move_as_one() {
     assert_eq!(opic.track, "V3");
     s.move_clip(opic.id, "V2", 1.0).unwrap();
     assert_eq!(by_id(&s.timeline(), opic.id).track, "V3", "it can't land on the first overlay");
-    // pictures never go below the main track, nor onto it
+    // pictures never go below the main track
     assert!(s.move_clip(pic.id, "A2", 0.0).is_err());
-    assert!(s.move_clip(pic.id, "V1", 0.0).is_err());
-    assert!(s.move_clip(on(&s.timeline(), "V1")[0].id, "V2", 0.0).is_err());
     // nothing goes before 0
     s.move_clip(pic.id, "V2", -5.0).unwrap();
     assert!(by_id(&s.timeline(), pic.id).start.abs() < EPS);
@@ -293,4 +291,58 @@ fn dropped_files_go_where_they_belong() {
     let lane = on(&v, "A2");
     assert_eq!(lane.len(), 1, "the sound goes on a lane");
     assert!((lane[0].start - 1.0).abs() < EPS);
+}
+
+#[test]
+fn clips_move_freely_between_lanes_and_the_main_track() {
+    let Some((mut s, _, video)) = setup() else { return };
+    let first = s.add_to_lane(video, 0.0).unwrap();
+    let second = s.add_to_lane(video, 3.0).unwrap();
+    let v = s.timeline();
+    let pic = |ids: &[u64], v: &TimelineView| ids.iter().map(|i| by_id(v, *i)).find(|c| c.track.starts_with('V')).unwrap();
+    let (a, b) = (pic(&first, &v), pic(&second, &v));
+    assert_eq!((a.track.as_str(), b.track.as_str()), ("V2", "V2"));
+    // up to a lane of its own, and back down to one that is free there
+    s.move_clip(b.id, "V3", 3.0).unwrap();
+    assert_eq!(by_id(&s.timeline(), b.id).track, "V3");
+    s.move_clip(b.id, "V2", 3.0).unwrap();
+    assert_eq!(by_id(&s.timeline(), b.id).track, "V2", "a free lane takes it");
+    // onto a lane that is taken there: a new lane right above it, never back where it came from
+    s.move_clip(b.id, "V3", 3.0).unwrap();
+    s.move_clip(b.id, "V2", 0.5).unwrap();
+    let v = s.timeline();
+    assert_eq!(by_id(&v, b.id).track, "V3", "just above the lane it was dropped on: {:#?}", on(&v, "V3"));
+    assert_eq!(by_id(&v, a.id).track, "V2", "the clip that was there stays");
+    // into the main track, at the cut nearest where it is dropped (between the two clips)
+    let mains = on(&v, "V1");
+    assert_eq!(mains.len(), 2);
+    s.move_clip(a.id, "V1", 1.9).unwrap();
+    let v = s.timeline();
+    let m = on(&v, "V1");
+    assert_eq!(m.len(), 3, "{m:#?}");
+    assert_eq!(m[1].id, a.id);
+    assert!((m[1].start - 2.0).abs() < EPS && (m[2].start - 4.0).abs() < EPS, "{m:#?}");
+    // its sound came with it, onto the main track's sound, in step
+    let snd = on(&v, "A1");
+    assert!(snd.iter().any(|c| c.link == by_id(&v, a.id).link && (c.start - 2.0).abs() < EPS), "{snd:#?}");
+    assert_eq!(v.undo_label.as_deref(), Some("Move"));
+    // and off the main track again: the main track closes up, its sound goes to a lane
+    s.move_clip(a.id, "V2", 1.0).unwrap();
+    let v = s.timeline();
+    assert_eq!(on(&v, "V1").len(), 2);
+    assert!((on(&v, "V1")[1].start - 2.0).abs() < EPS, "the main track closed up");
+    let moved = by_id(&v, a.id);
+    assert!(moved.track.starts_with('V') && moved.track != "V1" && (moved.start - 1.0).abs() < EPS, "{moved:?}");
+    let msnd = v.clips.iter().find(|c| c.link == moved.link && c.id != a.id).unwrap();
+    assert!(msnd.track.starts_with('A') && msnd.track != "A1" && (msnd.start - 1.0).abs() < EPS, "{msnd:?}");
+    // one undo step each
+    s.undo().unwrap();
+    assert_eq!(on(&s.timeline(), "V1").len(), 3);
+    // text stays on the lanes; the main track's only clip stays put
+    let t = s.add_text(0.0, 1.0, "Hello", &json!({})).unwrap();
+    assert!(s.move_clip(t, "V1", 0.0).is_err());
+    let mut one = Studio::new();
+    one.add_clip(clip("tl-a", "testsrc2", 440).unwrap().to_str().unwrap()).unwrap();
+    let only = on(&one.timeline(), "V1")[0].id;
+    assert!(one.move_clip(only, "V2", 0.0).is_err());
 }

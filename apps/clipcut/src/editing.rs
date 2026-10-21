@@ -327,6 +327,25 @@ pub async fn move_clip(clip: u64, lane: String, seconds: f64, app: tauri::State<
     edit(&app, move |s| s.move_clip(clip, &lane, seconds)).await
 }
 
+/// Ctrl+C: keeps clips `clips` (and their linked sound) to paste. Returns how many.
+#[tauri::command]
+pub fn copy_clips(clips: Vec<u64>, app: tauri::State<'_, App>) -> Result<usize, String> {
+    lock(&app.studio).copy_clips(&clips).map_err(|e| e.to_string())
+}
+
+/// Ctrl+V: copies of the copied clips at `seconds` (the same media: graphics are not rendered again).
+#[tauri::command]
+pub async fn paste_clips(seconds: f64, app: tauri::State<'_, App>) -> Result<ClipResult, String> {
+    let (studio, player) = (app.studio.clone(), app.player.clone());
+    blocking(move || {
+        lock(&player).stop();
+        let mut s = lock(&studio);
+        let clips = s.paste(seconds).map_err(|e| e.to_string())?;
+        Ok(ClipResult { timeline: s.timeline(), clips })
+    })
+    .await
+}
+
 #[tauri::command]
 pub async fn move_clips(clips: Vec<u64>, seconds: f64, app: tauri::State<'_, App>) -> Result<TimelineView, String> {
     edit(&app, move |s| s.move_clips(&clips, seconds)).await

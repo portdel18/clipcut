@@ -14,6 +14,7 @@ mod animations;
 mod beats;
 mod captions;
 mod channels;
+mod clipboard;
 mod colour;
 mod ducking;
 mod exporting;
@@ -28,6 +29,7 @@ mod props;
 mod replace;
 mod returns;
 mod scopes;
+mod shuttle;
 mod timeline;
 mod timing;
 mod titles;
@@ -57,6 +59,7 @@ pub use preview::{FrameFeed, QUALITIES, preview_scale};
 pub use props::{ClipProps, PEAKS_PER_SECOND, Peaks, TextProps};
 pub use replace::Replaced;
 pub use scopes::SCOPES;
+pub use shuttle::Stretcher;
 pub use timeline::{ClipView, Keep, LaneView, MediaView, ProjectView, TimelineView};
 pub use timing::FREEZE_SECONDS;
 pub use titles::{MY_TITLES, TitleView};
@@ -196,6 +199,8 @@ pub struct Studio {
     merge: Option<(String, Arc<Project>)>,
     /// What made each graphic folder seen so far (see `graphics.rs`).
     graphics: std::sync::Mutex<std::collections::HashMap<std::path::PathBuf, Option<String>>>,
+    /// The clips Ctrl+C copied (`clipboard.rs`).
+    clipboard: clipboard::Copied,
 }
 
 impl Default for Studio {
@@ -210,7 +215,7 @@ impl Studio {
         // a clip of another size fits the frame when it's added (CapCut-style), through its Scale,
         // so it stays sharp when zoomed in; the engine's own default leaves it at its pixel size
         session.prefs.media.default_media_scaling = "setToFrameSize".into();
-        Self { session, merge: None, graphics: Default::default() }
+        Self { session, merge: None, graphics: Default::default(), clipboard: Default::default() }
     }
 
     /// The engine session, for operations this façade doesn't cover yet.

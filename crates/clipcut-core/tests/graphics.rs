@@ -189,3 +189,76 @@ fn a_graphic_can_start_a_video_and_says_what_is_wrong() {
     assert!(s.add_graphic(&g.join("frame_99999.png").to_string_lossy(), 30.0, 0.0, None).is_err());
     let _ = std::fs::remove_dir_all(g);
 }
+
+#[test]
+fn a_graphic_is_copied_and_pasted_without_rendering_it_again() {
+    let (Some(v), Some(g)) = (video(), graphic("paste", "red", 15, true)) else { return };
+    let mut s = Studio::new();
+    s.add_clip(v.to_str().unwrap()).unwrap();
+    let made = s.add_graphic(&first(&g), 30.0, 0.0, None).unwrap();
+    assert_eq!(made.len(), 2, "picture and sound: {made:?}");
+    s.set_props(&made[..1], &serde_json::json!({"x": 100.0}), None).unwrap();
+    let items_before = s.timeline().media.len();
+    assert_eq!(s.copy_clips(&made).unwrap(), 2);
+    let pasted = s.paste(1.0).unwrap();
+    assert_eq!(pasted.len(), 2, "{pasted:?}");
+    let (a, b) = (clip(&s, made[0]), clip(&s, pasted.iter().copied().find(|c| !clip(&s, *c).track.starts_with('A')).unwrap()));
+    // the same graphic, from the same files: nothing was rendered or imported again
+    assert_eq!(s.timeline().media.len(), items_before, "no new media");
+    assert_eq!(b.graphic.as_deref(), Some("lt"));
+    assert_eq!(b.name, a.name);
+    assert!((b.start - 1.0).abs() < 1e-6 && (b.end - b.start - (a.end - a.start)).abs() < 1e-6, "{b:?}");
+    assert_eq!(b.track, a.track, "its own lane is free at 1 s");
+    assert_eq!(b.props.x, a.props.x, "its position and look come along");
+    let snd = pasted.iter().map(|c| clip(&s, *c)).find(|c| c.track.starts_with('A')).unwrap();
+    assert!((snd.start - 1.0).abs() < 1e-6, "its sound is pasted with it: {snd:?}");
+    // the copy looks as the first one does, a second later (the video under them is one blue)
+    assert!(s.frame(0.2, 320).unwrap().rgba == s.frame(1.2, 320).unwrap().rgba, "the copy shows as the original does");
+    assert!(s.frame(0.2, 320).unwrap().rgba != s.frame(0.7, 320).unwrap().rgba, "and the graphic does show");
+    // pasted where the first one is: it goes on another lane
+    let again = s.paste(0.0).unwrap();
+    let c = again.iter().map(|c| clip(&s, *c)).find(|c| c.track.starts_with('V')).unwrap();
+    assert!(c.track != a.track && (c.start).abs() < 1e-6, "{c:?}");
+    // editing the first one in Graphics replaces it alone: the copies stay
+    let updated = s.add_graphic(&first(&g), 30.0, 0.0, Some(made[0])).unwrap();
+    let v = s.timeline();
+    for id in pasted.iter().chain(&again) {
+        assert!(v.clips.iter().any(|c| c.id == *id), "copy {id} stayed: {:#?}", v.clips);
+    }
+    assert!(v.clips.iter().all(|c| c.id != made[0] && c.id != made[1]));
+    assert_eq!(updated.len(), 2);
+    // each paste is one undo step
+    s.undo().unwrap();
+    s.undo().unwrap();
+    assert!(s.timeline().clips.iter().all(|c| !again.contains(&c.id)));
+    s.undo().unwrap();
+    assert!(s.timeline().clips.iter().all(|c| !pasted.contains(&c.id)));
+}
+
+#[test]
+fn main_clips_paste_into_the_main_track_after_the_clip_under_the_playhead() {
+    let Some(v) = video() else { return };
+    let mut s = Studio::new();
+    s.add_clip(v.to_str().unwrap()).unwrap();
+    s.add_clip(v.to_str().unwrap()).unwrap();
+    let mains = |s: &Studio| {
+        let mut m: Vec<ClipView> = s.timeline().clips.into_iter().filter(|c| c.track == "V1").collect();
+        m.sort_by(|a, b| a.start.total_cmp(&b.start));
+        m
+    };
+    let first_id = mains(&s)[0].id;
+    s.copy_clips(&[first_id]).unwrap();
+    // the playhead in the middle of the first clip: the copy goes in after it, nothing is cut
+    let pasted = s.paste(0.7).unwrap();
+    let m = mains(&s);
+    assert_eq!(m.len(), 3);
+    assert!(pasted.contains(&m[1].id), "{m:#?}");
+    assert!((m[1].start - 2.0).abs() < 1e-6 && (m[2].start - 4.0).abs() < 1e-6 && (m[2].end - 6.0).abs() < 1e-6, "{m:#?}");
+    // its sound came along, in step
+    let snd: Vec<ClipView> = s.timeline().clips.into_iter().filter(|c| c.track == "A1").collect();
+    assert_eq!(snd.len(), 3);
+    assert!(snd.iter().any(|c| (c.start - 2.0).abs() < 1e-6 && pasted.contains(&c.id)), "{snd:#?}");
+    assert!(s.paste(f64::NAN).is_err());
+    let mut empty = Studio::new();
+    assert!(empty.paste(0.0).is_err() && !empty.can_paste());
+}

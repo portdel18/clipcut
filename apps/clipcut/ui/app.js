@@ -702,6 +702,101 @@ async function openCaptionsPanel() {
   renderCaptionsPanel();
   loadWords();
 }
+/* The captions' look, one control per setting (presets above set many at once). Dragged sliders
+   send their latest value, one undo step per drag. */
+const CSTY = { built: false, controls: [] };
+function sendCapStyle(patch, merge) { latest('set_caption_style', { style: merge ? { ...patch, merge } : patch }); }
+function buildCapStyle() {
+  if (CSTY.built) return;
+  CSTY.built = true;
+  const box = $('#cap-style-form');
+  const add = (el, read, write) => { CSTY.controls.push({ el, read, write }); return el; };
+  const range = (label, key, { min, max, step, unit = '', toView = v => v, fromView = v => v }) => {
+    const row = document.createElement('label');
+    row.className = 'prop';
+    row.innerHTML = `<span>${label}</span><input type="range" min="${min}" max="${max}" step="${step}"><input type="number" min="${min}" max="${max}" step="${step}" title="${unit}">`;
+    const [r, n] = row.querySelectorAll('input');
+    r.id = `cs-${key}`;
+    let k = nextKey(`cs-${key}`);
+    r.addEventListener('input', () => { n.value = r.value; sendCapStyle({ [key]: fromView(+r.value) }, k); });
+    r.addEventListener('change', () => { k = nextKey(`cs-${key}`); r.blur(); });
+    n.addEventListener('change', () => { const v = clamp(+n.value, min, max); if (Number.isFinite(v)) { r.value = n.value = v; sendCapStyle({ [key]: fromView(v) }); } });
+    add(r, st => toView(st[key]));
+    add(n, st => toView(st[key]));
+    return row;
+  };
+  const colour = (label, key, extra) => {
+    const row = document.createElement('label');
+    row.className = 'prop wide';
+    row.innerHTML = `<span>${label}</span><span class="cs-line"><input type="color"></span>`;
+    const c = row.querySelector('input');
+    c.id = `cs-${key}`;
+    let k = nextKey(`cs-${key}`);
+    c.addEventListener('input', () => sendCapStyle({ [key]: c.value, ...(extra ? extra() : {}) }, k));
+    c.addEventListener('change', () => { k = nextKey(`cs-${key}`); });
+    add(c, st => st[key]);
+    return row;
+  };
+  const seg = (label, key, opts) => {
+    const row = document.createElement('div');
+    row.className = 'prop wide';
+    row.innerHTML = `<span>${label}</span><div class="seg"></div>`;
+    const g = row.querySelector('.seg');
+    for (const [v, text] of opts) {
+      const b = document.createElement('button');
+      b.textContent = text;
+      b.dataset.v = v;
+      b.id = `cs-${key}-${v}`;
+      b.onclick = () => sendCapStyle({ [key]: v });
+      g.appendChild(b);
+    }
+    add(g, st => st[key], (el, v) => { for (const b of el.children) b.setAttribute('aria-pressed', String(b.dataset.v === v)); });
+    return row;
+  };
+  // font
+  const fr = document.createElement('label');
+  fr.className = 'prop wide';
+  fr.innerHTML = '<span>Font</span><select id="cs-font"></select>';
+  const sel = fr.querySelector('select');
+  const fill = list => { const cur = sel.value; sel.innerHTML = ''; for (const f of list) { const o = document.createElement('option'); o.value = o.textContent = f; sel.appendChild(o); } if (cur) sel.value = cur; };
+  fill(fontList || ['Inter', 'Noto Serif', 'JetBrains Mono']);
+  if (!fontList) invoke('fonts').then(l => { fontList = l; fill(l); syncCapStyle(); }).catch(() => {});
+  sel.addEventListener('change', () => { sendCapStyle({ font: sel.value }); sel.blur(); });
+  add(sel, st => st.font, (el, v) => { if (v && ![...el.options].some(o => o.value === v)) { const o = document.createElement('option'); o.value = o.textContent = v; el.appendChild(o); } el.value = v || 'Inter'; });
+  // the box: on or off, its colour and how solid
+  const bx = document.createElement('label');
+  bx.className = 'check';
+  bx.innerHTML = '<input type="checkbox" id="cs-background"> Box behind the words';
+  const bc = bx.querySelector('input');
+  bc.addEventListener('change', () => sendCapStyle({ background: bc.checked }));
+  add(bc, st => st.background, (el, v) => { el.checked = !!v; });
+  box.append(
+    fr,
+    range('Size', 'size', { min: 20, max: 160, step: 1, unit: 'px at 1080 lines' }),
+    colour('Colour', 'color'),
+    range('Outline', 'outline', { min: 0, max: 16, step: 0.5, unit: 'px' }),
+    colour('Outline colour', 'outlineColor'),
+    bx,
+    colour('Box colour', 'backgroundColor', () => ({ background: true })),
+    range('Box opacity', 'backgroundOpacity', { min: 0, max: 100, step: 1, unit: '% solid' }),
+    seg('Place', 'position', [['top', 'Top'], ['middle', 'Middle'], ['bottom', 'Bottom']]),
+    range('From edge', 'margin', { min: 0, max: 45, step: 0.5, unit: '% of the height', toView: v => +(v * 100).toFixed(1), fromView: v => v / 100 }),
+    seg('Align', 'align', [['left', 'Left'], ['center', 'Centre'], ['right', 'Right']]),
+    range('Line height', 'lineSpacing', { min: 0.8, max: 2.5, step: 0.05, unit: '× the size' }),
+  );
+}
+/** Shows the captions' look in the controls (except the one being used). */
+function syncCapStyle() {
+  const st = S.tl && S.tl.captions && S.tl.captions.style;
+  if (!st || !CSTY.built) return;
+  for (const c of CSTY.controls) {
+    if (document.activeElement === c.el && c.el.type !== 'checkbox') continue;
+    const v = c.read(st);
+    if (c.write) c.write(c.el, v);
+    else c.el.value = v;
+  }
+  $('#cs-backgroundColor').closest('label').classList.toggle('dim', !st.background);
+}
 function capNote() {
   const m = CAP.models && CAP.models.find(x => x.id === $('#cap-model').value);
   const c = S.tl && S.tl.captions;
@@ -716,6 +811,7 @@ function renderCaptionsPanel() {
   const c = S.tl.captions;
   $('#cap-tools').hidden = !c.exists;
   $('#cap-on').checked = c.on;
+  if (c.exists) { buildCapStyle(); syncCapStyle(); }
   $('#cap-go').disabled = CAP.busy || !has();
   $('#cap-go').textContent = c.exists ? 'Auto captions again' : 'Auto captions';
   capNote();
@@ -843,7 +939,8 @@ async function cutSelectedWords() {
   const tl = await edit('cut_words', { from: a, to: b });
   if (tl) toast(a === b ? 'Word cut' : `${b - a + 1} words cut`);
 }
-/** Lights the word under the playhead (and keeps it in view while playing). */
+/** Lights the word under the playhead (and keeps it in view while playing, until the person
+    scrolls the transcript themselves: then "Follow the playback" brings it back). */
 function markWord() {
   if (!W.spans.length || $('#panel-captions').hidden) return;
   let lo = 0, hi = W.words.length - 1, at = -1;
@@ -857,9 +954,33 @@ function markWord() {
   W.now = at;
   if (at >= 0 && W.spans[at]) {
     W.spans[at].classList.add('now');
-    if (S.playing) W.spans[at].scrollIntoView({ block: 'nearest' });
+    if (S.playing && W.follow !== false) keepWordInView(W.spans[at]);
   }
 }
+
+/** Scrolls the transcript box (never the panel around it) so `span` shows, a third of the way down. */
+function keepWordInView(span) {
+  const box = $('#transcript'), b = box.getBoundingClientRect(), r = span.getBoundingClientRect();
+  if (r.top >= b.top && r.bottom <= b.bottom) return;
+  const was = box.scrollTop;
+  box.scrollTop += r.top - b.top - b.height / 3;
+  // the scroll event this fires is ours, not the person's
+  if (box.scrollTop !== was) W.autoScroll = true;
+}
+/** Playing, the transcript follows the words; scrolling it by hand stops that until "Follow the
+    playback" is pressed or playback starts again. */
+function followWords(on) {
+  W.follow = on;
+  $('#tr-follow').hidden = on || !S.playing;
+  if (on) { const sp = W.spans[W.now]; if (sp && S.playing) keepWordInView(sp); }
+}
+for (const ev of ['wheel', 'touchmove']) $('#transcript').addEventListener(ev, () => { if (S.playing) followWords(false); }, { passive: true });
+$('#transcript').addEventListener('scroll', () => {
+  // the scrollbar dragged, or keys: anything but our own scrolling
+  if (W.autoScroll) { W.autoScroll = false; return; }
+  if (S.playing) followWords(false);
+});
+$('#tr-follow').onclick = () => followWords(true);
 
 /* Find and replace in the transcript. The search runs over the words joined by spaces, as in a text
    editor: the same rules as `find_in` in clipcut-core's replace.rs, which does the replacing. */
@@ -3369,8 +3490,11 @@ function groupDrag(c, el, e, after) {
   });
 }
 function reorderDrag(c, el, e, after) {
-  const x0 = e.clientX;
+  const x0 = e.clientX, y0 = e.clientY;
   let started = false;
+  // dragged up above the main track: it leaves it for a lane (the main track's only clip stays)
+  const mainRow = rowOf('V1');
+  let lift = null, liftStart = c.start;
   const grab = timeAt(e.clientX) - c.start;
   const len = c.end - c.start;
   const others = mainClips().filter(o => o.id !== c.id);
@@ -3381,12 +3505,26 @@ function reorderDrag(c, el, e, after) {
   let to = from;
   follow(e, ev => {
     if (!started) {
-      if (Math.abs(ev.clientX - x0) < 5) return;
+      if (Math.hypot(ev.clientX - x0, ev.clientY - y0) < 5) return;
       started = true;
       el.classList.add('dragging');
       for (const o of others) S.els.get(o.id)?.classList.add('moving');
     }
     const start = Math.max(0, timeAt(ev.clientX) - grab);
+    const y = yAt(ev.clientY);
+    lift = mainRow && others.length && y < mainRow.top - 6 ? laneFor(c, y) : null;
+    if (lift) {
+      // over the lanes: the others close up, and it shows where it would land
+      if (lift.id === 'V1') lift = { id: 'V2', dy: mainRow.top - ROW.video - ROW.gap - mainRow.top };
+      liftStart = Math.max(0, snapFrame(start));
+      S.geom.clear();
+      for (const p of packed) S.geom.set(p.o.id, { ...p.o, start: p.start, end: p.end });
+      S.geom.set(c.id, { ...c, start: liftStart, end: liftStart + len, dy: lift.dy });
+      $('#insert-mark').hidden = true;
+      layoutClips();
+      drawVisible();
+      return;
+    }
     const centre = start + len / 2;
     to = packed.filter(p => (p.start + p.end) / 2 < centre).length;
     // the others make room where it would go
@@ -3412,7 +3550,8 @@ function reorderDrag(c, el, e, after) {
     layoutClips();
     drawVisible();
     after(started);
-    if (started && !cancelled && to !== from) edit('reorder', { clip: c.id, to });
+    if (started && !cancelled && lift) edit('move_clip', { clip: c.id, lane: lift.id, seconds: liftStart });
+    else if (started && !cancelled && to !== from) edit('reorder', { clip: c.id, to });
   });
 }
 /** The lane a lane clip would go to with the pointer at `y`: one of its kind's lanes, or a new
@@ -3432,7 +3571,9 @@ function laneFor(c, y) {
     return { id: `A${bottom + 1}`, dy: last.top + last.h + ROW.gap - own.top };
   }
   let best = own, d = Infinity;
-  for (const r of rows) { const dd = Math.abs(y - (r.top + r.h / 2)); if (dd < d) { d = dd; best = r; } }
+  // a picture (not text) can also go down into the main track
+  const main = kind === 'video' && c.kind !== 'text' && !isMain(c) ? rowOf('V1') : null;
+  for (const r of main ? [...rows, main] : rows) { const dd = Math.abs(y - (r.top + r.h / 2)); if (dd < d) { d = dd; best = r; } }
   return { id: best.id, dy: best.top - own.top };
 }
 function laneDrag(c, el, e, after) {
@@ -3636,15 +3777,20 @@ function startMediaDrag(m, e) {
 /* ---------- playback ---------- */
 let raf = 0;
 function stopLoop() { cancelAnimationFrame(raf); raf = 0; }
-async function play() {
+// `speed` above 1 is a shuttle speed (L pressed again): the player keeps the sound's pitch
+async function play(speed = 1) {
   if (!has()) return;
-  if (S.rate !== 1) stopShuttle();
+  if (S.rate < 0) stopShuttle();
+  stopLoop();
   if (S.t >= dur() - frameStep()) S.t = 0;
   try {
-    await invoke('play', { from: S.t, maxWidth: previewWidth(), quality: quality() });
+    await invoke('play', { from: S.t, maxWidth: previewWidth(), quality: quality(), speed });
   } catch (e) { toast(e, true); return; }
   S.playing = true;
+  S.rate = speed;
   setPlayIcon();
+  showRate();
+  followWords(true);
   drawOverlay();
   const loop = async () => {
     if (!S.playing) return;
@@ -3657,15 +3803,18 @@ async function play() {
     followPlayhead();
     showFrame(S.t);
     pollMeters();
-    if (!st.playing) { S.playing = false; setPlayIcon(); drawOverlay(); settleMeters(); drawVisible(); return; }
+    if (!st.playing) { S.playing = false; S.rate = 1; showRate(); setPlayIcon(); drawOverlay(); settleMeters(); drawVisible(); return; }
     raf = requestAnimationFrame(loop);
   };
   raf = requestAnimationFrame(loop);
 }
 async function pause() {
-  if (S.rate !== 1) { stopShuttle(); return; }
+  if (S.rate < 0) { stopShuttle(); return; }
   stopLoop();
   S.playing = false;
+  $('#tr-follow').hidden = true;
+  S.rate = 1;
+  showRate();
   setPlayIcon();
   settleMeters();
   try {
@@ -3680,16 +3829,16 @@ async function pause() {
 function toggle() { (S.playing ? pause : play)(); }
 
 /* Shuttle (J K L, as in Premiere): L plays forward and each press goes one step faster
-   (`SHUTTLE`: 1×, 1.25×, 1.5×, 1.75×, 2×, 3×… 8×), J the same backward, K stops. 1× forward is the player with its sound; any other
-   speed runs the playhead on the wall clock and shows the frames it can, without sound. */
+   (`SHUTTLE`: 1×, 1.25×, 1.5×, 1.75×, 2×, 3×… 8×), J the same backward, K stops. Forward is the
+   player at that speed, with its sound (pitch kept); backward runs the playhead on the wall clock
+   and shows the frames it can, without sound. */
 S.rate = 1;
 let shuttleRaf = 0;
 async function shuttle(rate) {
   if (!has()) return;
-  if (rate === 1) { if (!S.playing || S.rate !== 1) await play(); return; }
-  if (S.playing && S.rate === 1) await pause();
-  if (rate > 0 && S.t >= dur() - frameStep()) S.t = 0;
-  if (rate < 0 && S.t <= 0) S.t = dur();
+  if (rate > 0) { if (!S.playing || S.rate !== rate) await play(rate); return; }
+  if (S.playing && S.rate > 0) await pause();
+  if (S.t <= 0) S.t = dur();
   const was = S.rate;
   S.rate = rate;
   S.playing = true;
@@ -3698,7 +3847,7 @@ async function shuttle(rate) {
   if (was !== 1) return;
   let from = S.t, t0 = performance.now(), r = rate;
   const loop = now => {
-    if (S.rate === 1) return;
+    if (S.rate >= 0) return;
     // a new speed carries on from where the playhead is
     if (S.rate !== r) { from = S.t; t0 = now; r = S.rate; }
     const t = Math.min(Math.max(from + r * (now - t0) / 1000, 0), dur());
@@ -3711,10 +3860,11 @@ async function shuttle(rate) {
   };
   shuttleRaf = requestAnimationFrame(loop);
 }
+// ends backward shuttling (forward speeds are the player, stopped by `pause`)
 function stopShuttle() {
   cancelAnimationFrame(shuttleRaf);
   shuttleRaf = 0;
-  if (S.rate === 1) return;
+  if (S.rate >= 0) return;
   S.rate = 1;
   S.playing = false;
   S.t = clampT(snapFrame(S.t));
@@ -3752,8 +3902,18 @@ async function seek(t) {
 }
 function seekBy(d) { seek(S.t + d); scrollToTime(S.t); }
 /** Up / Down: the previous or next cut. */
-function seekCut(dir) {
-  const half = frameStep() / 2, list = cuts();
+/** Every place ↑ and ↓ stop at: the main track's cuts and the end, every other clip's start and
+    end (graphics, text, overlays, sound), keyframes, and where transitions start and end. */
+function events() {
+  if (!S.tl) return [0];
+  const set = new Set([...cuts(), dur()]);
+  const add = t => { if (Number.isFinite(t) && t >= 0) set.add(+t.toFixed(6)); };
+  for (const c of S.tl.clips) { add(c.start); add(c.end); keyTimes(c).forEach(add); }
+  for (const t of S.tl.transitions || []) { add(t.start); add(t.end); }
+  return [...set].sort((a, b) => a - b);
+}
+function seekEvent(dir) {
+  const half = frameStep() / 2, list = events();
   const t = dir > 0 ? list.find(x => x > S.t + half) : [...list].reverse().find(x => x < S.t - half);
   if (t !== undefined) { seek(t); scrollToTime(S.t); }
 }
@@ -4054,6 +4214,21 @@ scroller().addEventListener('wheel', e => {
   }
 }, { passive: false });
 
+/** Ctrl+C: the selected clips (captions are copied as text in the Captions panel). */
+async function copyClips() {
+  const ids = selectedClips().filter(c => !isCap(c)).map(c => c.id);
+  if (!ids.length) { toast('Select the clips to copy first.'); return; }
+  try {
+    await invoke('copy_clips', { clips: ids });
+    const n = ids.length;
+    toast(n === 1 ? 'Copied 1 clip: Ctrl+V pastes it at the playhead' : `Copied ${n} clips: Ctrl+V pastes them at the playhead`);
+  } catch (e) { toast(e, true); }
+}
+/** Ctrl+V: copies at the playhead, selected; a graphic plays the same files, nothing is rendered again. */
+async function pasteClips() {
+  const r = await make('paste_clips', { seconds: S.t });
+  if (r) renderSelection();
+}
 /** Freezes the frame at the playhead: of the selected video clip under it, else the main track's. */
 async function freezeFrame() {
   if (!has()) return;
@@ -4078,8 +4253,8 @@ const ACTIONS = [
   { group: 'Playback', id: 'second-on', label: 'Forward one second', keys: [], fn: () => seekBy(1) },
   { group: 'Playback', id: 'five-back', label: 'Back five seconds', keys: ['Shift+ArrowLeft'], fn: () => seekBy(-5) },
   { group: 'Playback', id: 'five-on', label: 'Forward five seconds', keys: ['Shift+ArrowRight'], fn: () => seekBy(5) },
-  { group: 'Playback', id: 'cut-back', label: 'Go to the previous cut', keys: ['ArrowUp'], fn: () => seekCut(-1) },
-  { group: 'Playback', id: 'cut-on', label: 'Go to the next cut', keys: ['ArrowDown'], fn: () => seekCut(1) },
+  { group: 'Playback', id: 'cut-back', label: 'Go to the previous event (a cut, a clip’s start or end, a keyframe, a transition)', keys: ['ArrowUp'], fn: () => seekEvent(-1) },
+  { group: 'Playback', id: 'cut-on', label: 'Go to the next event (a cut, a clip’s start or end, a keyframe, a transition)', keys: ['ArrowDown'], fn: () => seekEvent(1) },
   { group: 'Playback', id: 'start', label: 'Go to the start', keys: ['Home'], fn: () => { seek(0); scrollToTime(0); } },
   { group: 'Playback', id: 'end', label: 'Go to the end', keys: ['End'], fn: () => { seek(Infinity); scrollToTime(dur()); } },
   { group: 'Editing', id: 'split', label: 'Split at the playhead', keys: ['S'], once: true, fn: () => split() },
@@ -4088,6 +4263,8 @@ const ACTIONS = [
   { group: 'Editing', id: 'delleft', label: 'Delete to the left of the playhead', keys: ['Q'], once: true, fn: () => splitKeep('right') },
   { group: 'Editing', id: 'delright', label: 'Delete to the right of the playhead', keys: ['W'], once: true, fn: () => splitKeep('left') },
   { group: 'Editing', id: 'delete', label: 'Delete the selection (clips, a keyframe, a transition or transcript words)', keys: ['Delete', 'Backspace'], once: true, fn: () => deleteSelection() },
+  { group: 'Editing', id: 'copy', label: 'Copy the selected clips', keys: ['Ctrl+C'], once: true, when: () => has() && !String(window.getSelection() || ''), fn: () => copyClips() },
+  { group: 'Editing', id: 'paste', label: 'Paste the copied clips at the playhead', keys: ['Ctrl+V'], once: true, when: has, fn: () => pasteClips() },
   { group: 'Editing', id: 'undo', label: 'Undo', keys: ['Ctrl+Z'], fn: () => undo() },
   { group: 'Editing', id: 'redo', label: 'Redo', keys: ['Ctrl+Shift+Z', 'Ctrl+Y'], fn: () => redo() },
   { group: 'Editing', id: 'select-all', label: 'Select every clip', keys: ['Ctrl+A'], fn: () => select(visibleClips().map(c => c.id)) },
@@ -4174,6 +4351,23 @@ function keyChanges() {
   }
   return out;
 }
+/** The action a key belongs to by default, if any. */
+const homeOf = k => ACTIONS.find(a => a.keys.includes(k));
+/** A key no action has goes back to the action it belongs to by default (only key `only`, when
+    given). Returns what went back, for the note. */
+function sendKeysHome(only) {
+  const bound = new Set([...KEYS.values()].flat()), back = [];
+  for (const a of ACTIONS) for (const k of a.keys) {
+    if (bound.has(k) || (only && k !== only)) continue;
+    KEYS.set(a.id, [...(KEYS.get(a.id) || []), k]);
+    bound.add(k);
+    back.push(`${showKey(k)} to “${a.label}”`);
+  }
+  return back;
+}
+/* Saved changes from before version 2 could leave a default key on no action at all (moved to
+   another action, then taken off it): those go back home once. */
+const KEYS_VERSION = 2;
 /** Puts saved changes over the defaults; a key a changed action took leaves the others. */
 function useKeyChanges(saved) {
   for (const a of ACTIONS) KEYS.set(a.id, [...a.keys]);
@@ -4185,13 +4379,14 @@ function useKeyChanges(saved) {
     keys.forEach(k => taken.add(k));
   }
   for (const a of ACTIONS) if (!(saved && Object.prototype.hasOwnProperty.call(saved, a.id))) KEYS.set(a.id, KEYS.get(a.id).filter(k => !taken.has(k)));
+  if (saved && Object.keys(saved).length && saved._version !== KEYS_VERSION && sendKeysHome().length) { saveKeys(); return; }
   rebuildKeymap();
   refreshKeyTips();
 }
 function saveKeys() {
   rebuildKeymap();
   refreshKeyTips();
-  invoke('save_shortcuts', { keys: keyChanges() }).catch(e => toast(e, true));
+  invoke('save_shortcuts', { keys: { ...keyChanges(), _version: KEYS_VERSION } }).catch(e => toast(e, true));
 }
 rebuildKeymap();
 invoke('load_shortcuts').then(useKeyChanges).catch(() => useKeyChanges({}));
@@ -4253,7 +4448,7 @@ function renderShortcuts() {
       x.textContent = '×';
       x.title = `Take ${showKey(k)} off ${a.label.toLowerCase()}`;
       x.setAttribute('aria-label', x.title);
-      x.onclick = () => { KEYS.set(a.id, keys.filter(y => y !== k)); $('#keys-note').textContent = ''; saveKeys(); renderShortcuts(); };
+      x.onclick = () => takeKeyOff(a.id, k);
       chip.appendChild(x);
       chips.appendChild(chip);
     }
@@ -4292,6 +4487,15 @@ function renderShortcuts() {
     const add = KD.last && list.querySelector(`.key-row[data-action="${KD.last}"] .add`);
     (add || $('#keys-filter')).focus({ preventScroll: true });
   }
+}
+/** Takes key `k` off action `id`; a key moved there from the action it belongs to goes back. */
+function takeKeyOff(id, k) {
+  KEYS.set(id, (KEYS.get(id) || []).filter(y => y !== k));
+  const home = homeOf(k);
+  const back = home && home.id !== id ? sendKeysHome(k) : [];
+  $('#keys-note').textContent = back.length ? `Back to its own action: ${back.join(', ')}.` : '';
+  saveKeys();
+  renderShortcuts();
 }
 /** Gives action `id` the keys `keys` (in addition to its own, or instead of them), taking them off
     any other action that had them. */

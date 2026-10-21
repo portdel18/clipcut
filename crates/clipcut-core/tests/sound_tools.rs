@@ -323,3 +323,29 @@ fn a_faster_voice_stays_clean() {
         assert!((pitch(&s, at + 0.2) - 150.0).abs() < 6.0, "at {speed}%: {} Hz", pitch(&s, at + 0.2));
     }
 }
+
+#[test]
+fn shuttle_sound_plays_faster_at_the_same_pitch() {
+    // a rising tone: 200 Hz at the start, 300 Hz higher every second
+    let Some(path) = clip("ch-chirp", "aevalsrc=0.5*sin(2*PI*(200*t+150*t*t))", "aevalsrc=0.5*sin(2*PI*(200*t+150*t*t))") else { return };
+    let mut s = Studio::new();
+    s.add_clip(path.to_str().unwrap()).unwrap();
+    let feed = s.audio_feed().unwrap();
+    let rate = f64::from(feed.sample_rate);
+    for speed in [1.25, 2.0, 3.0] {
+        // from 0.2 s, read in the player's blocks
+        let mut st = clipcut_core::Stretcher::new(feed.sample_rate, (0.2 * rate) as i64, speed);
+        let mut out = Vec::new();
+        while out.len() < (0.5 * rate) as usize * 2 {
+            out.extend(st.next(&feed, 1024));
+        }
+        let left: Vec<f32> = out.iter().step_by(2).copied().collect();
+        // 0.1 s around 0.3 s of output is the sequence around 0.2 + 0.3 × speed
+        let (a, b) = ((0.25 * rate) as usize, (0.35 * rate) as usize);
+        let ups = left[a..b].windows(2).filter(|w| w[0] < 0.0 && w[1] >= 0.0).count() as f64 / 0.1;
+        let want = 200.0 + 300.0 * (0.2 + 0.3 * speed);
+        assert!((ups - want).abs() < want * 0.06, "at {speed}×: {ups} Hz where the sequence has {want} Hz");
+        let rms = (left[a..b].iter().map(|v| v * v).sum::<f32>() / (b - a) as f32).sqrt();
+        assert!((rms - 0.35).abs() < 0.07, "at {speed}×: level {rms}");
+    }
+}
