@@ -57,7 +57,11 @@ svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width:
 
 /* Library */
 .library { grid-area: lib; display: grid; grid-template-columns: 64px minmax(0, 1fr); background: var(--panel); border-right: 1px solid var(--line); min-height: 0; }
-.rail { display: flex; flex-direction: column; gap: 2px; padding: 8px 6px; border-right: 1px solid var(--line); }
+.rail { display: flex; flex-direction: column; gap: 2px; padding: 8px 6px; border-right: 1px solid var(--line); min-height: 0; overflow-x: hidden; overflow-y: auto; scrollbar-width: thin; scrollbar-color: var(--faint) transparent; }
+/* a short window (a tall timeline): the tabs scroll, none hide */
+.rail-tab { flex: none; }
+.rail::-webkit-scrollbar { width: 6px; }
+.rail::-webkit-scrollbar-thumb { background: var(--faint); border-radius: 3px; }
 .rail-tab { display: grid; justify-items: center; gap: 3px; padding: 8px 0; border: 0; border-radius: 8px; background: none; color: var(--muted); cursor: pointer; font-size: 11px; }
 .rail-tab:hover:not(:disabled) { color: var(--text); background: var(--panel-2); }
 .rail-tab[aria-selected="true"] { color: var(--accent); background: var(--panel-2); }
@@ -437,3 +441,14 @@ h3.sub { margin: 12px 0 6px; font-size: 11px; font-weight: 600; color: var(--mut
   -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='3' stroke-linecap='round'%3E%3Cpath d='M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1'/%3E%3Cpath d='M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1'/%3E%3C/svg%3E") center / contain no-repeat;
   mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='3' stroke-linecap='round'%3E%3Cpath d='M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1'/%3E%3Cpath d='M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1'/%3E%3C/svg%3E") center / contain no-repeat;
 }
+/* colour boxes: a hex box and a dropper beside each (Clip Studio's dropper.js); the popup's own
+   dropper does nothing in the Windows web view */
+.colour-hex { width: 74px; height: 24px; padding: 0 6px; font-family: var(--mono); font-size: 12px; text-transform: uppercase; }
+.dropper { display: inline-grid; place-items: center; flex: none; width: 26px; height: 24px; padding: 0; border: 1px solid var(--line); border-radius: 5px; background: var(--well); color: var(--muted); cursor: pointer; }
+.dropper:hover { color: var(--text); border-color: var(--faint); }
+.dropper[aria-pressed="true"] { color: var(--accent); border-color: var(--accent); }
+.dropper svg { width: 14px; height: 14px; }
+.prop:has(> input[type="color"]) { display: flex; gap: 6px; }
+.prop:has(> input[type="color"]) > span:first-child { flex: 0 0 74px; }
+.cap-style .cs-line, .prop .check:has(> input[type="color"]) { gap: 6px; }
+html.dropping, html.dropping * { cursor: crosshair !important; }

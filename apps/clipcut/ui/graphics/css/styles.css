@@ -145,7 +145,17 @@ input[type=range]:focus-visible::-moz-range-thumb { background: var(--accent); }
 .check { display: flex; align-items: center; gap: 8px; font-size: 13px; cursor: pointer; }
 .check input { width: 16px; height: 16px; margin: 0; flex: none; accent-color: var(--accent); cursor: pointer; }
 
-.color { display: grid; grid-template-columns: 38px 1fr; gap: 8px; }
+.color { display: grid; grid-template-columns: 38px 1fr auto; gap: 8px; }
+/* the colour dropper (dropper.js) beside a colour box */
+.dropper { display: grid; place-items: center; width: 30px; height: 30px; align-self: center; padding: 0; border: 1px solid var(--line); border-radius: 6px; background: var(--well); color: var(--muted); cursor: pointer; }
+.dropper:hover { color: var(--text); border-color: var(--faint); }
+.dropper[aria-pressed="true"] { color: var(--accent); border-color: var(--accent); }
+.dropper svg { width: 16px; height: 16px; }
+.spans .dropper, .area-list .dropper { width: 24px; height: 24px; }
+.spans li:has(> .dropper) { grid-template-columns: 30px 24px minmax(0, 1fr) 28px; }
+.area-list li:has(> .dropper) { grid-template-columns: 30px 24px minmax(0, 1fr) 28px; }
+.area-list li:has(> .dropper) .d { grid-column: 3 / 5; }
+html.dropping, html.dropping * { cursor: crosshair !important; }
 .color input[type=text] { font-family: var(--mono); font-size: 12.5px; text-transform: uppercase; }
 input[type=color] { width: 38px; height: 36px; padding: 0; border: 1px solid var(--line); border-radius: 6px; background: var(--well); cursor: pointer; }
 input[type=color]::-webkit-color-swatch-wrapper { padding: 3px; }

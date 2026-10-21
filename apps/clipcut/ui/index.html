@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="en">
+<html lang="en" data-colour-hex>
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -159,7 +159,7 @@
   <main class="player" aria-label="Player">
     <div class="stage" id="stage">
       <canvas id="preview" aria-label="Preview"></canvas>
-      <canvas id="overlay" aria-hidden="true"></canvas>
+      <canvas id="overlay" aria-hidden="true" data-nopick></canvas>
       <div class="empty" id="empty">
         <p>Import a video to start</p>
         <button class="btn" id="empty-import">Import</button>
@@ -339,6 +339,7 @@
 </section>
 <script src="cs-shim.js"></script>
 <script src="graphics/js/platforms.js"></script>
+<script src="graphics/js/dropper.js"></script>
 <script src="app.js"></script>
 </body>
 </html>
