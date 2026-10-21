@@ -1658,6 +1658,108 @@ async function channelHint(one, ids) {
   }
 }
 
+/** Under Volume: when the clip plays too loud (red on its waveform), by how much, and a button
+ *  that turns it down to just under full scale. */
+function loudHint(s, one, ids) {
+  const box = document.createElement('div');
+  box.id = 'loud-hint';
+  s.appendChild(box);
+  let waiting = false;
+  const show = () => {
+    const now = clipById(one.id);
+    const snd = now && soundOf(now);
+    if (!snd) return;
+    const over = overBy(snd);
+    box.innerHTML = '';
+    // its waveform is still being read
+    if (over == null) { if (!waiting) { waiting = true; setTimeout(() => { waiting = false; if (box.isConnected) show(); }, 300); } return; }
+    if (over < -0.01) return;
+    const p = document.createElement('p');
+    p.className = 'hint loud';
+    p.textContent = `Too loud: the red on its waveform goes ${over < 0.1 ? 'up to' : `${over.toFixed(1)} dB past`} the limit, where the sound distorts.`;
+    box.appendChild(p);
+    // to 1 dB under the limit; the same change for every selected clip
+    const by = -(over + 1);
+    const b = buttons([['Lower to fit', 'Turn the volume down so the loudest part is just under the limit', () => {
+      const vols = ids.map(id => { const c = clipById(id); const x = c && (soundOf(c) || c); return x ? (x.props.volumeDb || 0) : 0; });
+      const v = Math.round((Math.min(...vols) + by) * 2) / 2;
+      queueProps(ids, { volumeDb: Math.max(-60, v) });
+    }]]);
+    b.firstChild.id = 'loud-fit';
+    box.appendChild(b);
+  };
+  // again when the volume changes
+  controls.push({ el: box, read: () => null, write: show });
+  show();
+}
+
+/* Remove background on any picture on the timeline: Clip Studio's cut-out (graphics/js/cutout.js,
+   the model Thumbnails uses) runs in the Graphics page, unseen, on the picture as it was; the
+   cut-out takes its place (cutout_clip), and Put background back brings the picture back */
+const CUT = { busy: false, clip: null, note: '' };
+const CUT_QUALITIES = [['standard', 'Standard (178 MB)'], ['best', 'Best (973 MB, needs the graphics card)'], ['people', 'Best for people (973 MB, needs the graphics card)']];
+function cutQuality() {
+  try { const q = localStorage.getItem('clipcut.cutQuality'); return CUT_QUALITIES.some(([v]) => v === q) ? q : 'standard'; } catch (_) { return 'standard'; }
+}
+function cutoutControls(s, one) {
+  const row = document.createElement('label');
+  row.className = 'prop';
+  row.innerHTML = '<span>Quality</span><select id="cut-quality"></select>';
+  const sel = row.querySelector('select');
+  for (const [v, l] of CUT_QUALITIES) sel.add(new Option(l, v));
+  sel.value = cutQuality();
+  sel.title = 'Best: finer hair and edges on the main subject. Best for people: keeps every person in the picture.';
+  sel.addEventListener('change', () => { try { localStorage.setItem('clipcut.cutQuality', sel.value); } catch (_) {} });
+  s.appendChild(row);
+  const cut = one.cutFrom != null;
+  const b = buttons(cut
+    ? [['Remove again', 'Remove the background again from the picture as it was, with the quality chosen', () => removeBackground(one.id)], ['Put background back', 'Show the picture as it was', () => edit('put_background_back', { clip: one.id })]]
+    : [['Remove background', 'Cut out the person or object: the rest of the picture becomes see-through', () => removeBackground(one.id)]]);
+  b.firstChild.id = 'cut-btn';
+  if (b.children[1]) b.children[1].id = 'cut-back';
+  for (const x of b.children) x.disabled = CUT.busy;
+  s.appendChild(b);
+  const note = document.createElement('p');
+  note.className = 'hint';
+  note.id = 'cut-note';
+  note.textContent = CUT.clip === one.id && CUT.note ? CUT.note : cut ? 'Background removed: what is under the picture on the timeline shows through.' : '';
+  s.appendChild(note);
+}
+async function removeBackground(id) {
+  const c = clipById(id);
+  if (CUT.busy || !c) return;
+  CUT.busy = true;
+  CUT.clip = id;
+  const say = t => { CUT.note = t; const n = $('#cut-note'); if (n && CUT.clip === id) n.textContent = t; };
+  for (const x of document.querySelectorAll('#cut-btn, #cut-back')) x.disabled = true;
+  const quality = cutQuality(), big = quality !== 'standard', t0 = performance.now();
+  try {
+    say('Getting the background model ready…');
+    const bytes = await invoke('still_png', { item: c.cutFrom ?? c.item, seconds: 0 });
+    await loadGraphics();
+    const w = graphicsWin();
+    if (!w || !w.CS || !w.CS.hosted || !w.CS.hosted.cutout) throw new Error('Graphics did not load: try again.');
+    const png = await w.CS.hosted.cutout(new w.File([bytes], 'picture.png', { type: 'image/png' }), quality, (done, total, phase) => {
+      if (phase === 'start') say(big ? 'Removing the background with the Best model… (up to half a minute)' : 'Removing the background… (a few seconds on a graphics card, up to half a minute without one)');
+      else say(`Downloading the ${big ? 'Best' : 'background'} model, once: ${Math.round(done / 1e6)} of ${Math.round(total / 1e6)} MB`);
+    });
+    // the page's bytes belong to its own window: Tauri takes one of this window's
+    const body = new Uint8Array(png);
+    const tl = await serial(async () => {
+      if (S.playing) await pause();
+      return invoke('cutout_clip', body, { headers: { clip: String(id) } });
+    });
+    CUT.busy = false;
+    say(`Background removed in ${((performance.now() - t0) / 1000).toFixed(1)} s: what is under the picture on the timeline shows through.`);
+    apply(tl);
+  } catch (e) {
+    say(e && e.message ? e.message : String(e));
+  } finally {
+    CUT.busy = false;
+    for (const x of document.querySelectorAll('#cut-btn, #cut-back')) x.disabled = false;
+  }
+}
+
 /* Remove a colour (green screen): the engine's Ultra Key on picture clips */
 const KY = { picking: null, color: '#00b140' };
 function keyControls(s, one, ids) {
@@ -2502,8 +2604,24 @@ function drawStrip(c, el, viewL, viewR, need) {
     }
   }
 }
-let waveColour = '';
-/** The sound clip `snd`'s waveform, drawn in clip `c`'s element (a main clip draws its sound's). */
+let waveColour = '', loudColour = '';
+/** How much louder or quieter sound clip `snd` plays than it was recorded: its volume and its
+ *  lane's, as a gain. */
+function playGain(snd) {
+  const lane = S.tl.lanes.find(l => l.id === snd.track);
+  return Math.pow(10, ((snd.props.volumeDb || 0) + (lane ? lane.volumeDb || 0 : 0)) / 20);
+}
+/** How far over full scale (dB) sound clip `snd` goes where it plays, as loud as it will sound;
+ *  0 or less when it never does, null before its waveform is read. */
+function overBy(snd) {
+  const peaks = Peaks.get(snd.item);
+  if (!peaks) return null;
+  let v = 0;
+  for (let i = Math.floor(snd.sourceIn * PEAKS_PER_SECOND), n = Math.min(peaks.length, Math.ceil(snd.sourceOut * PEAKS_PER_SECOND)); i < n; i++) if (peaks[i] > v) v = peaks[i];
+  return v > 0 ? 20 * Math.log10(v / 255 * playGain(snd)) : -Infinity;
+}
+/** The sound clip `snd`'s waveform, drawn in clip `c`'s element (a main clip draws its sound's):
+ *  red where it plays too loud (past full scale, where it distorts). */
 function drawWave(snd, c, cv, viewL, viewR) {
   const g = geom(c);
   const h = cv.parentElement.clientHeight;
@@ -2513,18 +2631,29 @@ function drawWave(snd, c, cv, viewL, viewR) {
   ctx.clearRect(0, 0, b - a, h);
   const peaks = Peaks.get(snd.item);
   if (!peaks) return;
-  // louder or quieter with the clip's volume, as it will sound
-  const gain = Math.pow(10, (snd.props.volumeDb || 0) / 20);
+  // louder or quieter with the clip's and its lane's volume, as it will sound
+  const gain = playGain(snd);
   const rate = (g.sourceOut - g.sourceIn) / Math.max(1e-6, g.end - g.start);
-  ctx.fillStyle = waveColour || (waveColour = getComputedStyle(document.documentElement).getPropertyValue('--sound-wave').trim() || '#46c99a');
+  const css = getComputedStyle(document.documentElement);
+  const ok = waveColour || (waveColour = css.getPropertyValue('--sound-wave').trim() || '#46c99a');
+  const loud = loudColour || (loudColour = css.getPropertyValue('--sound-loud').trim() || '#ff5a4f');
   const mid = h / 2;
   for (let x = 0; x < b - a; x++) {
     const t0 = g.sourceIn + (a - L + x) / S.px * rate, t1 = g.sourceIn + (a - L + x + 1) / S.px * rate;
     let v = 0;
     for (let i = Math.floor(t0 * PEAKS_PER_SECOND), n = Math.max(i + 1, Math.ceil(t1 * PEAKS_PER_SECOND)); i < n && i < peaks.length; i++) v = Math.max(v, peaks[i]);
+    const level = v / 255 * gain;
     // a gentle curve so quiet speech still shows
-    const amp = Math.min(1, Math.sqrt(v / 255 * gain)) * (h / 2 - 1);
-    if (amp > 0.3) ctx.fillRect(x, mid - amp, 1, amp * 2);
+    const amp = Math.min(1, Math.sqrt(level)) * (h / 2 - 1);
+    if (amp <= 0.3) continue;
+    ctx.fillStyle = ok;
+    ctx.fillRect(x, mid - amp, 1, amp * 2);
+    if (level < 0.999) continue;
+    // too loud: red edges where it hits the top and bottom, as CapCut and Premiere show it
+    const tip = Math.max(2, amp * 0.3);
+    ctx.fillStyle = loud;
+    ctx.fillRect(x, mid - amp, 1, tip);
+    ctx.fillRect(x, mid + amp - tip, 1, tip);
   }
 }
 async function pumpThumbs() {
@@ -3024,7 +3153,7 @@ function renderProps() {
     return;
   }
   const one = sel.length === 1 ? sel[0] : null;
-  const sig = one ? `${one.id}:${one.kind}:${isCap(one) || isMain(one)}:${!isCap(one) && hasSound(one)}:${keyTimes(one).length > 0}:${pictureClip(one)}:${S.kf && S.kf.clip === one.id ? S.kf.t : ''}:${(chOf(one) || {}).mode || ''}:${!!one.props.key}:${one.link || ''}:${(soundOf(one) || {}).track || ''}:${!!one.props.freeze}` : `n:${sel.map(c => c.id).join(',')}`;
+  const sig = one ? `${one.id}:${one.kind}:${isCap(one) || isMain(one)}:${!isCap(one) && hasSound(one)}:${keyTimes(one).length > 0}:${pictureClip(one)}:${S.kf && S.kf.clip === one.id ? S.kf.t : ''}:${(chOf(one) || {}).mode || ''}:${!!one.props.key}:${one.link || ''}:${(soundOf(one) || {}).track || ''}:${!!one.props.freeze}:${one.cutFrom != null}` : `n:${sel.map(c => c.id).join(',')}`;
   $('#props-title').textContent = one ? (one.graphic ? 'Graphic' : one.title ? 'Title' : { text: 'Text', audio: 'Sound', image: 'Picture', caption: 'Caption' }[one.kind] || (isMain(one) ? 'Clip' : 'Overlay')) : sel.length ? `${sel.length} clips` : 'Project';
   if (sig === propsSig) { syncProps(one); return; }
   propsSig = sig;
@@ -3072,6 +3201,7 @@ function renderProps() {
     const s = section('Sound');
     s.appendChild(slider('Volume', ids, 'volumeDb', { min: -60, max: 15, step: 0.5, unit: 'dB', read: c => (c.live && c.live.volumeDb != null ? c.live.volumeDb : (soundOf(c) || c).props.volumeDb), kf: 'volume' }));
     // fades of the clip's own sound (a main clip's too: its picture's edges are the transitions')
+    loudHint(s, one, ids);
     s.appendChild(slider('Fade in', ids, 'fadeIn', { min: 0, max: 10, step: 0.1, unit: 's', read: c => (soundOf(c) || c).props.fadeIn }));
     s.appendChild(slider('Fade out', ids, 'fadeOut', { min: 0, max: 10, step: 0.1, unit: 's', read: c => (soundOf(c) || c).props.fadeOut }));
     if (chOf(one)) channelControls(s, one, ids);
@@ -3097,6 +3227,7 @@ function renderProps() {
   }
   if (visual(one) || hasSound(one)) keyframeControls(section('Keyframes'), one);
   trimControls(section('Trim'), one);
+  if (pictureClip(one) && one.kind === 'image' && !one.graphic && !one.title && ids.length === 1) cutoutControls(section('Remove background'), one);
   if (pictureClip(one) && (one.kind === 'video' || one.kind === 'image') && !one.graphic && !one.title) keyControls(section('Remove a colour'), one, ids);
   if (pictureClip(one)) adjustControls(box, ids);
   if (one.kind !== 'text' && one.kind !== 'image') {

@@ -49,6 +49,8 @@ pub struct ClipView {
     pub beats: Vec<f64>,
     /// A title made from a template: the template's name (its controls replace the text ones).
     pub title: Option<String>,
+    /// A picture whose background was removed: the media item of the picture as it was.
+    pub cut_from: Option<u64>,
 }
 
 /// A track as a lane of the timeline: `V1` and `A1` are the main track's picture and sound.
@@ -196,6 +198,7 @@ impl Studio {
                             hold: crate::returns::holds(i),
                             beats: crate::beats::beats_of(i),
                             title: crate::titles::title_of(i),
+                            cut_from: if prefix == "V" { crate::cutouts::cut_from(i) } else { None },
                         });
                     }
                 }

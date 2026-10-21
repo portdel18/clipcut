@@ -467,6 +467,8 @@ fn main() {
             graphics::dropped_file,
             graphics::still_source,
             cutout::cutout_model,
+            graphics::cutout_clip,
+            graphics::put_background_back,
             graphics::still_png,
             graphics::save_still,
             graphics::save_graphic_file,

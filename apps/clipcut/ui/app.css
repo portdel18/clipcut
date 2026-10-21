@@ -15,6 +15,8 @@
   --text-clip-2: #b9a6ff;
   --sound-clip: #143a31;
   --sound-wave: #46c99a;
+  /* sound past full scale on a waveform (the meters' red) */
+  --sound-loud: #ff5a4f;
   --err: #ff7a6e;
   --ok: #69d394;
   --ui: "Segoe UI Variable", "Segoe UI", system-ui, -apple-system, "Helvetica Neue", Arial, sans-serif;
@@ -428,3 +430,4 @@ h3.sub { margin: 12px 0 6px; font-size: 11px; font-weight: 600; color: var(--mut
 .media-card .still { position: absolute; top: 6px; left: 6px; width: 26px; height: 26px; display: none; place-items: center; border: 0; border-radius: 6px; background: rgba(0, 0, 0, .6); color: #fff; cursor: pointer; }
 .media-card:hover .still, .media-card .still:focus-visible { display: grid; }
 .media-card .still svg { width: 15px; height: 15px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linejoin: round; }
+.hint.loud { color: var(--sound-loud); }

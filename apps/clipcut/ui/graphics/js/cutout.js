@@ -158,9 +158,10 @@ function ready(model, progress) {
   return sessionP;
 }
 
-/** The picture `img` (an <img> or canvas) with its background transparent, as a new <img>, by the
-    model of `quality` ('standard', 'best' or 'people'). */
-async function cutout(img, progress, quality = 'standard') {
+/** The picture `img` (an <img> or canvas) with its background transparent, as a new <img> (its PNG
+    as `.blob`), by the model of `quality` ('standard', 'best' or 'people'), at most `maxSide` on
+    its longest side. */
+async function cutout(img, progress, quality = 'standard', { maxSide = MAX_SIDE } = {}) {
   const model = modelFor(quality);
   let s = await ready(model, progress);
   const ort = window.ort, N = model.size;
@@ -195,7 +196,7 @@ async function cutout(img, progress, quality = 'standard') {
   for (let i = 0; i < N * N; i++) { const a = Math.round(((y[i] - mn) / span) * 255); m.data[i * 4 + 3] = a; }
   g.clearRect(0, 0, N, N);
   g.putImageData(m, 0, 0);
-  const k = Math.min(1, MAX_SIDE / Math.max(iw, ih));
+  const k = Math.min(1, maxSide / Math.max(iw, ih));
   const W = Math.max(1, Math.round(iw * k)), H = Math.max(1, Math.round(ih * k));
   const o = document.createElement('canvas'); o.width = W; o.height = H;
   const og = o.getContext('2d');
@@ -207,6 +208,7 @@ async function cutout(img, progress, quality = 'standard') {
   const out2 = new Image();
   out2.src = URL.createObjectURL(blob);
   await out2.decode();
+  out2.blob = blob;
   return out2;
 }
 /** Uses a model file the person downloaded themselves for `quality` (checked, then kept). */
@@ -215,6 +217,22 @@ cutout.useFile = async (file, quality = 'standard') => {
   const buf = await checked(model, await file.arrayBuffer(), 'chosen');
   await keep(model, buf);
   return true;
+};
+/* For an app holding the page (ClipCut's Remove background on a picture in its video): a picture
+   file → its cut-out as PNG bytes at the picture's own size, so it takes the picture's place. */
+const HOST_MAX = 8192;
+window.CS.hosted.cutout = async (file, quality = 'standard', progress) => {
+  // the app's file is its own window's: read it into one of this page's
+  const url = URL.createObjectURL(new Blob([await file.arrayBuffer()], { type: file.type || 'image/png' }));
+  try {
+    const img = new Image();
+    img.src = url;
+    try { await img.decode(); } catch (_) { throw new Error('That picture could not be read.'); }
+    if (Math.max(img.naturalWidth, img.naturalHeight) > HOST_MAX) throw new Error(`That picture is over ${HOST_MAX} pixels on its longest side: make it smaller, then try again.`);
+    const out = await cutout(img, progress, quality, { maxSide: HOST_MAX });
+    URL.revokeObjectURL(out.src);
+    return new Uint8Array(await out.blob.arrayBuffer());
+  } finally { URL.revokeObjectURL(url); }
 };
 cutout.model = MODEL;
 cutout.models = MODELS;

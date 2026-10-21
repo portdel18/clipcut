@@ -262,3 +262,70 @@ fn main_clips_paste_into_the_main_track_after_the_clip_under_the_playhead() {
     let mut empty = Studio::new();
     assert!(empty.paste(0.0).is_err() && !empty.can_paste());
 }
+
+/// A 320 × 180 still: `colour` all over, or (`cut`) transparent but for a box in the middle.
+fn picture(name: &str, colour: &str, cut: bool, size: &str) -> Option<PathBuf> {
+    let ff = ffmpeg_or_skip("clipcut-core cut-outs")?;
+    let out = fixtures_dir("clipcut-core").join(format!("{name}-{}.png", std::process::id()));
+    let alpha = if cut { "if(between(X,110,209)*between(Y,60,119),255,0)" } else { "255" };
+    let ok = Command::new(&ff)
+        .args(["-v", "error", "-y", "-f", "lavfi", "-i"])
+        .arg(format!("color=c={colour}:size={size},format=rgba,geq=r='r(X,Y)':g='g(X,Y)':b='b(X,Y)':a='{alpha}'"))
+        .args(["-frames:v", "1"])
+        .arg(&out)
+        .status()
+        .is_ok_and(|s| s.success());
+    ok.then_some(out)
+}
+
+#[test]
+fn a_picture_on_the_timeline_has_its_background_removed_and_put_back() {
+    let (Some(v), Some(photo), Some(cut), Some(small)) =
+        (video(), picture("photo", "red", false, "320x180"), picture("photo-cut", "red", true, "320x180"), picture("photo-small", "red", true, "160x90"))
+    else {
+        return;
+    };
+    let mut s = Studio::new();
+    s.add_clip(v.to_str().unwrap()).unwrap();
+    let item = s.import(photo.to_str().unwrap()).unwrap();
+    let pic = s.add_to_lane(item, 0.0).unwrap()[0];
+    s.set_props(&[pic], &serde_json::json!({"opacity": 80.0}), None).unwrap();
+    let before = clip(&s, pic);
+    assert_eq!(before.cut_from, None);
+    assert!(pixel(&s, 0.5, 20, 20)[0] > 150, "the photo covers the video");
+    assert_eq!(s.cutout_source(pic).unwrap(), item);
+
+    s.cut_out(pic, cut.to_str().unwrap()).unwrap();
+    let c = clip(&s, pic);
+    assert_eq!(c.cut_from, Some(item), "{c:?}");
+    assert_ne!(c.item, item);
+    assert_eq!(
+        (c.start, c.end, c.track.as_str(), c.props.opacity),
+        (before.start, before.end, before.track.as_str(), before.props.opacity),
+        "the same clip, as it was"
+    );
+    let out = pixel(&s, 0.5, 20, 20);
+    assert!(out[2] > 100 && out[0] < 60, "the video shows where the background was: {out:?}");
+    assert!(pixel(&s, 0.5, 160, 90)[0] > 100, "the subject stays");
+    // another cut-out is made of the original, not of the cut-out
+    assert_eq!(s.cutout_source(pic).unwrap(), item);
+    // a cut-out of another size is refused, and changes nothing
+    assert!(s.cut_out(pic, small.to_str().unwrap()).is_err());
+    assert_eq!(clip(&s, pic).item, c.item);
+
+    s.put_background_back(pic).unwrap();
+    let back = clip(&s, pic);
+    assert_eq!((back.item, back.cut_from), (item, None));
+    assert!(pixel(&s, 0.5, 20, 20)[0] > 150);
+    assert!(s.put_background_back(pic).is_err(), "nothing to put back");
+    // each is one undo step
+    s.undo().unwrap();
+    assert_eq!(clip(&s, pic).cut_from, Some(item));
+    s.undo().unwrap();
+    assert_eq!(clip(&s, pic).item, item);
+    // a video isn't a picture
+    assert!(s.cut_out(main_clip(&s), cut.to_str().unwrap()).is_err());
+    for f in [photo, cut, small] {
+        let _ = std::fs::remove_file(f);
+    }
+}
