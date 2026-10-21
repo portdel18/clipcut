@@ -229,24 +229,47 @@ pub(crate) fn still_source(seconds: f64, clip: Option<u64>, app: tauri::State<'_
 /// The largest side a still is taken at (8K).
 const STILL_MAX: u32 = 8192;
 
-/// Media `item`'s picture at `seconds`, at its own size, as a PNG (for Thumbnails).
-#[tauri::command]
-pub(crate) async fn still_png(item: u64, seconds: f64, app: tauri::State<'_, App>) -> Result<tauri::ipc::Response, String> {
-    let stills = lock(&app.studio).stills();
-    blocking(move || {
-        let f = stills.frame(item, seconds, STILL_MAX).map_err(|e| e.to_string())?;
-        let png = filmcraft_export::encode_png(f.rgba, f.w, f.h).map_err(|e| format!("The still couldn't be made: {e}"))?;
-        Ok(tauri::ipc::Response::new(png))
+/// A still as a PNG: media `item`'s picture at `seconds` into it, at its own size; or, with no
+/// item, the whole picture the timeline shows at `seconds` (every lane, text, graphics, captions)
+/// at the video's size.
+fn still(app: &App, item: Option<u64>) -> Result<Box<dyn FnOnce(f64) -> Result<Vec<u8>, String> + Send>, String> {
+    let png = |f: clipcut_core::Frame| filmcraft_export::encode_png(f.rgba, f.w, f.h).map_err(|e| format!("The still couldn't be made: {e}"));
+    Ok(match item {
+        Some(item) => {
+            let stills = lock(&app.studio).stills();
+            Box::new(move |seconds| png(stills.frame(item, seconds, STILL_MAX).map_err(|e| e.to_string())?))
+        }
+        None => {
+            let feed = lock(&app.studio).still_feed().map_err(|e| e.to_string())?;
+            Box::new(move |seconds| {
+                if !seconds.is_finite() {
+                    return Err("the time must be a number".into());
+                }
+                png(feed.render(feed.frame_at(seconds), false).map_err(|e| e.to_string())?)
+            })
+        }
     })
-    .await
 }
 
-/// Saves media `item`'s picture at `seconds` as a PNG where the person picks (the Save dialog,
-/// named `name`). Returns where, or None when they cancelled.
+/// A still at `seconds` as a PNG (for Thumbnails): of media `item`, or of the whole picture.
 #[tauri::command]
-pub(crate) async fn save_still(item: u64, seconds: f64, name: String, handle: tauri::AppHandle, app: tauri::State<'_, App>) -> Result<Option<String>, String> {
+pub(crate) async fn still_png(item: Option<u64>, seconds: f64, app: tauri::State<'_, App>) -> Result<tauri::ipc::Response, String> {
+    let make = still(&app, item)?;
+    blocking(move || Ok(tauri::ipc::Response::new(make(seconds)?))).await
+}
+
+/// Saves a still at `seconds` (of media `item`, or of the whole picture) as a PNG where the person
+/// picks (the Save dialog, named `name`). Returns where, or None when they cancelled.
+#[tauri::command]
+pub(crate) async fn save_still(
+    item: Option<u64>,
+    seconds: f64,
+    name: String,
+    handle: tauri::AppHandle,
+    app: tauri::State<'_, App>,
+) -> Result<Option<String>, String> {
     use tauri_plugin_dialog::DialogExt;
-    let stills = lock(&app.studio).stills();
+    let make = still(&app, item)?;
     let file = crate::editing::safe_name(&name);
     blocking(move || {
         let Some(path) = handle
@@ -260,8 +283,7 @@ pub(crate) async fn save_still(item: u64, seconds: f64, name: String, handle: ta
         else {
             return Ok(None);
         };
-        let f = stills.frame(item, seconds, STILL_MAX).map_err(|e| e.to_string())?;
-        let png = filmcraft_export::encode_png(f.rgba, f.w, f.h).map_err(|e| format!("The still couldn't be made: {e}"))?;
+        let png = make(seconds)?;
         std::fs::write(&path, png)
             .map_err(|e| format!("Couldn't save {}: {e}. Check the folder can be written to and there's space on the drive.", path.display()))?;
         Ok(Some(path.to_string_lossy().into_owned()))

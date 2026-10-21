@@ -296,3 +296,38 @@ fn every_edit_is_one_undo_step() {
     assert!((s.timeline().duration - 4.0).abs() < 0.05, "one undo brings the deleted piece back");
     assert_magnetic(&s.timeline());
 }
+
+#[test]
+fn several_main_clips_move_as_one_block_and_change_together() {
+    let Some((mut s, a, b)) = two_clips() else { return };
+    s.add_clip(a.to_str().unwrap()).unwrap();
+    s.add_clip(b.to_str().unwrap()).unwrap();
+    let m = main_track(&s.timeline());
+    assert_eq!(m.len(), 4);
+    let ids: Vec<u64> = m.iter().map(|c| c.id).collect();
+    // the first two, dragged to the end: they keep their order and the rest close up
+    s.reorder_clips(&[ids[1], ids[0]], 2).unwrap();
+    let v = s.timeline();
+    let order: Vec<u64> = main_track(&v).iter().map(|c| c.id).collect();
+    assert_eq!(order, vec![ids[2], ids[3], ids[0], ids[1]]);
+    assert_magnetic(&v);
+    assert_eq!(v.undo_label.as_deref(), Some("Reorder"));
+    // their sound came along
+    for c in main_track(&v) {
+        let snd = v.clips.iter().find(|x| x.track == "A1" && x.link == c.link).unwrap();
+        assert!((snd.start - c.start).abs() < 1e-6, "{c:?} {snd:?}");
+    }
+    s.undo().unwrap();
+    assert_eq!(main_track(&s.timeline()).iter().map(|c| c.id).collect::<Vec<_>>(), ids);
+    assert!(s.reorder_clips(&[], 0).is_err());
+    // the volume of several at once, one undo step
+    s.set_props(&[ids[0], ids[2]], &serde_json::json!({"volumeDb": -12.0}), None).unwrap();
+    let v = s.timeline();
+    let vol = |id: u64| {
+        let pic = v.clips.iter().find(|c| c.id == id).unwrap();
+        v.clips.iter().find(|x| x.track == "A1" && x.link == pic.link).unwrap().props.volume_db
+    };
+    assert_eq!((vol(ids[0]), vol(ids[2]), vol(ids[1])), (Some(-12.0), Some(-12.0), Some(0.0)));
+    s.undo().unwrap();
+    assert_eq!(s.timeline().clips.iter().filter(|c| c.props.volume_db == Some(-12.0)).count(), 0);
+}

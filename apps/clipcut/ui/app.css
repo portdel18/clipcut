@@ -183,6 +183,7 @@ select:disabled { opacity: .5; }
 .transcript { max-height: 360px; overflow-y: auto; padding: 8px 10px; border-radius: 8px; background: var(--well); border: 1px solid var(--line); line-height: 1.7; font-size: 13.5px; outline: none; cursor: text; }
 .transcript:focus { border-color: var(--faint); }
 .tr-follow { display: block; margin: 0 0 6px auto; }
+.still-from { margin: 0 0 8px; }
 .cap-style { display: grid; gap: 7px; margin: 10px 0; }
 .cap-style .dim { opacity: .5; }
 .cap-style .cs-line { display: flex; align-items: center; }
@@ -414,7 +415,7 @@ h3.sub { margin: 12px 0 6px; font-size: 11px; font-weight: 600; color: var(--mut
 .key-row .reset:hover { color: var(--text); background: var(--panel-2); }
 
 /* Remove a colour: picking it in the player */
-.stage.picking, .stage.picking canvas { cursor: crosshair; }
+.stage.picking, .stage.picking canvas, body.picking-colour .clip .pics { cursor: crosshair; }
 .ch-hint { display: grid; gap: 6px; }
 .ch-hint:empty { display: none; }
 

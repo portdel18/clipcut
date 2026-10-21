@@ -56,7 +56,9 @@ remote `upstream`). Read `README.md` for what it is and the roadmap.
   track to lane pictures.
 - Selection: Ctrl/Shift-click adds a clip; a drag on empty timeline draws a box (`boxSelect`), a
   click there moves the playhead. Dragging one of several selected lane clips moves them all
-  (`groupDrag` → `Studio::move_clips`, one undo step; the main track and its sound stay put).
+  (`groupDrag` → `Studio::move_clips`, one undo step); several selected main clips move as one
+  block (`mainGroupDrag` → `Studio::reorder_clips`). Several selected clips share a panel
+  (`severalControls`: volume, fades, opacity for all of them at once).
 - Shuttle (J K L): each press steps through `SHUTTLE` (1, 1.25, 1.5, 1.75, 2, 3… 8) via
   `shuttle(rate)`; forward speeds are the real player at that speed (`play(speed)`: the sound is
   time-stretched with its pitch kept by `clipcut_core::Stretcher`, the clock runs `speed` seconds a
@@ -142,9 +144,12 @@ remote `upstream`). Read `README.md` for what it is and the roadmap.
   clip marker "ClipCut pitch" turns it off. Freeze is the engine's
   Insert Frame Hold Segment after a razor of the clip and its sound, then `pack_main`. Remove a
   colour (`key.rs`) is Ultra Key; `pick_colour` renders the frame without keys.
-- Stills: `Studio::still_source` names the media frame under the playhead; `still_png` /
-  `save_still` (`src/graphics.rs`) encode it at the file's own size from `Studio::stills` (originals,
-  never proxies), and Thumbnails gets it through `CS.hosted.photo`.
+- Stills: by default of the whole video (`still_png` / `save_still` with no item: `Studio::still_feed`,
+  everything on screen at the video's size from the originals, scrubbed along the timeline); "This
+  clip's footage" is `Studio::still_source`'s media frame at the file's own size from
+  `Studio::stills` (originals, never proxies). Thumbnails gets either through `CS.hosted.photo`.
+- Remove a colour's Pick takes the colour from the player, or from a clip's pictures on the
+  timeline (`pickColourFromStrip`).
 - Remove background (Thumbnails) runs in the page (Clip Studio's `js/cutout.js`: ONNX Runtime Web,
   WebGPU else WebAssembly, so the CSP has `'wasm-unsafe-eval'`); its model comes from
   `HOST.model` → `cutout_model` (`src/cutout.rs`: downloaded once into the models folder, checked by
