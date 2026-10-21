@@ -521,3 +521,53 @@ fn a_reversed_clip_shows_exactly_its_source_range() {
     let all: Vec<i64> = (0..20).flat_map(|f| shown(&p, f, false)).collect();
     assert_eq!(all, (10..=29).rev().collect::<Vec<_>>());
 }
+
+#[test]
+fn blur_fill_covers_the_frame_with_the_clip_itself_and_rounds_its_corners() {
+    let (mut p, _red, _o, seq, mut map) = setup();
+    // a vertical red picture in the horizontal 320 × 180 sequence: fitted, it leaves the sides empty
+    let g = GeneratorSource::new(Generator::ColorMatte { color: [1.0, 0.0, 0.0, 1.0] }, 90, 160, FrameRate::FPS_24, Tick(10 * TICKS_PER_SECOND));
+    let info = g.info().clone();
+    let tall = p.add_item(
+        "tall",
+        Label::Iris,
+        ItemKind::Media(MediaClip {
+            media: MediaRef::Generator(g.generator.clone()),
+            info,
+            interpret: Default::default(),
+            mark_in: None,
+            mark_out: None,
+            markers: vec![],
+            offline: false,
+            proxy: None,
+            identity: None,
+        }),
+        None,
+    );
+    map.0.insert(tall, Arc::new(g) as SharedSource);
+    let id = place(&mut p, seq, 0, tall, 0, 48);
+    let img = render_sequence(&p, seq, Tick(0), RenderOptions::default(), &map);
+    assert_eq!(img.get(10, 90)[3], 0.0, "without it the sides are empty");
+    let mut e = filmcraft_project::find_effect("blur_fill").expect("Blur Fill").instance();
+    e.param_mut("darken").unwrap().value = ParamValue::Float(50.0);
+    e.param_mut("rounding").unwrap().value = ParamValue::Float(20.0);
+    let s = p.sequence_mut(seq).unwrap();
+    s.find_item_mut(id).unwrap().1.effects.push(e);
+    let img = render_sequence(&p, seq, Tick(0), RenderOptions::default(), &map);
+    // the sides: the clip's own red, darkened by half, opaque
+    let side = img.get(10, 90);
+    assert!(side[3] > 0.99 && (side[0] - 0.5).abs() < 0.05 && side[1] < 0.01, "{side:?}");
+    // the clip itself as it was, in the middle
+    let mid = img.get(160, 90);
+    assert!((mid[0] - 1.0).abs() < 1e-3, "{mid:?}");
+    // its corner rounded off: the darker fill shows there; the middle of its top edge is the clip
+    let corner = img.get(111, 1);
+    assert!(corner[0] < 0.7, "corner: {corner:?}");
+    assert!((img.get(160, 1)[0] - 1.0).abs() < 1e-3);
+    // the same at half resolution (preview)
+    let half = render_sequence(&p, seq, Tick(0), RenderOptions { scale: 0.5, ..Default::default() }, &map);
+    let hs = half.get(5, 45);
+    assert!(hs[3] > 0.99 && (hs[0] - 0.5).abs() < 0.05, "{hs:?}");
+    // the GPU compositor leaves it to the CPU (it isn't a GPU effect), so exports match
+    assert!(!crate::gpufx::GPU_EFFECTS.contains(&"blur_fill"));
+}

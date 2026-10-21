@@ -12,6 +12,7 @@
 pub mod audio;
 pub mod audio_fx;
 pub mod blend;
+mod blur_fill;
 pub mod color_match;
 pub mod colorman;
 pub mod effects;
@@ -529,7 +530,17 @@ pub(crate) fn item_layer_ex(
         }
     }
     mask::apply_opacity_masks(&mut layer, item, mt, px_scale);
-    let placed = if layer.w == w && layer.h == h && identity_placement(&m) { layer } else { layer.transformed(w, h, &m) };
+    // Blur Fill: the layer's own picture under it, covering the frame, and its corners rounded
+    let fill = if opts.effects { item.effect("blur_fill").filter(|e| e.enabled) } else { None };
+    let under = fill.map(|e| blur_fill::background(&layer, w, h, e, mt));
+    if let Some(e) = fill {
+        blur_fill::round_corners(&mut layer, e, mt);
+    }
+    let mut placed = if layer.w == w && layer.h == h && identity_placement(&m) { layer } else { layer.transformed(w, h, &m) };
+    if let Some(mut bg) = under {
+        blend::composite(&mut bg, &placed, 1.0, Blend::Normal);
+        placed = bg;
+    }
     let (op, bl) = opacity_blend(item, mt);
     Some(Layer::Full { image: placed, opacity: op, blend: bl, opaque: false })
 }

@@ -19,6 +19,7 @@ mod colour;
 mod cutouts;
 mod ducking;
 mod exporting;
+mod fill;
 mod graphics;
 mod key;
 mod keyframes;

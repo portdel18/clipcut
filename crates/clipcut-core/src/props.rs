@@ -47,6 +47,8 @@ pub struct ClipProps {
     pub colour: Option<crate::colour::ColourView>,
     /// Picture clips: the colour removed from them (green screen), when one is.
     pub key: Option<crate::key::KeyView>,
+    /// Picture clips: their own picture behind them, filling the frame, when they have it.
+    pub fill: Option<crate::fill::FillView>,
 }
 
 /// A text clip's words and look (its first text layer).
@@ -157,6 +159,7 @@ pub(crate) fn clip_props_at(s: &filmcraft_engine::Session, q: &Sequence, track: 
     p.opacity = Some(float_at(effect(i, "opacity"), "opacity", at).unwrap_or(100.0));
     p.colour = crate::colour::colour_of(&i.effects);
     p.key = crate::key::key_of(i);
+    p.fill = crate::fill::fill_of(i);
     if kind == "text" {
         let l = effect(i, filmcraft_project::graphic::TEXT_LAYER);
         let style = text(l, "font_style").to_ascii_lowercase();
