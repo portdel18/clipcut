@@ -136,7 +136,8 @@ async fn listed_size(m: &Model) -> Result<u64, String> {
     if !r.status().is_success() {
         return Err(format!("the server answered {}", r.status().as_u16()));
     }
-    r.content_length().ok_or_else(|| "the server gave no size".into())
+    // the header itself: `content_length()` is the body's size, nothing for a HEAD
+    r.headers().get(reqwest::header::CONTENT_LENGTH).and_then(|v| v.to_str().ok()).and_then(|v| v.parse().ok()).ok_or_else(|| "the server gave no size".into())
 }
 
 /// `--model-test <dir> <report.json>`, without a window (Windows CI): downloads the Standard model
