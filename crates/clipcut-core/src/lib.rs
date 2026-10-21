@@ -16,6 +16,7 @@ mod captions;
 mod channels;
 mod clipboard;
 mod colour;
+mod cutouts;
 mod ducking;
 mod exporting;
 mod graphics;

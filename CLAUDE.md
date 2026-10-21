@@ -151,10 +151,19 @@ remote `upstream`). Read `README.md` for what it is and the roadmap.
 - Remove a colour's Pick takes the colour from the player, or from a clip's pictures on the
   timeline (`pickColourFromStrip`).
 - Remove background (Thumbnails) runs in the page (Clip Studio's `js/cutout.js`: ONNX Runtime Web,
-  WebGPU else WebAssembly, so the CSP has `'wasm-unsafe-eval'`); its model comes from
-  `HOST.model` → `cutout_model` (`src/cutout.rs`: downloaded once into the models folder, checked by
-  size and SHA-256 on every read). The pins in `cutout.rs` and `cutout.js` must match; Windows CI's
-  `--model-test` step checks the download.
+  WebGPU else WebAssembly, so the CSP has `'wasm-unsafe-eval'`); the model its Quality picks
+  (Standard ISNet 178 MB; Best / Best for people BiRefNet 973 MB, graphics card only) comes from
+  `HOST.model(name)` → `cutout_model` (`src/cutout.rs` `MODELS`, found by name: downloaded once into
+  the models folder, checked by size and SHA-256 on every read). The pins in `cutout.rs` and
+  `cutout.js` must match; Windows CI's `--model-test` step downloads Standard and checks the listed
+  size of the others. Any photo on the timeline has Remove background too (`cutoutControls`): the
+  original's `still_png` goes to `CS.hosted.cutout` in the Graphics page (loaded unseen), and
+  `cutout_clip` saves the PNG in `Cut-outs` beside `Graphics` and swaps it into the clip in place
+  (`cutouts.rs`: same size only; a clip marker "ClipCut cut-out" keeps the original's item, for
+  Put background back, `ClipView.cut_from`).
+- Waveforms are drawn as loud as they will play (clip and lane volume, `playGain`); past full
+  scale their bars get red edges (`--sound-loud`), and the Sound panel says by how much, with
+  Lower to fit (`loudHint`, `overBy`).
 - Copy and paste (`clipboard.rs`): `Studio::copy_clips` keeps clips and their linked partners,
   `paste` puts copies at the playhead (lane clips keep lane and spacing or take a free lane; main
   clips go into the main track after the clip under the playhead). Copies play the same media, so

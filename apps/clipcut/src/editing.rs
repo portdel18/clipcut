@@ -114,7 +114,10 @@ fn view(studio: &std::sync::Arc<std::sync::Mutex<Studio>>) -> TimelineView {
 
 /// Runs an edit with playback stopped (the player plays a snapshot of the sequence) and returns
 /// the timeline afterwards.
-async fn edit(app: &tauri::State<'_, App>, f: impl FnOnce(&mut Studio) -> clipcut_core::Result<()> + Send + 'static) -> Result<TimelineView, String> {
+pub(crate) async fn edit(
+    app: &tauri::State<'_, App>,
+    f: impl FnOnce(&mut Studio) -> clipcut_core::Result<()> + Send + 'static,
+) -> Result<TimelineView, String> {
     let (studio, player) = (app.studio.clone(), app.player.clone());
     blocking(move || {
         lock(&player).stop();

@@ -43,7 +43,7 @@ pub fn read_graphic(dir: &Path) -> Result<Value> {
 
 impl Studio {
     /// A media item's picture size.
-    fn picture_size(&self, item: ItemId) -> Option<(u32, u32)> {
+    pub(crate) fn picture_size(&self, item: ItemId) -> Option<(u32, u32)> {
         let it = self.session.project.item(item)?;
         let ItemKind::Media(m) = &it.kind else { return None };
         m.info.video.as_ref().map(|v| (v.width, v.height))

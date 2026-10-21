@@ -93,6 +93,51 @@ fn graphics_root(handle: &tauri::AppHandle, app: &App) -> PathBuf {
     }
 }
 
+/// Where cut-outs (pictures with their background removed) go: `Cut-outs` beside `Graphics`.
+fn cutouts_root(handle: &tauri::AppHandle, app: &App) -> PathBuf {
+    let g = graphics_root(handle, app);
+    g.parent().map_or_else(|| PathBuf::from("Cut-outs"), |p| p.join("Cut-outs"))
+}
+
+/// Remove background on a picture clip: the body is the cut-out (a PNG the page made of the
+/// picture `still_png` gave it, the same size); header `clip`. It is saved in `Cut-outs` and takes
+/// the place of the clip's picture.
+#[tauri::command]
+pub async fn cutout_clip(request: Request<'_>, handle: tauri::AppHandle, app: tauri::State<'_, App>) -> Result<TimelineView, String> {
+    let clip: u64 = header(&request, "clip")?.parse().map_err(|_| "the clip is not a number")?;
+    let png = body(&request)?;
+    if !png.starts_with(b"\x89PNG") {
+        return Err("the cut-out isn't a PNG picture: try again".into());
+    }
+    let name = {
+        let v = lock(&app.studio).timeline();
+        let c = v.clips.iter().find(|c| c.id == clip).ok_or("that clip is no longer on the timeline")?;
+        let from = c.cut_from.unwrap_or(c.item);
+        let n = v.media.iter().find(|m| m.item == from).map_or_else(|| c.name.clone(), |m| m.name.clone());
+        Path::new(&n).file_stem().map_or_else(|| "Picture".into(), |s| s.to_string_lossy().to_string())
+    };
+    let root = cutouts_root(&handle, &app);
+    std::fs::create_dir_all(&root).map_err(|e| format!("the Cut-outs folder can't be made ({}): {e}", root.display()))?;
+    let base = crate::editing::safe_name(&format!("{name} no background"));
+    let path = (1..10_000)
+        .map(|n| if n == 1 { root.join(format!("{base}.png")) } else { root.join(format!("{base} {n}.png")) })
+        .find(|p| !p.exists())
+        .ok_or("too many cut-outs of this picture")?;
+    std::fs::write(&path, png).map_err(|e| format!("the cut-out couldn't be saved ({}): {e}", path.display()))?;
+    let at = path.to_string_lossy().to_string();
+    let r = crate::editing::edit(&app, move |s| s.cut_out(clip, &at)).await;
+    if r.is_err() {
+        let _ = std::fs::remove_file(&path);
+    }
+    r
+}
+
+/// The picture clip `clip` shows as it was before Remove background.
+#[tauri::command]
+pub async fn put_background_back(clip: u64, app: tauri::State<'_, App>) -> Result<TimelineView, String> {
+    crate::editing::edit(&app, move |s| s.put_background_back(clip)).await
+}
+
 fn header<'a>(req: &'a Request<'_>, name: &str) -> Result<&'a str, String> {
     req.headers().get(name).and_then(|v| v.to_str().ok()).ok_or_else(|| format!("the graphic's {name} is missing"))
 }

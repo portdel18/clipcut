@@ -1619,6 +1619,13 @@
             <div class="btn-row th-photo-has" hidden>
               <button class="btn" id="th-photo-cut" type="button" title="Take the background off the photo (an AI model on this computer: nothing is uploaded)">Remove background</button>
             </div>
+            <div class="field th-photo-has" hidden><label class="lbl" for="th-photo-cutq">Background removal</label>
+              <select id="th-photo-cutq" title="Standard: quick, keeps everything in front. Best: finer hair and edges, but keeps only the main subject. Best for people: keeps the people. The Best models download once (973 MB each) and need a graphics card.">
+                <option value="standard">Standard (178 MB)</option>
+                <option value="best">Best (973 MB)</option>
+                <option value="people">Best for people (973 MB)</option>
+              </select>
+            </div>
             <p class="hint cut-status" id="th-photo-cutnote" hidden></p>
             <input type="file" id="th-video-file" accept="video/*" hidden>
             <p class="hint">Drag the preview to move the photo; scroll to zoom. You can also drop an image on the preview, or a video to pick one of its frames.</p>
@@ -1759,6 +1766,13 @@
             <input type="file" id="th-inset-file" accept="image/*" hidden>
             <div class="btn-row th-inset-has" hidden>
               <button class="btn" id="th-inset-cut" type="button" title="Take the background off the inset (an AI model on this computer: nothing is uploaded)">Remove background</button>
+            </div>
+            <div class="field th-inset-has" hidden><label class="lbl" for="th-inset-cutq">Background removal</label>
+              <select id="th-inset-cutq" title="Standard: quick, keeps everything in front. Best: finer hair and edges, but keeps only the main subject. Best for people: keeps the people. The Best models download once (973 MB each) and need a graphics card.">
+                <option value="standard">Standard (178 MB)</option>
+                <option value="best">Best (973 MB)</option>
+                <option value="people">Best for people (973 MB)</option>
+              </select>
             </div>
             <p class="hint cut-status" id="th-inset-cutnote" hidden></p>
             <p class="hint">A face, logo, or document. Drag it on the preview to place it; scroll over it to resize.</p>

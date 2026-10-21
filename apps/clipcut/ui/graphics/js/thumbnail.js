@@ -33,6 +33,8 @@ const TH_DEFAULT = {
   overlay: 'side', overlayColor: '#000000', overlayAmt: 0.75,
   insetShape: 'circle', insetSize: 0.55, insetX: 0.78, insetY: 0.5, insetBorder: 8, insetBorderColor: '#FFFFFF',
   out: { size: '16:9', format: 'jpeg' },
+  // Remove background's model: standard, best, people (CS.cutout.models)
+  cutQuality: 'standard',
 };
 const TH_PRESET_KEYS = ['font', 'caps', 'size', 'boxW', 'align', 'valign', 'tilt', 'fg', 'hl', 'hlMode', 'hlText', 'outline', 'outlineColor', 'shadow', 'tagBg', 'tagFg', 'bg', 'bright', 'sat', 'overlay', 'overlayColor', 'overlayAmt', 'insetShape', 'insetSize', 'insetX', 'insetY', 'insetBorder', 'insetBorderColor', 'out'];
 const TH_BUILTINS = {
@@ -47,6 +49,7 @@ const th = Object.assign(clone(TH_DEFAULT), store.get('th', {}));
 th.out = Object.assign({}, TH_DEFAULT.out, th.out || {});
 if (!SIZES[th.out.size]) th.out.size = '16:9';
 if (!FONTS[th.font]) th.font = TH_DEFAULT.font;
+if (!['standard', 'best', 'people'].includes(th.cutQuality)) th.cutQuality = 'standard';
 
 const toolTh = $('#tool-th');
 const thCanvas = $('#th-canvas'), thViewer = $('#th-viewer'), thMonitor = $('#th-monitor');
@@ -388,7 +391,7 @@ function mediaUI() {
   for (const which of ['photo', 'inset']) {
     $(`#th-${which}-name`).textContent = media[which + 'Name'];
     $(`#th-${which}-clear`).hidden = !media[which];
-    document.querySelector(`.th-${which}-has`).hidden = !media[which];
+    for (const el of document.querySelectorAll(`.th-${which}-has`)) el.hidden = !media[which];
     const b = $(`#th-${which}-cut`);
     b.textContent = media[which + 'Full'] ? 'Put background back' : 'Remove background';
     b.disabled = cutBusy;
@@ -418,12 +421,13 @@ async function toggleCut(which) {
   cutBusy = true; mediaUI();
   const src = media[which];
   const t0 = performance.now();
+  const quality = th.cutQuality, big = quality !== 'standard';
   try {
     cutNote(which, 'Getting the background model ready…');
     const img = await window.CS.cutout(src, (done, total, phase) => {
-      if (phase === 'start') cutNote(which, 'Removing the background… (a few seconds on a graphics card, up to half a minute without one)');
-      else cutNote(which, `Downloading the background model, once: ${Math.round(done / 1e6)} of ${Math.round(total / 1e6)} MB`);
-    });
+      if (phase === 'start') cutNote(which, big ? 'Removing the background with the Best model… (up to half a minute on a graphics card)' : 'Removing the background… (a few seconds on a graphics card, up to half a minute without one)');
+      else cutNote(which, `Downloading the ${big ? 'Best' : 'background'} model, once: ${Math.round(done / 1e6)} of ${Math.round(total / 1e6)} MB`);
+    }, quality);
     if (media[which] !== src) return; // another picture was chosen meanwhile
     media[which + 'Full'] = src;
     media[which] = img;
@@ -440,8 +444,15 @@ $('#th-model-file').addEventListener('change', async e => {
   const which = cutWaiting || 'photo';
   cutWaiting = null;
   if (!f) return;
-  try { await window.CS.cutout.useFile(f); cutNote(which, 'Model ready.'); toggleCut(which); } catch (err) { cutNote(which, err.message, true); }
+  try { await window.CS.cutout.useFile(f, th.cutQuality); cutNote(which, 'Model ready.'); toggleCut(which); } catch (err) { cutNote(which, err.message, true); }
 });
+// another model: a picture already cut out is cut out again with it
+for (const which of ['photo', 'inset']) {
+  bindSelect(`th-${which}-cutq`, th, 'cutQuality', () => {
+    saveSoon('th', th);
+    for (const w of ['photo', 'inset']) if (media[w + 'Full'] && !cutBusy) { media[w] = media[w + 'Full']; media[w + 'Full'] = null; toggleCut(w); }
+  });
+}
 $('#th-photo-pick').addEventListener('click', () => pickImage('photo'));
 $('#th-inset-pick').addEventListener('click', () => pickImage('inset'));
 $('#th-photo-clear').addEventListener('click', () => { media.photo = null; media.photoFull = null; media.photoName = ''; cutNote('photo', ''); mediaUI(); thRefresh(); });
