@@ -48,6 +48,12 @@ remote `upstream`). Read `README.md` for what it is and the roadmap.
 - The timeline takes 44% of the window by default (`--tl-h` on `.app`); the divider above it
   (`#tl-split`) resizes it and remembers the share (`clipcut.tlHeight`). `layoutRows` centres the
   lanes in it (`S.rowShift`), so code that places things by lane uses `S.rows`, never `ROW` sums.
+- Lanes: `Studio::move_clip` drops a clip on the lane asked for, or on a new lane right beside it
+  when that is taken there (`lane_beside`); pictures (not text) also move off the main track onto
+  a lane (`move_off_main`: its sound goes to a sound lane, still linked, the main track closes up)
+  and into it at the nearest cut (`move_into_main`, via `pack`). In the interface, a main clip
+  dragged above the main track lifts onto a lane (`reorderDrag`), and `laneFor` offers the main
+  track to lane pictures.
 - Selection: Ctrl/Shift-click adds a clip; a drag on empty timeline draws a box (`boxSelect`), a
   click there moves the playhead. Dragging one of several selected lane clips moves them all
   (`groupDrag` → `Studio::move_clips`, one undo step; the main track and its sound stay put).

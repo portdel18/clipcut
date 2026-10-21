@@ -6,7 +6,7 @@
 //! A clip never lands on top of another one: when its place on a lane is taken it goes to the next
 //! free lane of its kind, and a new lane is added when none is free.
 
-use filmcraft_project::{ClipId, ItemId, Sequence, TrackKind};
+use filmcraft_project::{ClipId, ItemId, Sequence, TrackItem, TrackKind};
 use filmcraft_time::Tick;
 use serde_json::{Value, json};
 
@@ -155,9 +155,10 @@ impl Studio {
         })
     }
 
-    /// Moves a lane clip to `lane` ("V2", "A3"…) at `seconds`, with its linked partner keeping its
-    /// offset. A place that is taken sends the clip (or its partner) to the next free lane of its
-    /// kind. One undo step.
+    /// Moves a clip to `lane` ("V2", "A3"…) at `seconds`, with its linked partner keeping its
+    /// offset. A lane that is taken there gets a new lane beside it for the clip (its partner goes
+    /// to a free lane of its kind). A picture also moves off the main track onto a lane ("V2"…),
+    /// or from a lane into the main track ("V1", at the cut nearest `seconds`). One undo step.
     pub fn move_clip(&mut self, clip: u64, lane: &str, seconds: f64) -> Result<()> {
         let t = self.frame_tick(seconds)?;
         let (want, index) = parse_lane(lane).ok_or_else(|| Error::Invalid(format!("{lane} is not a lane")))?;
@@ -167,6 +168,9 @@ impl Studio {
         let kind = q.track(track).map(|t| t.kind).ok_or(Error::NothingOpen)?;
         let own = if kind == TrackKind::Video { Lane::Video } else { Lane::Audio };
         let own_index = tracks(q, own).iter().position(|t| t.id == track).unwrap_or(0);
+        if own == Lane::Video && want == Lane::Video && (own_index == 0) != (index == 0) {
+            return if index == 0 { self.move_into_main(clip, t) } else { self.move_off_main(clip, index, t) };
+        }
         if own_index == 0 {
             return Err(Error::Invalid("clips on the main track move by dragging them along it".into()));
         }
@@ -198,7 +202,8 @@ impl Studio {
             s.unlock_lanes()?;
             let mut moves = Vec::new();
             let start = item.start + shift;
-            let dest = if s.lane_free(own, index, start, start + item.duration, &ids) { index } else { s.free_lane(own, start, start + item.duration, &ids)? };
+            // the lane asked for, or a new one beside it when it is taken there
+            let dest = if s.lane_free(own, index, start, start + item.duration, &ids) { index } else { s.lane_beside(own, index)? };
             moves.push(json!({"clip": clip, "track": lane_name(own, dest), "time": start.0}));
             for (ptrack, p) in &partners {
                 let q = s.session.active_sequence().ok_or(Error::NothingOpen)?;
@@ -383,6 +388,81 @@ impl Studio {
         self.unlock_lanes()?;
         self.session.execute("timeline.move", json!({"moves": out, "linked": false})).map_err(engine)?;
         Ok(())
+    }
+
+    /// A picture from the main track onto lane `index` at `at` (a new lane beside it when that is
+    /// taken there); its sound goes to a free sound lane with it, still linked. The main track
+    /// closes up.
+    fn move_off_main(&mut self, clip: u64, index: usize, at: Tick) -> Result<()> {
+        let q = self.session.active_sequence().ok_or(Error::NothingOpen)?;
+        let item = q.find_item(ClipId(clip)).map(|(_, i)| i.clone()).ok_or_else(|| Error::Invalid("that clip is no longer on the timeline".into()))?;
+        let sounds: Vec<TrackItem> =
+            item.link.map(|l| q.audio_tracks.iter().flat_map(|t| t.items.iter()).filter(|i| i.link == Some(l)).cloned().collect()).unwrap_or_default();
+        let mains = self.main_order()?;
+        if mains.len() < 2 {
+            return Err(Error::Invalid("the main track's only clip stays on it: add another clip first".into()));
+        }
+        self.group_follow("Move", None, |s| {
+            s.unlock_lanes()?;
+            let end = at + item.duration;
+            let dest = if s.lane_free(Lane::Video, index, at, end, &[clip]) { index } else { s.lane_beside(Lane::Video, index)? };
+            let mut moves = vec![json!({"clip": clip, "track": lane_name(Lane::Video, dest), "time": at.0})];
+            for snd in &sounds {
+                let st = Tick(at.0 + (snd.start.0 - item.start.0)).max(Tick::ZERO);
+                let a = s.free_lane(Lane::Audio, st, st + snd.duration, &[snd.id.0])?;
+                moves.push(json!({"clip": snd.id.0, "track": lane_name(Lane::Audio, a), "time": st.0}));
+            }
+            s.session.execute("timeline.move", json!({"moves": moves, "linked": false})).map_err(engine)?;
+            s.pack_main()
+        })
+    }
+
+    /// A lane picture into the main track at the cut nearest `at`; its linked sound goes onto the
+    /// main track's sound with it, and the clips after it move along.
+    fn move_into_main(&mut self, clip: u64, at: Tick) -> Result<()> {
+        let q = self.session.active_sequence().ok_or(Error::NothingOpen)?;
+        let item = q.find_item(ClipId(clip)).map(|(_, i)| i.clone()).ok_or_else(|| Error::Invalid("that clip is no longer on the timeline".into()))?;
+        if self.session.project.item(item.item).is_some_and(|it| matches!(it.kind, filmcraft_project::ItemKind::Graphic { .. })) {
+            return Err(Error::Invalid("text stays on the lanes above the main track".into()));
+        }
+        let sounds: Vec<TrackItem> =
+            item.link.map(|l| q.audio_tracks.iter().flat_map(|t| t.items.iter()).filter(|i| i.link == Some(l)).cloned().collect()).unwrap_or_default();
+        let main = q.video_tracks.first().ok_or(Error::NothingOpen)?;
+        let mut order: Vec<(Tick, Tick, u64)> = main.items.iter().map(|i| (i.start, i.end(), i.id.0)).collect();
+        order.sort();
+        // the cut nearest `at`: before the first clip whose middle is past it
+        let k = order.iter().position(|(s, e, _)| Tick((s.0 + e.0) / 2) > at).unwrap_or(order.len());
+        let end = order.iter().map(|(_, e, _)| *e).max().unwrap_or(Tick::ZERO);
+        let mut ids: Vec<u64> = order.iter().map(|(_, _, id)| *id).collect();
+        ids.insert(k, clip);
+        self.group_follow("Move", None, |s| {
+            s.unlock_lanes()?;
+            // past the main track's end first (free there), then laid out in its place
+            let mut moves = vec![json!({"clip": clip, "track": "V1", "time": end.0})];
+            for snd in &sounds {
+                moves.push(json!({"clip": snd.id.0, "track": "A1", "time": end.0 + (snd.start.0 - item.start.0).max(0)}));
+            }
+            s.session.execute("timeline.move", json!({"moves": moves, "linked": false})).map_err(engine)?;
+            s.pack(&ids, "Move")
+        })
+    }
+
+    /// A new, empty lane right beside lane `index` (above a picture lane, below a sound lane, so
+    /// the clip lands where it was dropped); returns its index.
+    pub(crate) fn lane_beside(&mut self, lane: Lane, index: usize) -> Result<usize> {
+        let after = lane_name(lane, index);
+        let p = if lane == Lane::Video { json!({"video": 1, "audio": 0, "videoAfter": after}) } else { json!({"video": 0, "audio": 1, "audioAfter": after}) };
+        let added = self.session.execute("sequence.addTracks", p).map_err(engine)?;
+        let key = if lane == Lane::Video { "video" } else { "audio" };
+        let id = added
+            .get(key)
+            .and_then(Value::as_array)
+            .and_then(|a| a.first())
+            .and_then(Value::as_u64)
+            .ok_or_else(|| Error::Engine("no lane was added".into()))?;
+        self.session.execute("timeline.setTrack", json!({"track": id, "syncLock": false})).map_err(engine)?;
+        let q = self.session.active_sequence().ok_or(Error::NothingOpen)?;
+        tracks(q, lane).iter().position(|t| t.id.0 == id).ok_or_else(|| Error::Engine("the new lane went missing".into()))
     }
 
     fn lane_free(&self, lane: Lane, index: usize, start: Tick, end: Tick, except: &[u64]) -> bool {

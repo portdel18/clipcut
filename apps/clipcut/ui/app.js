@@ -3490,8 +3490,11 @@ function groupDrag(c, el, e, after) {
   });
 }
 function reorderDrag(c, el, e, after) {
-  const x0 = e.clientX;
+  const x0 = e.clientX, y0 = e.clientY;
   let started = false;
+  // dragged up above the main track: it leaves it for a lane (the main track's only clip stays)
+  const mainRow = rowOf('V1');
+  let lift = null, liftStart = c.start;
   const grab = timeAt(e.clientX) - c.start;
   const len = c.end - c.start;
   const others = mainClips().filter(o => o.id !== c.id);
@@ -3502,12 +3505,26 @@ function reorderDrag(c, el, e, after) {
   let to = from;
   follow(e, ev => {
     if (!started) {
-      if (Math.abs(ev.clientX - x0) < 5) return;
+      if (Math.hypot(ev.clientX - x0, ev.clientY - y0) < 5) return;
       started = true;
       el.classList.add('dragging');
       for (const o of others) S.els.get(o.id)?.classList.add('moving');
     }
     const start = Math.max(0, timeAt(ev.clientX) - grab);
+    const y = yAt(ev.clientY);
+    lift = mainRow && others.length && y < mainRow.top - 6 ? laneFor(c, y) : null;
+    if (lift) {
+      // over the lanes: the others close up, and it shows where it would land
+      if (lift.id === 'V1') lift = { id: 'V2', dy: mainRow.top - ROW.video - ROW.gap - mainRow.top };
+      liftStart = Math.max(0, snapFrame(start));
+      S.geom.clear();
+      for (const p of packed) S.geom.set(p.o.id, { ...p.o, start: p.start, end: p.end });
+      S.geom.set(c.id, { ...c, start: liftStart, end: liftStart + len, dy: lift.dy });
+      $('#insert-mark').hidden = true;
+      layoutClips();
+      drawVisible();
+      return;
+    }
     const centre = start + len / 2;
     to = packed.filter(p => (p.start + p.end) / 2 < centre).length;
     // the others make room where it would go
@@ -3533,7 +3550,8 @@ function reorderDrag(c, el, e, after) {
     layoutClips();
     drawVisible();
     after(started);
-    if (started && !cancelled && to !== from) edit('reorder', { clip: c.id, to });
+    if (started && !cancelled && lift) edit('move_clip', { clip: c.id, lane: lift.id, seconds: liftStart });
+    else if (started && !cancelled && to !== from) edit('reorder', { clip: c.id, to });
   });
 }
 /** The lane a lane clip would go to with the pointer at `y`: one of its kind's lanes, or a new
@@ -3553,7 +3571,9 @@ function laneFor(c, y) {
     return { id: `A${bottom + 1}`, dy: last.top + last.h + ROW.gap - own.top };
   }
   let best = own, d = Infinity;
-  for (const r of rows) { const dd = Math.abs(y - (r.top + r.h / 2)); if (dd < d) { d = dd; best = r; } }
+  // a picture (not text) can also go down into the main track
+  const main = kind === 'video' && c.kind !== 'text' && !isMain(c) ? rowOf('V1') : null;
+  for (const r of main ? [...rows, main] : rows) { const dd = Math.abs(y - (r.top + r.h / 2)); if (dd < d) { d = dd; best = r; } }
   return { id: best.id, dy: best.top - own.top };
 }
 function laneDrag(c, el, e, after) {

@@ -553,7 +553,7 @@ impl Studio {
     }
 
     /// Main-track clip ids in timeline order.
-    fn main_order(&self) -> Result<Vec<u64>> {
+    pub(crate) fn main_order(&self) -> Result<Vec<u64>> {
         let q = self.session.active_sequence().ok_or(Error::NothingOpen)?;
         let mut items: Vec<_> = q.video_tracks.first().map(|t| t.items.iter().map(|i| (i.start, i.id.0)).collect()).unwrap_or_default();
         items.sort();
@@ -568,7 +568,7 @@ impl Studio {
 
     /// Lays `order` out back to back from 0 on the main track, moving linked sound along. One
     /// undo step; nothing happens when everything is already in place.
-    fn pack(&mut self, order: &[u64], label: &str) -> Result<()> {
+    pub(crate) fn pack(&mut self, order: &[u64], label: &str) -> Result<()> {
         let q = self.session.active_sequence().ok_or(Error::NothingOpen)?;
         let Some(main) = q.video_tracks.first() else { return Ok(()) };
         let mut at = Tick::ZERO;
