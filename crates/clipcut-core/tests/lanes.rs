@@ -74,7 +74,9 @@ fn music_goes_below_and_stays_put_when_the_main_track_changes() {
     // a second one where the first is goes on the next lane down
     let second = s.add_to_lane(music, 2.0).unwrap()[0];
     assert_eq!(by_id(&s.timeline(), second).track, "A3");
-    // deleting, trimming and Q on the main track move nothing on the lanes
+    // with linkage off, deleting, trimming and Q on the main track move nothing on the lanes
+    // (linkage, on by default, has its own tests)
+    s.set_linkage(false);
     let main = on(&s.timeline(), "V1");
     s.delete(&[main[0].id]).unwrap();
     s.trim(main[1].id, false, -0.5).unwrap();

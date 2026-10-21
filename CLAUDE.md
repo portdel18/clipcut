@@ -54,6 +54,13 @@ remote `upstream`). Read `README.md` for what it is and the roadmap.
   and into it at the nearest cut (`move_into_main`, via `pack`). In the interface, a main clip
   dragged above the main track lifts onto a lane (`reorderDrag`), and `laneFor` offers the main
   track to lane pictures.
+- Linkage (`linkage.rs`, on by default, `#link-btn` / `Studio::set_linkage`, remembered as
+  `clipcut.linkage`): before every `group_follow` edit each lane clip is tied to the main-track clip
+  under its start (the moment of its media, or the cut when it starts within a frame of it);
+  afterwards `place_lanes` moves it to where that footage plays now (its own lane if free, else the
+  next free one), or clears it when the footage is gone, unless it runs on past that clip (a music
+  bed stays). A lane clip the edit itself moved is left alone; Slip runs `without_linkage`. Linked
+  clips show a link mark (`isLinked` in `app.js`).
 - Selection: Ctrl/Shift-click adds a clip; a drag on empty timeline draws a box (`boxSelect`), a
   click there moves the playhead. Dragging one of several selected lane clips moves them all
   (`groupDrag` → `Studio::move_clips`, one undo step); several selected main clips move as one

@@ -31,6 +31,8 @@ const S = {
   kf: null,              // a keyframe singled out on the timeline: {clip, t}
   cut: null,             // or the selected cut on the main track: the clip before it
   snap: true,
+  // linkage: lane clips follow the main-track clip they start on (linkage.rs)
+  linkage: (() => { try { return localStorage.getItem('clipcut.linkage') !== 'off'; } catch (_) { return true; } })(),
   frameBusy: false,      // a preview frame request is in flight
   want: null,            // the latest preview asked for while busy
   geom: new Map(),       // clip id → where a drag shows it (overrides its real place)
@@ -2393,6 +2395,10 @@ function makeClipEl(c) {
   else el.innerHTML = '<span class="label"></span>' + handles;
   const name = kind === 'caption' ? c.text.replace(/\n/g, ' ') : kind === 'text' ? (c.props.text && c.props.text.text.split('\n')[0]) || 'Text' : c.name;
   el.querySelector('.label').textContent = kind === 'caption' ? name : `${c.graphic ? TOOL_NAMES[c.graphic] || 'Graphic' : name} · ${fmtLen(c.end - c.start)}`;
+  if (S.linkage && isLinked(c)) {
+    el.classList.add('linked');
+    el.title = (el.title ? el.title + ' ' : '') + 'Linked: it moves with the main-track clip under its start, and goes if that footage is deleted.';
+  }
   if (c.graphic) { const t = document.createElement('span'); t.className = 'gr-tag'; t.textContent = 'Graphic'; el.appendChild(t); el.title = `${name}: made in Graphics. Select it and press Edit in Graphics to change it.`; }
   if (kind === 'caption') el.title = c.text;
   if (kind === 'main') el.querySelector('.snd').classList.toggle('none', !hasSound(c));
@@ -2732,6 +2738,7 @@ function renderTools() {
   $('#undo-btn').title = (S.tl.undoLabel ? `Undo ${S.tl.undoLabel}` : 'Undo') + (uk ? ` (${uk})` : '');
   $('#redo-btn').title = (S.tl.redoLabel ? `Redo ${S.tl.redoLabel}` : 'Redo') + (rk ? ` (${rk})` : '');
   $('#snap-btn').setAttribute('aria-pressed', String(S.snap));
+  $('#link-btn').setAttribute('aria-pressed', String(S.linkage));
   // the player's frame follows whether the selected clip is under the playhead
   const at = stageClip() ? 1 : 0;
   if (at !== lastAt) { lastAt = at; drawOverlay(); }
@@ -3541,6 +3548,20 @@ async function deleteSelection() {
 }
 const undo = () => edit('undo');
 const redo = () => edit('redo');
+/** A lane clip linkage moves with the main track: it starts over a main-track clip (the main
+ *  track's own sound and captions follow by their own rules). */
+function isLinked(c) {
+  if (isCap(c) || isMain(c) || c.track === 'A1' || isMainSound(c)) return false;
+  return mainClips().some(m => m.start <= c.start + 1e-6 && c.start < m.end - 1e-6);
+}
+function toggleLinkage() {
+  S.linkage = !S.linkage;
+  try { localStorage.setItem('clipcut.linkage', S.linkage ? 'on' : 'off'); } catch (_) {}
+  invoke('set_linkage', { on: S.linkage }).catch(e => toast(e, true));
+  renderTools();
+  renderTrack();
+  toast(S.linkage ? 'Linkage on: B-roll, text and sound move with the main-track clip they start on' : 'Linkage off: clips on the lanes stay where they are');
+}
 function toggleSnap() {
   S.snap = !S.snap;
   renderTools();
@@ -4378,6 +4399,9 @@ click('#delleft-btn', () => splitKeep('right'));
 click('#delright-btn', () => splitKeep('left'));
 click('#delete-btn', deleteSelection);
 click('#snap-btn', toggleSnap);
+click('#link-btn', toggleLinkage);
+// the engine starts with linkage on: tell it what the person chose
+invoke('set_linkage', { on: S.linkage }).catch(() => {});
 click('#zoomin-btn', () => setPx(S.px * 1.5));
 click('#zoomout-btn', () => setPx(S.px / 1.5));
 click('#fit-btn', () => fitZoom());
@@ -4547,6 +4571,7 @@ const ACTIONS = [
   { group: 'Editing', id: 'slip-back-10', label: 'Slip the selected clip ten frames left', keys: ['Alt+Shift+,'], when: has, fn: () => slipSel(-10) },
   { group: 'Editing', id: 'slip-on-10', label: 'Slip the selected clip ten frames right', keys: ['Alt+Shift+.'], when: has, fn: () => slipSel(10) },
   { group: 'Timeline', id: 'snap', label: 'Snapping on or off', keys: ['N'], once: true, fn: () => toggleSnap() },
+  { group: 'Timeline', id: 'linkage', label: 'Linkage on or off', keys: [], once: true, fn: () => toggleLinkage() },
   { group: 'Timeline', id: 'zoom-in', label: 'Zoom in', keys: ['=', 'Shift+=', 'Ctrl+=', 'Num +'], fn: () => setPx(S.px * 1.5) },
   { group: 'Timeline', id: 'zoom-out', label: 'Zoom out', keys: ['-', 'Ctrl+-', 'Num -'], fn: () => setPx(S.px / 1.5) },
   { group: 'Timeline', id: 'zoom-fit', label: 'Fit the whole video', keys: ['Ctrl+0'], fn: () => fitZoom() },
