@@ -83,6 +83,15 @@ impl Studio {
         Ok(FrameFeed { project: self.session.project.clone(), sequence, provider, scale, rate, frames })
     }
 
+    /// The whole picture (every lane, text, graphics, captions) at the video's own size, from the
+    /// original media (never proxies): a still of what the timeline shows.
+    pub fn still_feed(&self) -> Result<FrameFeed> {
+        let info = self.info()?;
+        let mut feed = self.frame_feed(info.width.max(16), "full")?;
+        feed.provider = Arc::new(self.session.media.full_res_provider(self.session.project.clone(), self.session.services.clone()));
+        Ok(feed)
+    }
+
     /// The frame at `seconds`, at most `max_width` wide, without the clips `hide` (a graphic being
     /// changed, so it isn't under its new version): the picture a graphic is designed over.
     pub fn frame_without(&self, seconds: f64, max_width: u32, hide: &[u64]) -> Result<Frame> {

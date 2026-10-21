@@ -549,6 +549,7 @@ fn main() {
             editing::add_text,
             editing::move_clip,
             editing::move_clips,
+            editing::reorder_clips,
             editing::copy_clips,
             editing::paste_clips,
             editing::extract_audio,

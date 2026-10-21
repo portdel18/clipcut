@@ -347,6 +347,11 @@ pub async fn paste_clips(seconds: f64, app: tauri::State<'_, App>) -> Result<Cli
 }
 
 #[tauri::command]
+pub async fn reorder_clips(clips: Vec<u64>, to: usize, app: tauri::State<'_, App>) -> Result<TimelineView, String> {
+    edit(&app, move |s| s.reorder_clips(&clips, to)).await
+}
+
+#[tauri::command]
 pub async fn move_clips(clips: Vec<u64>, seconds: f64, app: tauri::State<'_, App>) -> Result<TimelineView, String> {
     edit(&app, move |s| s.move_clips(&clips, seconds)).await
 }

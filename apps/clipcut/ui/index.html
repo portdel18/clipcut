@@ -273,6 +273,10 @@
 </dialog>
 <dialog class="dlg wide" id="still-dlg" aria-labelledby="still-title">
   <h2 id="still-title">Still</h2>
+  <div class="seg still-from" id="still-from" role="group" aria-label="What the still shows">
+    <button id="still-from-video" data-v="video" title="Everything on screen at that moment: every lane, text, graphics and captions">The video</button>
+    <button id="still-from-clip" data-v="clip" title="The clip's own footage, at the file's own size, without anything over it">This clip's footage</button>
+  </div>
   <canvas class="still-view" id="still-view" width="640" height="360"></canvas>
   <label class="prop wide still-time"><span>Frame</span><input type="range" id="still-time" min="0" max="1" step="0.001" value="0"></label>
   <div class="still-meta"><button class="tool" id="still-prev" title="One frame back (←)" aria-label="One frame back"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 6l-6 6 6 6"/></svg></button><span class="mono" id="still-at">0:00.00</span><button class="tool" id="still-next" title="One frame on (→)" aria-label="One frame on"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg></button></div>

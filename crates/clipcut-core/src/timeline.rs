@@ -552,6 +552,20 @@ impl Studio {
         self.group_follow("Reorder", None, |s| s.pack(&order, "Reorder"))
     }
 
+    /// Moves the main-track clips `clips` together, in their order, to position `to` among the
+    /// other main-track clips (0 = first); the rest close up around them. One undo step.
+    pub fn reorder_clips(&mut self, clips: &[u64], to: usize) -> Result<()> {
+        let order = self.main_order()?;
+        let block: Vec<u64> = order.iter().copied().filter(|c| clips.contains(c)).collect();
+        if block.is_empty() {
+            return Err(Error::Invalid("only clips on the main track can be reordered".into()));
+        }
+        let mut rest: Vec<u64> = order.into_iter().filter(|c| !clips.contains(c)).collect();
+        let at = to.min(rest.len());
+        rest.splice(at..at, block);
+        self.group_follow("Reorder", None, |s| s.pack(&rest, "Reorder"))
+    }
+
     /// Main-track clip ids in timeline order.
     pub(crate) fn main_order(&self) -> Result<Vec<u64>> {
         let q = self.session.active_sequence().ok_or(Error::NothingOpen)?;

@@ -1114,18 +1114,44 @@ function wireFind() {
 }
 
 /* Stills: a frame of a video file at its own size, for Thumbnails or as a PNG */
-const ST = { item: null, t: 0, name: '', fps: 30, len: 0, want: null, busy: false };
+// `item` null: a still of the whole video (the timeline's picture); else of that media's footage
+const ST = { item: null, t: 0, name: '', fps: 30, len: 0, want: null, busy: false, clip: null, mode: 'video' };
+try { ST.mode = localStorage.getItem('clipcut.stillFrom') || 'video'; } catch (_) {}
 /** The still at the playhead: of the selected clip under it, else the main track's. */
 async function stillAtPlayhead() {
   if (!has()) return;
   const sel = selectedClips().find(c => c.track[0] === 'V' && (c.kind === 'video' || c.kind === 'image') && c.start <= S.t + 1e-6 && c.end > S.t);
-  let src;
-  try { src = await invoke('still_source', { seconds: S.t, clip: sel ? sel.id : null }); } catch (e) { toast(e, true); return; }
-  openStill(src.item, src.seconds);
+  let src = null;
+  try { src = await invoke('still_source', { seconds: S.t, clip: sel ? sel.id : null }); } catch (_) { /* only the whole video then */ }
+  ST.clip = src && { item: src.item, t: src.seconds };
+  if (ST.mode === 'clip' && ST.clip) openStill(src.item, src.seconds);
+  else openVideoStill(S.t);
+}
+/** The still dialog over the whole video: scrubs the timeline, shows everything on screen. */
+function openVideoStill(t) {
+  ST.item = null;
+  ST.len = dur();
+  ST.name = projectName();
+  ST.fps = (S.tl && S.tl.fps) || 30;
+  $('#still-time').max = String(Math.max(0, dur() - frameStep()));
+  $('#still-time').disabled = false;
+  $('#still-title').textContent = 'Still of the video';
+  $('#still-note').textContent = `Everything on screen: every lane, text, graphics and captions, at the video's size (${S.tl.width} × ${S.tl.height}).`;
+  showStillFrom('video');
+  stillSeek(t);
+  if (!$('#still-dlg').open) $('#still-dlg').showModal();
+}
+function showStillFrom(mode) {
+  for (const b of $('#still-from').children) b.setAttribute('aria-pressed', String(b.dataset.v === mode));
+  $('#still-from-clip').disabled = !ST.clip;
+  $('#still-from-clip').title = ST.clip ? "The clip's own footage, at the file's own size, without anything over it" : 'There is no video or picture clip at the playhead';
 }
 function openStill(item, t) {
   const m = mediaOf(item);
   if (!m) return;
+  if (!ST.clip || ST.clip.item !== item) ST.clip = { item, t };
+  showStillFrom('clip');
+  $('#still-note').textContent = 'The picture comes from the video file at its own size, without text or captions.';
   ST.item = item;
   ST.len = m.duration;
   ST.name = m.name.replace(/\.[^.]+$/, '');
@@ -1156,7 +1182,9 @@ async function stillPaint() {
       const t = ST.want;
       ST.want = null;
       try {
-        const img = toImage(await invoke('thumb', { item: ST.item, seconds: t, maxWidth: 960 }));
+        const img = toImage(ST.item == null
+          ? await invoke('frame', { seconds: t, maxWidth: 960, quality: 'full' })
+          : await invoke('thumb', { item: ST.item, seconds: t, maxWidth: 960 }));
         const c = $('#still-view');
         c.width = img.width; c.height = img.height;
         c.getContext('2d').putImageData(img, 0, 0);
@@ -1192,6 +1220,14 @@ function wireStill() {
   $('#still-thumb').onclick = stillToThumbnails;
   $('#still-save').onclick = stillSave;
   $('#still-btn').onclick = stillAtPlayhead;
+  for (const b of $('#still-from').children) b.onclick = () => {
+    const mode = b.dataset.v;
+    if (mode === 'clip' && !ST.clip) return;
+    ST.mode = mode;
+    try { localStorage.setItem('clipcut.stillFrom', mode); } catch (_) {}
+    if (mode === 'clip') openStill(ST.clip.item, ST.clip.t);
+    else openVideoStill(S.t);
+  };
   $('#still-dlg').addEventListener('keydown', e => {
     if (e.target.closest('input[type="range"]')) return;
     if (e.key === 'ArrowLeft') { e.preventDefault(); stillSeek(ST.t - 1 / ST.fps); }
@@ -1633,7 +1669,7 @@ function keyControls(s, one, ids) {
   box.checked = !!key;
   box.addEventListener('change', () => box.checked ? setKey(ids, { color: KY.color }) : edit('set_key', { clips: ids, key: null, merge: null }));
   s.appendChild(on);
-  const pick = buttons([['Pick from the video', 'Click the colour to remove in the player (Esc: stop)', () => startPicking(ids)]]);
+  const pick = buttons([['Pick from the video', 'Then click the colour to remove, in the player or on the clip in the timeline (Esc: stop)', () => startPicking(ids)]]);
   pick.firstChild.id = 'key-pick';
   if (!key) { s.appendChild(pick); return; }
   const row = document.createElement('label');
@@ -1662,11 +1698,28 @@ function setKey(ids, change, merge = null) {
 function startPicking(ids) {
   KY.picking = ids;
   $('#stage').classList.add('picking');
-  toast('Click the colour to remove in the player');
+  document.body.classList.add('picking-colour');
+  toast('Click the colour to remove, in the player or on the clip in the timeline (Esc: stop)');
 }
 function stopPicking() {
   KY.picking = null;
   $('#stage').classList.remove('picking');
+  document.body.classList.remove('picking-colour');
+}
+/** The colour under the pointer in a clip's pictures on the timeline (its media's own frame). */
+async function pickColourFromStrip(cv, e) {
+  const ids = KY.picking;
+  stopPicking();
+  try {
+    const r = cv.getBoundingClientRect();
+    const x = Math.floor((e.clientX - r.left) * cv.width / Math.max(1, r.width)), y = Math.floor((e.clientY - r.top) * cv.height / Math.max(1, r.height));
+    const d = cv.getContext('2d').getImageData(Math.max(0, x - 1), Math.max(0, y - 1), 3, 3).data;
+    let rr = 0, g = 0, b = 0, n = 0;
+    for (let i = 0; i < d.length; i += 4) if (d[i + 3] > 0) { rr += d[i]; g += d[i + 1]; b += d[i + 2]; n++; }
+    if (!n) { toast('Click on the picture itself to pick its colour.'); return; }
+    const hex = v => Math.round(v / n).toString(16).padStart(2, '0');
+    await setKey(ids, { color: `#${hex(rr)}${hex(g)}${hex(b)}` });
+  } catch (err) { toast(err, true); }
 }
 async function pickColourAt(x, y) {
   const ids = KY.picking;
@@ -2971,13 +3024,16 @@ function renderProps() {
     return;
   }
   const one = sel.length === 1 ? sel[0] : null;
-  const sig = one ? `${one.id}:${one.kind}:${isCap(one) || isMain(one)}:${!isCap(one) && hasSound(one)}:${keyTimes(one).length > 0}:${pictureClip(one)}:${S.kf && S.kf.clip === one.id ? S.kf.t : ''}:${(chOf(one) || {}).mode || ''}:${!!one.props.key}:${one.link || ''}:${(soundOf(one) || {}).track || ''}:${!!one.props.freeze}` : `n${sel.length}`;
+  const sig = one ? `${one.id}:${one.kind}:${isCap(one) || isMain(one)}:${!isCap(one) && hasSound(one)}:${keyTimes(one).length > 0}:${pictureClip(one)}:${S.kf && S.kf.clip === one.id ? S.kf.t : ''}:${(chOf(one) || {}).mode || ''}:${!!one.props.key}:${one.link || ''}:${(soundOf(one) || {}).track || ''}:${!!one.props.freeze}` : `n:${sel.map(c => c.id).join(',')}`;
   $('#props-title').textContent = one ? (one.graphic ? 'Graphic' : one.title ? 'Title' : { text: 'Text', audio: 'Sound', image: 'Picture', caption: 'Caption' }[one.kind] || (isMain(one) ? 'Clip' : 'Overlay')) : sel.length ? `${sel.length} clips` : 'Project';
   if (sig === propsSig) { syncProps(one); return; }
   propsSig = sig;
   box.innerHTML = '';
   controls.length = 0;
-  if (!one) return;
+  if (!one) {
+    if (sel.length > 1) { severalControls(box, sel); syncProps(sel.find(c => !isCap(c))); }
+    return;
+  }
   const ids = [one.id];
   if (isCap(one)) { captionControls(box, one); syncProps(one); return; }
   // a section named like the panel needs no heading of its own
@@ -3226,6 +3282,37 @@ function textControls(s, ids) {
   controls.push({ el: shc, read: c => t(c).shadow });
   s.appendChild(sh);
 }
+/** Several clips selected: the settings they share, changed on all of them at once (each slider
+    drag one undo step). Values shown are the first clip's. */
+function severalControls(box, sel) {
+  const clips = sel.filter(c => !isCap(c));
+  const ids = clips.map(c => c.id);
+  if (!ids.length) return;
+  const section = title => { const s = document.createElement('section'); s.innerHTML = `<h3>${title}</h3>`; box.appendChild(s); return s; };
+  const sounding = clips.filter(c => hasSound(c));
+  if (sounding.length) {
+    const s = section(sounding.length === clips.length ? 'Sound' : `Sound (${sounding.length} of ${clips.length} clips have sound)`);
+    const sids = sounding.map(c => c.id);
+    s.appendChild(slider('Volume', sids, 'volumeDb', { min: -60, max: 15, step: 0.5, unit: 'dB', read: c => (soundOf(c) || c).props.volumeDb }));
+    s.appendChild(slider('Fade in', sids, 'fadeIn', { min: 0, max: 10, step: 0.1, unit: 's', read: c => (soundOf(c) || c).props.fadeIn }));
+    s.appendChild(slider('Fade out', sids, 'fadeOut', { min: 0, max: 10, step: 0.1, unit: 's', read: c => (soundOf(c) || c).props.fadeOut }));
+    s.appendChild(buttons([
+      ['Mute', 'Silence every selected clip (volume all the way down)', () => queueProps(sids, { volumeDb: -60 })],
+      ['0 dB', 'Every selected clip back to its recorded level', () => queueProps(sids, { volumeDb: 0 })],
+    ]));
+  }
+  const pictures = clips.filter(c => visual(c));
+  if (pictures.length) {
+    const s = section('Picture');
+    s.appendChild(slider('Opacity', pictures.map(c => c.id), 'opacity', { min: 0, max: 100, step: 1, unit: '%', read: c => c.props.opacity }));
+  }
+  const s = section('Clips');
+  s.appendChild(buttons([['Delete', 'Delete every selected clip', () => deleteSelection()]]));
+  const hint = document.createElement('p');
+  hint.className = 'hint';
+  hint.textContent = `${clips.length} clips selected. Drag one of them to move them all.`;
+  s.appendChild(hint);
+}
 /** A colour, with an on/off switch in front when `toggle` is given. */
 function colorRow(label, ids, toggle, key, read) {
   const row = document.createElement('div');
@@ -3429,6 +3516,8 @@ function clipPointerDown(c, el, e) {
   if (e.button !== 0) return;
   e.stopPropagation();
   e.preventDefault();
+  // picking the colour to remove: a click on a clip's pictures in the timeline is the colour too
+  if (KY.picking && e.target.closest('.pics')) { pickColourFromStrip(el.querySelector('.pics canvas'), e); return; }
   const handle = e.target.closest('.handle');
   if (handle) { (isCap(c) ? captionTrim : startTrim)(c, handle.classList.contains('in') ? 'in' : 'out', e); return; }
   const add = e.ctrlKey || e.metaKey || e.shiftKey;
@@ -3445,6 +3534,7 @@ function clipPointerDown(c, el, e) {
     if (!started && wasSelected && S.sel.size > 1) select([c.id]);
   };
   if (isCap(c)) captionDrag(c, el, e, after);
+  else if (isMain(c) && wasSelected && selectedClips().filter(isMain).length > 1) mainGroupDrag(c, el, e, after);
   else if (isMain(c)) reorderDrag(c, el, e, after);
   else if (wasSelected && groupMembers().length > 1 && groupMembers().some(o => o.id === c.id)) groupDrag(c, el, e, after);
   else laneDrag(c, el, e, after);
@@ -3552,6 +3642,54 @@ function reorderDrag(c, el, e, after) {
     after(started);
     if (started && !cancelled && lift) edit('move_clip', { clip: c.id, lane: lift.id, seconds: liftStart });
     else if (started && !cancelled && to !== from) edit('reorder', { clip: c.id, to });
+  });
+}
+/** Several selected main-track clips move as one block, in their order, to where it is dropped;
+    the rest close up around them. */
+function mainGroupDrag(c, el, e, after) {
+  const x0 = e.clientX;
+  const all = mainClips();
+  const block = all.filter(o => S.sel.has(o.id));
+  const others = all.filter(o => !S.sel.has(o.id));
+  const len = block.reduce((n, o) => n + o.end - o.start, 0);
+  // where in the block the pointer took hold
+  const before = block.filter(o => o.start < c.start).reduce((n, o) => n + o.end - o.start, 0);
+  const grab = timeAt(e.clientX) - c.start + before;
+  const packed = [];
+  { let at = 0; for (const o of others) { packed.push({ o, start: at, end: at + o.end - o.start }); at += o.end - o.start; } }
+  let started = false, to = 0;
+  follow(e, ev => {
+    if (!started) {
+      if (Math.abs(ev.clientX - x0) < 5) return;
+      started = true;
+      for (const o of block) S.els.get(o.id)?.classList.add('dragging');
+      for (const o of others) S.els.get(o.id)?.classList.add('moving');
+    }
+    const start = Math.max(0, timeAt(ev.clientX) - grab);
+    to = packed.filter(p => (p.start + p.end) / 2 < start + len / 2).length;
+    S.geom.clear();
+    let at = 0;
+    packed.forEach((p, k) => {
+      if (k === to) at += len;
+      S.geom.set(p.o.id, { ...p.o, start: at, end: at + p.o.end - p.o.start });
+      at += p.o.end - p.o.start;
+    });
+    let b = start;
+    for (const o of block) { S.geom.set(o.id, { ...o, start: b, end: b + o.end - o.start }); b += o.end - o.start; }
+    const gap = packed.slice(0, to).reduce((n, p) => n + p.end - p.start, 0);
+    const mark = $('#insert-mark');
+    mark.style.left = (PAD + gap * S.px) + 'px';
+    mark.hidden = false;
+    layoutClips();
+    drawVisible();
+  }, cancelled => {
+    $('#insert-mark').hidden = true;
+    for (const o of all) S.els.get(o.id)?.classList.remove('dragging', 'moving');
+    S.geom.clear();
+    layoutClips();
+    drawVisible();
+    after(started);
+    if (started && !cancelled) edit('reorder_clips', { clips: block.map(o => o.id), to });
   });
 }
 /** The lane a lane clip would go to with the pointer at `y`: one of its kind's lanes, or a new
