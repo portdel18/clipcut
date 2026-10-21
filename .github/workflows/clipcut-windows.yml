@@ -154,17 +154,53 @@ jobs:
           }
           $wav = "$env:RUNNER_TEMP\speech.wav"
           $tts.SetOutputToWaveFile($wav)
-          $tts.Speak("Thanks for having me. I think the city is ready for this change. We started the plan two years ago, and the money is finally there.")
+          # about a minute with pauses between the sentences, so it is transcribed in parts at once
+          $pb = New-Object System.Speech.Synthesis.PromptBuilder
+          $lines = @(
+            "Thanks for having me. I think the city is ready for this change.",
+            "We started the plan two years ago, and the money is finally there.",
+            "The first part is a new bus line that runs from the river to the north side.",
+            "After that, we will repair the bridge on Main Street, which has been closed since spring.",
+            "People have asked for more parks, so two empty lots will become gardens next year.",
+            "The library will stay open later on weekdays, until nine in the evening.",
+            "We are also hiring forty new teachers for the schools on the east side.",
+            "None of this happens without the people who came to the meetings and spoke up.",
+            "So thank you, and I am happy to take your questions now."
+          )
+          foreach ($l in $lines) { $pb.AppendText($l); $pb.AppendBreak([TimeSpan]::FromMilliseconds(900)) }
+          $tts.Speak($pb)
           $tts.Dispose()
           $clip = "$env:RUNNER_TEMP\speech.mp4"
           ffmpeg -v error -y -f lavfi -i "testsrc2=size=1280x720:rate=30" -i $wav -c:v libx264 -pix_fmt yuv420p -c:a aac -shortest $clip
           $exe = @("target\release\ClipCut.exe", "target\release\clipcut.exe") | Where-Object { Test-Path $_ } | Select-Object -First 1
+          # the way it was (one part at a time), then in parts at once: the same words, faster
+          $env:FILMCRAFT_SPEECH_PARTS = "1"
+          $p = Start-Process -FilePath $exe -ArgumentList "--caption-test", $clip, "$env:RUNNER_TEMP\models", "whisper-tiny", "caption-report-one.json", "captions-one.srt" -Wait -PassThru -NoNewWindow
+          if ($p.ExitCode -ne 0) { Get-Content caption-report-one.json; throw "the captions test (one part) failed (exit $($p.ExitCode))" }
+          Remove-Item Env:FILMCRAFT_SPEECH_PARTS
           $p = Start-Process -FilePath $exe -ArgumentList "--caption-test", $clip, "$env:RUNNER_TEMP\models", "whisper-tiny", "caption-report.json", "captions.srt" -Wait -PassThru -NoNewWindow
           Get-Content caption-report.json
           if ($p.ExitCode -ne 0) { throw "the captions test failed (exit $($p.ExitCode))" }
           Get-Content captions.srt
+          $one = Get-Content caption-report-one.json -Raw | ConvertFrom-Json
+          $par = Get-Content caption-report.json -Raw | ConvertFrom-Json
+          Write-Output ("one part: {0:N1} s; in parts: {1:N1} s ({2} cores)" -f $one.transcribeSeconds, $par.transcribeSeconds, [Environment]::ProcessorCount)
+          # word error rate between the two (Levenshtein over words)
+          $norm = { param($t) ($t.ToLower() -replace "[^a-z0-9' ]", " ").Split(" ", [StringSplitOptions]::RemoveEmptyEntries) }
+          $a = & $norm $one.words; $b = & $norm $par.words
+          $d = New-Object 'int[,]' ($a.Count + 1), ($b.Count + 1)
+          for ($i = 0; $i -le $a.Count; $i++) { $d[$i, 0] = $i }
+          for ($j = 0; $j -le $b.Count; $j++) { $d[0, $j] = $j }
+          for ($i = 1; $i -le $a.Count; $i++) { for ($j = 1; $j -le $b.Count; $j++) {
+            $c = if ($a[$i - 1] -eq $b[$j - 1]) { 0 } else { 1 }
+            $d[$i, $j] = [Math]::Min([Math]::Min($d[($i - 1), $j] + 1, $d[$i, ($j - 1)] + 1), $d[($i - 1), ($j - 1)] + $c)
+          } }
+          $wer = $d[$a.Count, $b.Count] / [Math]::Max(1, $a.Count)
+          Write-Output ("{0} and {1} words, {2:P1} different" -f $a.Count, $b.Count, $wer)
+          if ($a.Count -lt 60) { throw "only $($a.Count) words were heard in a minute of speech" }
+          if ($wer -gt 0.08) { throw "the words heard in parts differ from one part at a time by $($wer.ToString('P1'))" }
           $heard = (Get-Content caption-report.json -Raw).ToLower()
-          foreach ($w in @("city", "change", "money")) {
+          foreach ($w in @("city", "change", "money", "bridge", "library", "teachers")) {
             if (-not $heard.Contains($w)) { throw "Whisper didn't hear '$w'" }
           }
 
@@ -249,6 +285,7 @@ jobs:
           name: ClipCut-captions-test
           path: |
             caption-report.json
+            caption-report-one.json
             captions.srt
           if-no-files-found: warn
           retention-days: 30

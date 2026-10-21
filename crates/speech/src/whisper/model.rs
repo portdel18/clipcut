@@ -28,6 +28,8 @@ pub struct Config {
     pub vocab_size: usize,
 }
 
+/// Cloning shares the weights (candle tensors are reference-counted); caches are per copy.
+#[derive(Clone)]
 struct Attention {
     q: Linear,
     k: Linear,
@@ -100,6 +102,8 @@ impl Attention {
     }
 }
 
+/// Cloning shares the weights (candle tensors are reference-counted); caches are per copy.
+#[derive(Clone)]
 struct Block {
     attn: Attention,
     attn_ln: LayerNorm,
@@ -147,6 +151,8 @@ impl Block {
     }
 }
 
+/// Cloning shares the weights (candle tensors are reference-counted); caches are per copy.
+#[derive(Clone)]
 pub struct Encoder {
     conv1: Conv1d,
     conv2: Conv1d,
@@ -183,6 +189,8 @@ impl Encoder {
     }
 }
 
+/// Cloning shares the weights (candle tensors are reference-counted); caches are per copy.
+#[derive(Clone)]
 pub struct Decoder {
     tok: Embedding,
     /// The token embedding transposed (d, vocab), contiguous: the output projection.
@@ -252,6 +260,8 @@ impl Decoder {
     }
 }
 
+/// Cloning shares the weights (candle tensors are reference-counted); caches are per copy.
+#[derive(Clone)]
 pub struct Model {
     pub cfg: Config,
     pub encoder: Encoder,
