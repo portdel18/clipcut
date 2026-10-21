@@ -58,7 +58,7 @@ fn tracks(q: &Sequence, lane: Lane) -> &[filmcraft_project::Track] {
 }
 
 /// Whether `[start, end)` is clear on track `index` of `lane`, ignoring the clips in `except`.
-fn is_free(q: &Sequence, lane: Lane, index: usize, start: Tick, end: Tick, except: &[u64]) -> bool {
+pub(crate) fn is_free(q: &Sequence, lane: Lane, index: usize, start: Tick, end: Tick, except: &[u64]) -> bool {
     tracks(q, lane).get(index).is_some_and(|t| !t.locked && t.items.iter().all(|i| except.contains(&i.id.0) || i.end() <= start || i.start >= end))
 }
 
@@ -397,6 +397,11 @@ impl Studio {
         if let Some(i) = (1..n).find(|i| is_free(q, lane, *i, start, end, except)) {
             return Ok(i);
         }
+        self.add_lane(lane)
+    }
+
+    /// Adds an empty lane of `lane`'s kind; returns its index.
+    pub(crate) fn add_lane(&mut self, lane: Lane) -> Result<usize> {
         let added = self
             .session
             .execute("sequence.addTracks", if lane == Lane::Video { json!({"video": 1, "audio": 0}) } else { json!({"video": 0, "audio": 1}) })

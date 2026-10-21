@@ -132,6 +132,7 @@ impl Studio {
                 if let Some(snd) = &sound {
                     let a = s.import(snd)?;
                     made.extend(s.add_to_lane(a, seconds)?);
+                    s.link_together(&made)?;
                 }
                 return Ok(made);
             };
@@ -145,12 +146,27 @@ impl Studio {
             let tr = q.track(track).ok_or(Error::NothingOpen)?;
             let (_, props) = crate::props::clip_props(&s.session, q, tr, &clip);
             let old_dir = s.media_path(clip.item).and_then(|p| graphic_dir(&p));
-            // the old version's clips: its picture, and its sound wherever it is
+            // the old version's clips: its picture and its sound, linked to it (pasted copies of
+            // the graphic play the same files and stay). A graphic from before they were linked:
+            // the sound from its folder that starts with it (within 20 ms).
+            let near = filmcraft_time::TICKS_PER_SECOND / 50;
             let gone: Vec<u64> = q
                 .all_tracks()
-                .flat_map(|t| t.items.iter())
-                .filter(|i| i.id.0 == old || (old_dir.is_some() && s.media_path(i.item).and_then(|p| graphic_dir(&p)) == old_dir))
-                .map(|i| i.id.0)
+                .flat_map(|t| t.items.iter().map(move |i| (t.kind, i)))
+                .filter(|(kind, i)| {
+                    i.id.0 == old
+                        || match clip.link {
+                            Some(l) => i.link == Some(l),
+                            None => {
+                                *kind == filmcraft_project::TrackKind::Audio
+                                    && i.link.is_none()
+                                    && (i.start.0 - clip.start.0).abs() <= near
+                                    && old_dir.is_some()
+                                    && s.media_path(i.item).and_then(|p| graphic_dir(&p)) == old_dir
+                            }
+                        }
+                })
+                .map(|(_, i)| i.id.0)
                 .collect();
             s.unlock_lanes()?;
             if index == 0 {
@@ -183,8 +199,27 @@ impl Studio {
                 let a = s.import(snd)?;
                 let at = s.session.active_sequence().and_then(|q| q.find_item(ClipId(*made.first()?)).map(|(_, i)| i.start.seconds())).unwrap_or(seconds);
                 made.extend(s.add_to_lane(a, at)?);
+                s.link_together(&made)?;
             }
             Ok(made)
         })
+    }
+
+    /// Links a graphic's picture and its sound, so they move, trim, go, copy and update together.
+    fn link_together(&mut self, clips: &[u64]) -> Result<()> {
+        if clips.len() < 2 {
+            return Ok(());
+        }
+        self.session
+            .edit_sequence("Link", |q, ctx, _| {
+                let l = ctx.alloc();
+                for c in clips {
+                    if let Some((_, i)) = q.find_item_mut(ClipId(*c)) {
+                        i.link = Some(l);
+                    }
+                }
+                Ok(())
+            })
+            .map_err(engine)
     }
 }

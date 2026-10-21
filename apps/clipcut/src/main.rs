@@ -90,7 +90,8 @@ async fn thumb(item: u64, seconds: f64, max_width: u32, app: tauri::State<'_, Ap
 }
 
 #[tauri::command]
-fn play(from: f64, max_width: Option<u32>, quality: Option<String>, app: tauri::State<'_, App>) -> Result<(), String> {
+fn play(from: f64, max_width: Option<u32>, quality: Option<String>, speed: Option<f64>, app: tauri::State<'_, App>) -> Result<(), String> {
+    let speed = speed.filter(|v| v.is_finite()).unwrap_or(1.0).clamp(0.25, 8.0);
     let quality = quality.unwrap_or_else(|| "auto".into());
     let max_width = max_width.unwrap_or(960).clamp(16, 7680);
     let (feed, end, frames) = {
@@ -100,8 +101,10 @@ fn play(from: f64, max_width: Option<u32>, quality: Option<String>, app: tauri::
     // decoding is one frame at a time, so a few workers are enough: while one decodes, the others
     // finish the frames before (2 or 3, leaving a core for the sound and the window)
     let cores = std::thread::available_parallelism().map(usize::from).unwrap_or(2);
-    let ahead = frames.map(|f| ahead::Ahead::start(f, from, cores.saturating_sub(1).clamp(2, 3), max_width, &quality));
-    lock(&app.player).play(feed, from, end, ahead);
+    // faster, the picture shows every second, third... frame: as many renders a second as at 1×
+    let step = speed.ceil() as i64;
+    let ahead = frames.map(|f| ahead::Ahead::start(f, from, cores.saturating_sub(1).clamp(2, 3), step, max_width, &quality));
+    lock(&app.player).play(feed, from, end, speed, ahead);
     Ok(())
 }
 
@@ -546,6 +549,8 @@ fn main() {
             editing::add_text,
             editing::move_clip,
             editing::move_clips,
+            editing::copy_clips,
+            editing::paste_clips,
             editing::extract_audio,
             editing::unlink_sound,
             editing::link_sound,

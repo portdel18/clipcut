@@ -57,6 +57,9 @@ jobs:
           }
           ffmpeg -hide_banner -version | Select-Object -First 1
 
+      - name: Test the keyboard shortcuts
+        run: node apps/clipcut/ui-tests/shortcuts.js apps/clipcut/ui/app.js
+
       - name: Test clipcut-core
         # tests that need ffmpeg fail rather than skip without it
         env:

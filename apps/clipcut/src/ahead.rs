@@ -20,6 +20,8 @@ pub struct Ahead {
     frames: Mutex<BTreeMap<i64, Arc<Frame>>>,
     /// The next frame a worker takes.
     next: AtomicI64,
+    /// Every how many frames one is rendered (a shuttle speed skips the rest).
+    step: i64,
     /// The frame showing now.
     head: AtomicI64,
     stop: AtomicBool,
@@ -30,13 +32,14 @@ pub struct Ahead {
 }
 
 impl Ahead {
-    /// Starts `workers` threads rendering from `seconds`.
-    pub fn start(feed: FrameFeed, seconds: f64, workers: usize, max_width: u32, quality: &str) -> Arc<Self> {
+    /// Starts `workers` threads rendering from `seconds`, one frame in every `step`.
+    pub fn start(feed: FrameFeed, seconds: f64, workers: usize, step: i64, max_width: u32, quality: &str) -> Arc<Self> {
         let first = feed.frame_at(seconds);
         let me = Arc::new(Ahead {
             feed,
             frames: Mutex::default(),
             next: AtomicI64::new(first),
+            step: step.clamp(1, 8),
             head: AtomicI64::new(first),
             stop: AtomicBool::new(false),
             threads: Mutex::default(),
@@ -64,11 +67,11 @@ impl Ahead {
             let cur = self.next.load(Ordering::Acquire);
             // never a frame the playhead has passed
             let k = cur.max(head);
-            if k >= head + LOOKAHEAD || k >= self.feed.frames {
+            if k >= head + LOOKAHEAD * self.step || k >= self.feed.frames {
                 std::thread::sleep(Duration::from_millis(3));
                 continue;
             }
-            if self.next.compare_exchange(cur, k + 1, Ordering::AcqRel, Ordering::Acquire).is_err() {
+            if self.next.compare_exchange(cur, k + self.step, Ordering::AcqRel, Ordering::Acquire).is_err() {
                 continue;
             }
             let Ok(f) = self.feed.render(k, true) else { continue };
@@ -130,7 +133,7 @@ mod tests {
         let mut s = clipcut_core::Studio::new();
         s.add_clip(path).unwrap();
         for workers in [1, 2, 3] {
-            let a = Ahead::start(s.frame_feed(960, "auto").unwrap(), 1.0, workers, 960, "auto");
+            let a = Ahead::start(s.frame_feed(960, "auto").unwrap(), 1.0, workers, 1, 960, "auto");
             let t0 = Instant::now();
             let (mut on_time, mut shown) = (0, 0);
             while t0.elapsed().as_secs_f64() < 3.0 {

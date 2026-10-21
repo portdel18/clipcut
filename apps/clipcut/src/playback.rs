@@ -6,6 +6,8 @@
 //! leaves its thread), the other mixes the sequence ahead into a small queue at the device's sample
 //! rate (linear resampling when the device and the sequence rates differ). The device callback
 //! only copies from that queue, so a slow mix shows up as a short gap, never a stalled callback.
+//! Shuttle speeds (L pressed again) play the sequence faster with its pitch kept
+//! ([`clipcut_core::Stretcher`]); the clock then runs that many seconds of sequence a second.
 
 use std::collections::VecDeque;
 use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
@@ -34,6 +36,8 @@ struct Clock {
 struct Running {
     from: f64,
     end: f64,
+    /// Seconds of sequence a second (1 = normal).
+    speed: f64,
     clock: Arc<Clock>,
     stop: Arc<AtomicBool>,
     threads: Vec<JoinHandle<()>>,
@@ -47,9 +51,9 @@ impl Running {
         let c = &self.clock;
         let rate = c.rate.load(Ordering::Acquire);
         let t = if rate > 0 {
-            self.from + c.played.load(Ordering::Acquire) as f64 / rate as f64
+            self.from + self.speed * c.played.load(Ordering::Acquire) as f64 / rate as f64
         } else if c.silent.load(Ordering::Acquire) {
-            self.from + c.started.elapsed().as_secs_f64()
+            self.from + self.speed * c.started.elapsed().as_secs_f64()
         } else {
             self.from
         };
@@ -75,10 +79,11 @@ pub struct Player {
 }
 
 impl Player {
-    /// Starts playing `feed` from `from` seconds, with the picture rendered ahead by `ahead`;
-    /// stops by itself at `end`.
-    pub fn play(&mut self, feed: AudioFeed, from: f64, end: f64, ahead: Option<Arc<crate::ahead::Ahead>>) {
+    /// Starts playing `feed` from `from` seconds at `speed` (1 = normal; faster keeps the pitch),
+    /// with the picture rendered ahead by `ahead`; stops by itself at `end`.
+    pub fn play(&mut self, feed: AudioFeed, from: f64, end: f64, speed: f64, ahead: Option<Arc<crate::ahead::Ahead>>) {
         self.stop();
+        let speed = if speed.is_finite() { speed.clamp(0.25, 8.0) } else { 1.0 };
         self.ahead = ahead;
         let from = if from.is_finite() { from.clamp(0.0, end.max(0.0)) } else { 0.0 };
         let clock = Arc::new(Clock { played: AtomicU64::new(0), rate: AtomicU32::new(0), silent: AtomicBool::new(false), started: Instant::now() });
@@ -98,10 +103,10 @@ impl Player {
         {
             let (feed, clock, stop, queue) = (feed.clone(), clock.clone(), stop.clone(), queue.clone());
             threads.push(std::thread::spawn(move || {
-                let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| mix(&feed, from, &clock, &stop, &queue)));
+                let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| mix(&feed, from, speed, &clock, &stop, &queue)));
             }));
         }
-        self.run = Some(Running { from, end, clock, stop, threads, feed, meters });
+        self.run = Some(Running { from, end, speed, clock, stop, threads, feed, meters });
     }
 
     /// Goes on playing with `feed` (the sequence after a mixer change) from where it is: the
@@ -247,15 +252,16 @@ where
     )
 }
 
-/// Keeps the queue about [`AHEAD`] seconds full, resampling the sequence mix to the device rate.
-fn mix(slot: &Mutex<Arc<AudioFeed>>, from: f64, clock: &Arc<Clock>, stop: &Arc<AtomicBool>, queue: &Arc<Mutex<VecDeque<f32>>>) {
+/// Keeps the queue about [`AHEAD`] seconds full, resampling the sequence mix (time-stretched to
+/// `speed` when it is not 1) to the device rate.
+fn mix(slot: &Mutex<Arc<AudioFeed>>, from: f64, speed: f64, clock: &Arc<Clock>, stop: &Arc<AtomicBool>, queue: &Arc<Mutex<VecDeque<f32>>>) {
     // Wait for the device rate (or for the news that there is no device)
     let rate = loop {
         if stop.load(Ordering::Acquire) {
             return;
         }
         if clock.silent.load(Ordering::Acquire) {
-            return mix_silent(slot, from, clock, stop);
+            return mix_silent(slot, from, speed, clock, stop);
         }
         let r = clock.rate.load(Ordering::Acquire);
         if r > 0 {
@@ -266,8 +272,13 @@ fn mix(slot: &Mutex<Arc<AudioFeed>>, from: f64, clock: &Arc<Clock>, stop: &Arc<A
     let src_rate = slot.lock().unwrap_or_else(PoisonError::into_inner).sample_rate.max(1);
     let step = f64::from(src_rate) / f64::from(rate);
     let target = ((AHEAD * f64::from(rate)) as usize).max(CHUNK) * 2;
-    let mut pos = from * f64::from(src_rate);
     let mut out = Vec::with_capacity(CHUNK * 2);
+    // at another speed the resampler reads the stretched sound (from output sample 0), kept from
+    // `held_start` on so the overlapping reads find it again
+    let mut stretch = ((speed - 1.0).abs() > 1e-6).then(|| clipcut_core::Stretcher::new(src_rate, (from * f64::from(src_rate)) as i64, speed));
+    let mut held: Vec<f32> = Vec::new();
+    let mut held_start = 0i64;
+    let mut pos = if stretch.is_some() { 0.0 } else { from * f64::from(src_rate) };
     while !stop.load(Ordering::Acquire) {
         let len = queue.lock().unwrap_or_else(PoisonError::into_inner).len();
         if len >= target {
@@ -278,7 +289,20 @@ fn mix(slot: &Mutex<Arc<AudioFeed>>, from: f64, clock: &Arc<Clock>, stop: &Arc<A
         let first = pos.floor() as i64;
         let need = (CHUNK as f64 * step).ceil() as usize + 2;
         let feed = slot.lock().unwrap_or_else(PoisonError::into_inner).clone();
-        let src = feed.mix(first, need);
+        let src = match &mut stretch {
+            None => feed.mix(first, need),
+            Some(st) => {
+                let have = held_start + (held.len() / 2) as i64;
+                let want = first + need as i64;
+                if want > have {
+                    held.extend(st.next(&feed, usize::try_from(want - have).unwrap_or(0)));
+                }
+                let drop = usize::try_from(first - held_start).unwrap_or(0).min(held.len() / 2);
+                held.drain(..drop * 2);
+                held_start += drop as i64;
+                held.get(..need * 2).map(<[f32]>::to_vec).unwrap_or_default()
+            }
+        };
         out.clear();
         for i in 0..CHUNK {
             let p = pos + i as f64 * step - first as f64;
@@ -296,11 +320,11 @@ fn mix(slot: &Mutex<Arc<AudioFeed>>, from: f64, clock: &Arc<Clock>, stop: &Arc<A
 }
 
 /// Without a device: mixes along with the wall clock and drops the sound, so the meters still move.
-fn mix_silent(slot: &Mutex<Arc<AudioFeed>>, from: f64, clock: &Arc<Clock>, stop: &Arc<AtomicBool>) {
+fn mix_silent(slot: &Mutex<Arc<AudioFeed>>, from: f64, speed: f64, clock: &Arc<Clock>, stop: &Arc<AtomicBool>) {
     let rate = f64::from(slot.lock().unwrap_or_else(PoisonError::into_inner).sample_rate.max(1));
     let mut pos = (from * rate) as i64;
     while !stop.load(Ordering::Acquire) {
-        let now = ((from + clock.started.elapsed().as_secs_f64()) * rate) as i64;
+        let now = ((from + speed * clock.started.elapsed().as_secs_f64()) * rate) as i64;
         if pos >= now {
             std::thread::sleep(Duration::from_millis(10));
             continue;

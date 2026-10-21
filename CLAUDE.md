@@ -52,8 +52,10 @@ remote `upstream`). Read `README.md` for what it is and the roadmap.
   click there moves the playhead. Dragging one of several selected lane clips moves them all
   (`groupDrag` → `Studio::move_clips`, one undo step; the main track and its sound stay put).
 - Shuttle (J K L): each press steps through `SHUTTLE` (1, 1.25, 1.5, 1.75, 2, 3… 8) via
-  `shuttle(rate)`; 1× forward is the real player with sound, other speeds run the playhead on the
-  wall clock (`S.rate`) and show frames silently. Timeline thumbnails are a decode
+  `shuttle(rate)`; forward speeds are the real player at that speed (`play(speed)`: the sound is
+  time-stretched with its pitch kept by `clipcut_core::Stretcher`, the clock runs `speed` seconds a
+  second, `ahead.rs` renders every `ceil(speed)`-th frame); backward runs the playhead on the wall
+  clock (`S.rate` < 0) and shows frames silently. Timeline thumbnails are a decode
   of the same video, so none are fetched while playing (`pumpThumbs`): tiles borrow a cached
   picture from a wider zoom until it stops.
 - Edits stop playback (the player plays a snapshot of the sequence), except mixer changes:
@@ -137,11 +139,20 @@ remote `upstream`). Read `README.md` for what it is and the roadmap.
   `HOST.model` → `cutout_model` (`src/cutout.rs`: downloaded once into the models folder, checked by
   size and SHA-256 on every read). The pins in `cutout.rs` and `cutout.js` must match; Windows CI's
   `--model-test` step checks the download.
+- Copy and paste (`clipboard.rs`): `Studio::copy_clips` keeps clips and their linked partners,
+  `paste` puts copies at the playhead (lane clips keep lane and spacing or take a free lane; main
+  clips go into the main track after the clip under the playhead). Copies play the same media, so
+  graphics are never rendered again; a graphic's picture and its sound are linked
+  (`link_together`), and Update Graphic replaces only the clip and its linked sound.
+- ↑/↓ go to the previous/next event (`events()` in `app.js`: main-track cuts, the end, every
+  clip's start and end, keyframes, transition edges).
 - Keys: every shortcut is an entry of `ACTIONS` in `app.js` (id, default `keys`, `fn`); the keydown
   handler looks presses up by `comboOf(e)` ("Ctrl+Shift+Z": letters by layout, other keys by
   `e.code`). A new shortcut is a new entry, never a key test in the handler. The user's changes are
   `shortcuts.json` in the config folder (`load_shortcuts` / `save_shortcuts`); tooltips that name a
-  key use `data-tip` + `data-keys` (or `keyText(id)`), so they follow them.
+  key use `data-tip` + `data-keys` (or `keyText(id)`), so they follow them. A key taken off an
+  action it was moved to goes back to its own (`takeKeyOff` / `sendKeysHome`); saved files carry
+  `_version` 2. `ui-tests/shortcuts.js` runs this logic under Node (Windows CI): keep it passing.
 - Find and replace (`replace.rs`): the search runs over the main words joined by spaces;
   `findMatches` in `app.js` must keep the same rules as `find_in`, since Replace sends the match's
   number. It rewrites the media transcripts (`transcript.set`) and the captions in one step.
