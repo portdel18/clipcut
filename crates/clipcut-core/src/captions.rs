@@ -65,10 +65,18 @@ pub struct CaptionStyleView {
     pub color: String,
     pub background: bool,
     pub background_color: String,
+    /// How solid the box is, 0–100.
+    pub background_opacity: f64,
     pub outline: f64,
     pub outline_color: String,
     /// `top`, `middle` or `bottom`.
     pub position: String,
+    /// `left`, `center` or `right`.
+    pub align: String,
+    /// Distance from the edge it sits at, as a share of the frame's height (0–0.45).
+    pub margin: f64,
+    /// Line height, as a multiple of the size.
+    pub line_spacing: f64,
 }
 
 /// A word of the main track's speech, in timeline time.
@@ -315,6 +323,7 @@ impl Studio {
             color: hex(st.color),
             background: st.background,
             background_color: hex(st.background_color),
+            background_opacity: (f64::from(st.background_color[3]) / 2.55).round(),
             outline: f64::from(st.outline),
             outline_color: hex(st.outline_color),
             position: match st.anchor {
@@ -323,6 +332,14 @@ impl Studio {
                 CaptionAnchor::Bottom => "bottom",
             }
             .into(),
+            align: match st.align {
+                filmcraft_project::caption::CaptionAlign::Left => "left",
+                filmcraft_project::caption::CaptionAlign::Right => "right",
+                _ => "center",
+            }
+            .into(),
+            margin: f64::from(st.margin),
+            line_spacing: f64::from(st.line_spacing),
         };
         v.items = t
             .captions
@@ -640,11 +657,30 @@ impl Studio {
 
     /// The caption track's look: `font`, `size` (pixels at 1080 lines), `color`, `background`,
     /// `backgroundColor`, `outline`, `outlineColor` and `position` (`top`, `middle`, `bottom`).
+    /// Changes the captions' look: any of `font`, `size`, `color`, `background`,
+    /// `backgroundColor`, `backgroundOpacity` (0–100), `outline`, `outlineColor`, `position`,
+    /// `align`, `margin` (share of the height) and `lineSpacing`. A `merge` key (a slider being
+    /// dragged) folds the changes it names into one undo step.
     pub fn set_caption_style(&mut self, style: &Value) -> Result<()> {
         let o = style.as_object().ok_or_else(|| Error::Invalid("nothing to change".into()))?;
-        self.caption_track().ok_or_else(|| Error::Invalid("make captions first".into()))?;
-        let p = style_params(o);
-        self.group("Caption Style", |s| s.session.execute("captions.setStyle", p).map(|_| ()).map_err(engine))
+        let track = self.caption_track().ok_or_else(|| Error::Invalid("make captions first".into()))?;
+        let mut o = o.clone();
+        // the box's colour and how solid it is go to the engine as one #rrggbbaa
+        if o.contains_key("backgroundOpacity") || o.get("backgroundColor").and_then(Value::as_str).is_some_and(|c| c.len() == 7) {
+            let cur = track.style.background_color;
+            let rgb = o
+                .get("backgroundColor")
+                .and_then(Value::as_str)
+                .filter(|c| c.len() >= 7)
+                .map(|c| c[1..7].to_string())
+                .unwrap_or_else(|| hex(cur)[1..].to_string());
+            let alpha =
+                o.get("backgroundOpacity").and_then(Value::as_f64).filter(|v| v.is_finite()).map_or(cur[3], |v| (v.clamp(0.0, 100.0) * 2.55).round() as u8);
+            o.insert("backgroundColor".into(), json!(format!("#{rgb}{alpha:02x}")));
+        }
+        let merge = o.get("merge").and_then(Value::as_str).map(|m| format!("capstyle:{m}"));
+        let p = style_params(&o);
+        self.group_merge("Caption Style", merge.as_deref(), |s| s.session.execute("captions.setStyle", p).map(|_| ()).map_err(engine))
     }
 
     /// Shows or hides the captions (in the player and in exports).
@@ -796,7 +832,7 @@ fn style_params(o: &serde_json::Map<String, Value>) -> Value {
             "position" => {
                 p.insert("anchor".into(), v.clone());
             }
-            "font" | "size" | "color" | "background" | "backgroundColor" | "outline" | "outlineColor" => {
+            "font" | "size" | "color" | "background" | "backgroundColor" | "outline" | "outlineColor" | "align" | "margin" | "lineSpacing" => {
                 p.insert(k.clone(), v.clone());
             }
             _ => {}

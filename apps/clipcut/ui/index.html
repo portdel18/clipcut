@@ -96,6 +96,7 @@
       <div class="cap-tools" id="cap-tools" hidden>
         <h3>Look</h3>
         <div class="text-styles" id="cap-styles"></div>
+        <div class="cap-style" id="cap-style-form"></div>
         <label class="check"><input type="checkbox" id="cap-on"> Show captions (they're burnt into exports)</label>
         <h3>Clean up the speech</h3>
         <div class="seg">
@@ -121,6 +122,7 @@
           <label class="check"><input type="checkbox" id="find-case"> Match case</label>
           <p class="hint">Replacing changes the words and the captions over them. Nothing is cut from the video.</p>
         </div>
+        <button class="btn small tr-follow" id="tr-follow" hidden title="Scroll the transcript with the playback again">Follow the playback</button>
         <div class="transcript" id="transcript" tabindex="0"></div>
         <button class="btn" id="cap-srt">Save subtitles (.srt)</button>
       </div>

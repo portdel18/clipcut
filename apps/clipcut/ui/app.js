@@ -702,6 +702,101 @@ async function openCaptionsPanel() {
   renderCaptionsPanel();
   loadWords();
 }
+/* The captions' look, one control per setting (presets above set many at once). Dragged sliders
+   send their latest value, one undo step per drag. */
+const CSTY = { built: false, controls: [] };
+function sendCapStyle(patch, merge) { latest('set_caption_style', { style: merge ? { ...patch, merge } : patch }); }
+function buildCapStyle() {
+  if (CSTY.built) return;
+  CSTY.built = true;
+  const box = $('#cap-style-form');
+  const add = (el, read, write) => { CSTY.controls.push({ el, read, write }); return el; };
+  const range = (label, key, { min, max, step, unit = '', toView = v => v, fromView = v => v }) => {
+    const row = document.createElement('label');
+    row.className = 'prop';
+    row.innerHTML = `<span>${label}</span><input type="range" min="${min}" max="${max}" step="${step}"><input type="number" min="${min}" max="${max}" step="${step}" title="${unit}">`;
+    const [r, n] = row.querySelectorAll('input');
+    r.id = `cs-${key}`;
+    let k = nextKey(`cs-${key}`);
+    r.addEventListener('input', () => { n.value = r.value; sendCapStyle({ [key]: fromView(+r.value) }, k); });
+    r.addEventListener('change', () => { k = nextKey(`cs-${key}`); r.blur(); });
+    n.addEventListener('change', () => { const v = clamp(+n.value, min, max); if (Number.isFinite(v)) { r.value = n.value = v; sendCapStyle({ [key]: fromView(v) }); } });
+    add(r, st => toView(st[key]));
+    add(n, st => toView(st[key]));
+    return row;
+  };
+  const colour = (label, key, extra) => {
+    const row = document.createElement('label');
+    row.className = 'prop wide';
+    row.innerHTML = `<span>${label}</span><span class="cs-line"><input type="color"></span>`;
+    const c = row.querySelector('input');
+    c.id = `cs-${key}`;
+    let k = nextKey(`cs-${key}`);
+    c.addEventListener('input', () => sendCapStyle({ [key]: c.value, ...(extra ? extra() : {}) }, k));
+    c.addEventListener('change', () => { k = nextKey(`cs-${key}`); });
+    add(c, st => st[key]);
+    return row;
+  };
+  const seg = (label, key, opts) => {
+    const row = document.createElement('div');
+    row.className = 'prop wide';
+    row.innerHTML = `<span>${label}</span><div class="seg"></div>`;
+    const g = row.querySelector('.seg');
+    for (const [v, text] of opts) {
+      const b = document.createElement('button');
+      b.textContent = text;
+      b.dataset.v = v;
+      b.id = `cs-${key}-${v}`;
+      b.onclick = () => sendCapStyle({ [key]: v });
+      g.appendChild(b);
+    }
+    add(g, st => st[key], (el, v) => { for (const b of el.children) b.setAttribute('aria-pressed', String(b.dataset.v === v)); });
+    return row;
+  };
+  // font
+  const fr = document.createElement('label');
+  fr.className = 'prop wide';
+  fr.innerHTML = '<span>Font</span><select id="cs-font"></select>';
+  const sel = fr.querySelector('select');
+  const fill = list => { const cur = sel.value; sel.innerHTML = ''; for (const f of list) { const o = document.createElement('option'); o.value = o.textContent = f; sel.appendChild(o); } if (cur) sel.value = cur; };
+  fill(fontList || ['Inter', 'Noto Serif', 'JetBrains Mono']);
+  if (!fontList) invoke('fonts').then(l => { fontList = l; fill(l); syncCapStyle(); }).catch(() => {});
+  sel.addEventListener('change', () => { sendCapStyle({ font: sel.value }); sel.blur(); });
+  add(sel, st => st.font, (el, v) => { if (v && ![...el.options].some(o => o.value === v)) { const o = document.createElement('option'); o.value = o.textContent = v; el.appendChild(o); } el.value = v || 'Inter'; });
+  // the box: on or off, its colour and how solid
+  const bx = document.createElement('label');
+  bx.className = 'check';
+  bx.innerHTML = '<input type="checkbox" id="cs-background"> Box behind the words';
+  const bc = bx.querySelector('input');
+  bc.addEventListener('change', () => sendCapStyle({ background: bc.checked }));
+  add(bc, st => st.background, (el, v) => { el.checked = !!v; });
+  box.append(
+    fr,
+    range('Size', 'size', { min: 20, max: 160, step: 1, unit: 'px at 1080 lines' }),
+    colour('Colour', 'color'),
+    range('Outline', 'outline', { min: 0, max: 16, step: 0.5, unit: 'px' }),
+    colour('Outline colour', 'outlineColor'),
+    bx,
+    colour('Box colour', 'backgroundColor', () => ({ background: true })),
+    range('Box opacity', 'backgroundOpacity', { min: 0, max: 100, step: 1, unit: '% solid' }),
+    seg('Place', 'position', [['top', 'Top'], ['middle', 'Middle'], ['bottom', 'Bottom']]),
+    range('From edge', 'margin', { min: 0, max: 45, step: 0.5, unit: '% of the height', toView: v => +(v * 100).toFixed(1), fromView: v => v / 100 }),
+    seg('Align', 'align', [['left', 'Left'], ['center', 'Centre'], ['right', 'Right']]),
+    range('Line height', 'lineSpacing', { min: 0.8, max: 2.5, step: 0.05, unit: '× the size' }),
+  );
+}
+/** Shows the captions' look in the controls (except the one being used). */
+function syncCapStyle() {
+  const st = S.tl && S.tl.captions && S.tl.captions.style;
+  if (!st || !CSTY.built) return;
+  for (const c of CSTY.controls) {
+    if (document.activeElement === c.el && c.el.type !== 'checkbox') continue;
+    const v = c.read(st);
+    if (c.write) c.write(c.el, v);
+    else c.el.value = v;
+  }
+  $('#cs-backgroundColor').closest('label').classList.toggle('dim', !st.background);
+}
 function capNote() {
   const m = CAP.models && CAP.models.find(x => x.id === $('#cap-model').value);
   const c = S.tl && S.tl.captions;
@@ -716,6 +811,7 @@ function renderCaptionsPanel() {
   const c = S.tl.captions;
   $('#cap-tools').hidden = !c.exists;
   $('#cap-on').checked = c.on;
+  if (c.exists) { buildCapStyle(); syncCapStyle(); }
   $('#cap-go').disabled = CAP.busy || !has();
   $('#cap-go').textContent = c.exists ? 'Auto captions again' : 'Auto captions';
   capNote();
@@ -843,7 +939,8 @@ async function cutSelectedWords() {
   const tl = await edit('cut_words', { from: a, to: b });
   if (tl) toast(a === b ? 'Word cut' : `${b - a + 1} words cut`);
 }
-/** Lights the word under the playhead (and keeps it in view while playing). */
+/** Lights the word under the playhead (and keeps it in view while playing, until the person
+    scrolls the transcript themselves: then "Follow the playback" brings it back). */
 function markWord() {
   if (!W.spans.length || $('#panel-captions').hidden) return;
   let lo = 0, hi = W.words.length - 1, at = -1;
@@ -857,9 +954,33 @@ function markWord() {
   W.now = at;
   if (at >= 0 && W.spans[at]) {
     W.spans[at].classList.add('now');
-    if (S.playing) W.spans[at].scrollIntoView({ block: 'nearest' });
+    if (S.playing && W.follow !== false) keepWordInView(W.spans[at]);
   }
 }
+
+/** Scrolls the transcript box (never the panel around it) so `span` shows, a third of the way down. */
+function keepWordInView(span) {
+  const box = $('#transcript'), b = box.getBoundingClientRect(), r = span.getBoundingClientRect();
+  if (r.top >= b.top && r.bottom <= b.bottom) return;
+  const was = box.scrollTop;
+  box.scrollTop += r.top - b.top - b.height / 3;
+  // the scroll event this fires is ours, not the person's
+  if (box.scrollTop !== was) W.autoScroll = true;
+}
+/** Playing, the transcript follows the words; scrolling it by hand stops that until "Follow the
+    playback" is pressed or playback starts again. */
+function followWords(on) {
+  W.follow = on;
+  $('#tr-follow').hidden = on || !S.playing;
+  if (on) { const sp = W.spans[W.now]; if (sp && S.playing) keepWordInView(sp); }
+}
+for (const ev of ['wheel', 'touchmove']) $('#transcript').addEventListener(ev, () => { if (S.playing) followWords(false); }, { passive: true });
+$('#transcript').addEventListener('scroll', () => {
+  // the scrollbar dragged, or keys: anything but our own scrolling
+  if (W.autoScroll) { W.autoScroll = false; return; }
+  if (S.playing) followWords(false);
+});
+$('#tr-follow').onclick = () => followWords(true);
 
 /* Find and replace in the transcript. The search runs over the words joined by spaces, as in a text
    editor: the same rules as `find_in` in clipcut-core's replace.rs, which does the replacing. */
@@ -3649,6 +3770,7 @@ async function play(speed = 1) {
   S.rate = speed;
   setPlayIcon();
   showRate();
+  followWords(true);
   drawOverlay();
   const loop = async () => {
     if (!S.playing) return;
@@ -3670,6 +3792,7 @@ async function pause() {
   if (S.rate < 0) { stopShuttle(); return; }
   stopLoop();
   S.playing = false;
+  $('#tr-follow').hidden = true;
   S.rate = 1;
   showRate();
   setPlayIcon();

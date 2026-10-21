@@ -66,6 +66,11 @@ remote `upstream`). Read `README.md` for what it is and the roadmap.
   holds its media anchor (`cc:<item>:<from>:<to>`), and main-track edits go through `group_follow`,
   which re-places them afterwards (and puts the main track's transitions back on their cuts,
   `transitions.rs`). A new edit that moves main-track clips must use `group_follow`.
+  The Captions panel's style controls (`buildCapStyle` / `syncCapStyle`) send
+  `set_caption_style` keys (`backgroundOpacity` is joined with `backgroundColor` into the
+  engine's `#rrggbbaa`; `merge` makes a dragged slider one undo step). While playing, the
+  transcript box scrolls itself (`keepWordInView`, never the panel) until the person scrolls it
+  (`followWords(false)`; "Follow the playback" or the next play brings it back).
   Whisper models can't be downloaded from this sandbox (Hugging Face is blocked): test with
   `Studio::hear` / `CLIPCUT_TEST_TRANSCRIPT`; the Windows CI step runs the real model on real speech.
 - Text animations (`clipcut-core/src/animations.rs`) are keyframes on the text layer kept on the

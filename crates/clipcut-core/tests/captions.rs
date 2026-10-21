@@ -203,6 +203,27 @@ fn captions_are_edited_styled_and_saved() {
     s.set_caption_style(&json!({"color": "#ffd400", "position": "top", "size": 80, "background": true})).unwrap();
     let st = s.timeline().captions.style;
     assert_eq!((st.color.as_str(), st.position.as_str(), st.size, st.background), ("#ffd400", "top", 80.0, true));
+    // the box's colour and how solid it is, separately; where they sit, align, line height
+    s.set_caption_style(&json!({"backgroundColor": "#2060d0"})).unwrap();
+    let st = s.timeline().captions.style;
+    assert_eq!(st.background_color, "#2060d0");
+    assert!((st.background_opacity - 75.0).abs() < 0.6, "the box keeps how solid it was: {}", st.background_opacity);
+    let steps = s.timeline().undo_label;
+    for (i, o) in [10.0, 30.0, 40.0].into_iter().enumerate() {
+        s.set_caption_style(&json!({"backgroundOpacity": o, "merge": "box"})).unwrap();
+        if i == 0 {
+            assert_eq!(s.timeline().undo_label.as_deref(), Some("Caption Style"));
+        }
+    }
+    let st = s.timeline().captions.style;
+    assert!((st.background_opacity - 40.0).abs() < 0.6 && st.background_color == "#2060d0", "{st:?}");
+    s.undo().unwrap();
+    assert!((s.timeline().captions.style.background_opacity - 75.0).abs() < 0.6, "a dragged slider is one undo step");
+    assert_eq!(s.timeline().undo_label, steps);
+    s.set_caption_style(&json!({"align": "left", "margin": 0.2, "lineSpacing": 1.6, "backgroundOpacity": 500})).unwrap();
+    let st = s.timeline().captions.style;
+    assert_eq!(st.align, "left");
+    assert!((st.margin - 0.2).abs() < 1e-6 && (st.line_spacing - 1.6).abs() < 1e-6 && (st.background_opacity - 100.0).abs() < 0.6, "{st:?}");
     // they show in the player: the frame changes when they're hidden
     let t = (caps(&s)[0].start + caps(&s)[0].end) / 2.0;
     let with = s.frame(t, 320).unwrap().rgba;
