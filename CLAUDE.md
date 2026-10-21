@@ -54,6 +54,13 @@ remote `upstream`). Read `README.md` for what it is and the roadmap.
   and into it at the nearest cut (`move_into_main`, via `pack`). In the interface, a main clip
   dragged above the main track lifts onto a lane (`reorderDrag`), and `laneFor` offers the main
   track to lane pictures.
+- Linkage (`linkage.rs`, on by default, `#link-btn` / `Studio::set_linkage`, remembered as
+  `clipcut.linkage`): before every `group_follow` edit each lane clip is tied to the main-track clip
+  under its start (the moment of its media, or the cut when it starts within a frame of it);
+  afterwards `place_lanes` moves it to where that footage plays now (its own lane if free, else the
+  next free one), or clears it when the footage is gone, unless it runs on past that clip (a music
+  bed stays). A lane clip the edit itself moved is left alone; Slip runs `without_linkage`. Linked
+  clips show a link mark (`isLinked` in `app.js`).
 - Selection: Ctrl/Shift-click adds a clip; a drag on empty timeline draws a box (`boxSelect`), a
   click there moves the playhead. Dragging one of several selected lane clips moves them all
   (`groupDrag` → `Studio::move_clips`, one undo step); several selected main clips move as one
@@ -189,6 +196,12 @@ remote `upstream`). Read `README.md` for what it is and the roadmap.
   picture it is in step with. Captions over words that play only on an unlinked lane clip stay on
   it (`lane_sound` in `captions.rs`).
 - Disk is tight here: `rm -rf target/debug/incremental` when a build fails with "no space left".
+- Colour boxes: WebView2's colour pop-up dropper does nothing, so `index.html` loads Clip Studio's
+  `graphics/js/dropper.js` (with `data-colour-hex` on `<html>`): every `input[type=color]`, also
+  ones made later, gets a hex box (`.colour-hex`) and a dropper that reads the picture clicked
+  (the player, timeline pictures, media cards; `#overlay` is `data-nopick`) and fires `input` +
+  `change` on the box, so its own handlers send it. Change it in Clip Studio and sync.
+- The library's tab rail (`.rail`) scrolls when the timeline leaves it too short.
 - Interface copy: plain words from the user's side, errors that say what went wrong and how to fix it.
   One dark theme from the tokens at the top of `ui/app.css`; amber (`--accent`) marks the active thing.
 - Branding: ClipCut's own name and icon (`packaging/clipcut/icon.py`). Never ArtCraft/FilmCraft

@@ -1,7 +1,7 @@
 //! The lanes around the magnetic main track, CapCut-style: overlay video, pictures and text above
 //! it (video tracks 2 and up), music and voiceover below it (audio tracks 2 and up). Clips on lanes
-//! sit where they are put: nothing closes up around them, and the main track's edits don't move
-//! them (lanes are never sync-locked).
+//! sit where they are put: nothing closes up around them (lanes are never sync-locked); the main
+//! track's edits move them only through linkage (`linkage.rs`), with the footage they start on.
 //!
 //! A clip never lands on top of another one: when its place on a lane is taken it goes to the next
 //! free lane of its kind, and a new lane is added when none is free.
@@ -498,8 +498,8 @@ impl Studio {
         tracks(q, lane).iter().position(|t| t.id.0 == id).ok_or_else(|| Error::Engine("the new lane went missing".into()))
     }
 
-    /// Lanes never follow the main track's ripple edits (CapCut keeps overlays, text and music
-    /// where they are). New sequences come with sync-locked tracks; this turns that off.
+    /// Lanes never ripple with the main track (linkage moves their clips with the footage they
+    /// start on instead). New sequences come with sync-locked tracks; this turns that off.
     pub(crate) fn unlock_lanes(&mut self) -> Result<()> {
         let Some(q) = self.session.active_sequence() else { return Ok(()) };
         let locked: Vec<u64> = q.video_tracks.iter().skip(1).chain(q.audio_tracks.iter().skip(1)).filter(|t| t.sync_lock).map(|t| t.id.0).collect();

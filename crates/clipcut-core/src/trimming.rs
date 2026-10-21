@@ -55,13 +55,16 @@ impl Studio {
         let rate = self.fps()?;
         let source_in = |s: &Self| s.session.active_sequence().and_then(|q| q.find_item(ClipId(clip)).map(|(_, i)| i.source_in));
         let before = source_in(self).ok_or_else(|| Error::Invalid("that clip is no longer on the timeline".into()))?;
-        self.group_follow("Slip", None, |s| {
-            s.session.execute("timeline.slip", json!({"clip": clip, "deltaFrames": frames})).map_err(engine)?;
-            let moved = rate.frame_at(source_in(s).unwrap_or(before) - before);
-            if moved == 0 && frames != 0 {
-                return Err(Error::Invalid(format!("the clip already shows the media's {} frames", if frames < 0 { "first" } else { "last" })));
-            }
-            Ok(moved)
+        // what the clip shows changes, not where it is: the lanes stay
+        self.without_linkage(|st| {
+            st.group_follow("Slip", None, |s| {
+                s.session.execute("timeline.slip", json!({"clip": clip, "deltaFrames": frames})).map_err(engine)?;
+                let moved = rate.frame_at(source_in(s).unwrap_or(before) - before);
+                if moved == 0 && frames != 0 {
+                    return Err(Error::Invalid(format!("the clip already shows the media's {} frames", if frames < 0 { "first" } else { "last" })));
+                }
+                Ok(moved)
+            })
         })
     }
 

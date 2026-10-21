@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="en">
+<html lang="en" data-colour-hex>
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -159,7 +159,7 @@
   <main class="player" aria-label="Player">
     <div class="stage" id="stage">
       <canvas id="preview" aria-label="Preview"></canvas>
-      <canvas id="overlay" aria-hidden="true"></canvas>
+      <canvas id="overlay" aria-hidden="true" data-nopick></canvas>
       <div class="empty" id="empty">
         <p>Import a video to start</p>
         <button class="btn" id="empty-import">Import</button>
@@ -233,6 +233,7 @@
       <button class="tool" id="delete-btn" disabled data-tip="Delete the selected clips; the gap closes" data-keys="delete" aria-label="Delete"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 7h14M10 7V5h4v2M7 7l1 12h8l1-12"/></svg></button>
       <span class="spacer"></span>
       <button class="tool" id="snap-btn" aria-pressed="true" data-tip="Snapping{k}; hold Shift while dragging to skip it" data-keys="snap" aria-label="Snapping"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 4v8a6 6 0 0 0 12 0V4"/><path d="M6 8h4M14 8h4"/></svg></button>
+      <button class="tool" id="link-btn" aria-pressed="true" data-tip="Linkage{k}: B-roll, text and sound on the lanes move with the main-track clip they start on, and go when it is deleted" data-keys="linkage" aria-label="Linkage"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1"/><path d="M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1"/></svg></button>
       <span class="sep" aria-hidden="true"></span>
       <button class="tool" id="zoomout-btn" title="Zoom out (pinch on the touchpad, or Ctrl+wheel)" aria-label="Zoom out"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6"/><path d="M8 11h6M20 20l-4.5-4.5"/></svg></button>
       <input type="range" id="zoom" min="0" max="100" value="0" aria-label="Timeline zoom">
@@ -338,6 +339,7 @@
 </section>
 <script src="cs-shim.js"></script>
 <script src="graphics/js/platforms.js"></script>
+<script src="graphics/js/dropper.js"></script>
 <script src="app.js"></script>
 </body>
 </html>

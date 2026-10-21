@@ -23,6 +23,7 @@ mod graphics;
 mod key;
 mod keyframes;
 mod lanes;
+mod linkage;
 mod media_check;
 mod mixer;
 mod preview;
@@ -202,6 +203,8 @@ pub struct Studio {
     graphics: std::sync::Mutex<std::collections::HashMap<std::path::PathBuf, Option<String>>>,
     /// The clips Ctrl+C copied (`clipboard.rs`).
     clipboard: clipboard::Copied,
+    /// Lane clips follow the main-track clip they start on (`linkage.rs`).
+    linkage: bool,
 }
 
 impl Default for Studio {
@@ -216,7 +219,7 @@ impl Studio {
         // a clip of another size fits the frame when it's added (CapCut-style), through its Scale,
         // so it stays sharp when zoomed in; the engine's own default leaves it at its pixel size
         session.prefs.media.default_media_scaling = "setToFrameSize".into();
-        Self { session, merge: None, graphics: Default::default(), clipboard: Default::default() }
+        Self { session, merge: None, graphics: Default::default(), clipboard: Default::default(), linkage: true }
     }
 
     /// The engine session, for operations this façade doesn't cover yet.

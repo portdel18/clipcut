@@ -556,6 +556,7 @@ fn main() {
             editing::paste_clips,
             editing::extract_audio,
             editing::unlink_sound,
+            editing::set_linkage,
             editing::link_sound,
             editing::load_shortcuts,
             editing::save_shortcuts,

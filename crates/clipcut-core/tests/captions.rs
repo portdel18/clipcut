@@ -418,10 +418,17 @@ fn extracted_sound_stays_linked_and_in_the_transcript() {
     assert_eq!(words(&s), all[..6].to_vec());
     assert_eq!(caps(&s), before, "the captions stay on the sound");
     assert!(s.unlink_sound(sound).is_err());
+    // with linkage (on by default) it follows the footage it starts on, like any lane clip
+    s.delete(&[main[0].id]).unwrap();
+    assert!(s.timeline().clips.iter().find(|c| c.id == sound).unwrap().start.abs() < 1e-6, "the sound followed its footage");
+    s.undo().unwrap();
+    // with linkage off it stays where it is
+    s.set_linkage(false);
     s.delete(&[main[0].id]).unwrap();
     assert!((s.timeline().clips.iter().find(|c| c.id == sound).unwrap().start - 2.0).abs() < 1e-6, "the sound stayed");
     assert!(s.link_sound(sound).is_err(), "no longer in step with its picture");
     s.undo().unwrap();
+    s.set_linkage(true);
 
     // and linked back
     s.link_sound(sound).unwrap();

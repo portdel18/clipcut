@@ -315,6 +315,12 @@ pub async fn extract_audio(clip: u64, app: tauri::State<'_, App>) -> Result<Clip
     .await
 }
 
+/// Linkage on or off: clips on the lanes follow the main-track clip they start on.
+#[tauri::command]
+pub fn set_linkage(on: bool, app: tauri::State<'_, App>) {
+    lock(&app.studio).set_linkage(on);
+}
+
 #[tauri::command]
 pub async fn unlink_sound(clip: u64, app: tauri::State<'_, App>) -> Result<TimelineView, String> {
     edit(&app, move |s| s.unlink_sound(clip)).await

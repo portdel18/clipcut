@@ -602,14 +602,18 @@ impl Studio {
             .map_err(engine)
     }
 
-    /// [`Studio::group`] for an edit that moves the main track: the captions follow its speech
-    /// and the transitions stay on their cuts.
+    /// [`Studio::group`] for an edit that moves the main track: the captions follow its speech,
+    /// the transitions stay on their cuts and the lanes' clips follow their footage (linkage).
     pub(crate) fn group_follow<R>(&mut self, label: &str, merge: Option<&str>, f: impl FnOnce(&mut Self) -> Result<R>) -> Result<R> {
         let held = self.hold_captions();
         let transitions = self.hold_transitions();
+        let lanes = self.hold_lanes();
         self.group_merge(label, merge, |s| {
             let r = f(s)?;
             s.keep_sound_in_step()?;
+            if let Some(l) = lanes {
+                s.place_lanes(l)?;
+            }
             s.place_transitions(transitions)?;
             if let Some(h) = held {
                 s.place_captions(h)?;
