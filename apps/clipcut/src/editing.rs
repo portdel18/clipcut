@@ -937,6 +937,21 @@ pub async fn set_key(clips: Vec<u64>, key: Option<KeyArgs>, merge: Option<String
     edit(&app, move |s| s.set_key(&clips, key.as_ref().map(|k| (k.color.as_str(), k.strength.as_str(), k.soften, k.spill)), merge.as_deref())).await
 }
 
+/// A background fill as the interface sends it.
+#[derive(serde::Deserialize)]
+pub struct FillArgs {
+    blur: f64,
+    darken: f64,
+    zoom: f64,
+    rounding: f64,
+}
+
+/// Background fill on `clips` (their own picture behind them, filling the frame), or off (`None`).
+#[tauri::command]
+pub async fn set_fill(clips: Vec<u64>, fill: Option<FillArgs>, merge: Option<String>, app: tauri::State<'_, App>) -> Result<TimelineView, String> {
+    edit(&app, move |s| s.set_fill(&clips, fill.as_ref().map(|f| (f.blur, f.darken, f.zoom, f.rounding)), merge.as_deref())).await
+}
+
 #[tauri::command]
 pub async fn pick_colour(seconds: f64, x: f64, y: f64, app: tauri::State<'_, App>) -> Result<String, String> {
     let studio = app.studio.clone();

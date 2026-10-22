@@ -481,6 +481,7 @@ fn main() {
             editing::set_reverse,
             editing::set_keep_pitch,
             editing::set_key,
+            editing::set_fill,
             editing::pick_colour,
             editing::set_look,
             editing::reset_colour,

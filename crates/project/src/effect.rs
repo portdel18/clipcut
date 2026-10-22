@@ -238,6 +238,8 @@ fn audio(id: &'static str, name: &'static str, cat: &'static [&'static str], par
 
 const ADJUST: &[&str] = &["Video Effects", "Adjust"];
 const BLUR: &[&str] = &["Video Effects", "Blur & Sharpen"];
+/// Not one of Premiere's: ClipCut's canvas fill, outside the Effects panel's folders.
+const CANVAS: &[&str] = &["Canvas"];
 const COLOR_CORR: &[&str] = &["Video Effects", "Color Correction"];
 const DISTORT: &[&str] = &["Video Effects", "Distort"];
 const GENERATE: &[&str] = &["Video Effects", "Generate"];
@@ -479,6 +481,20 @@ fn build_effects() -> Vec<EffectDef> {
                 fs("blurriness", "Blurriness", 0.0, (0.0, 3000.0), (0.0, 100.0), "", 1),
                 ch("dimensions", "Blur Dimensions", &["Horizontal and Vertical", "Horizontal", "Vertical"], 0),
                 b("repeat_edge", "Repeat Edge Pixels", false),
+            ],
+        ),
+        // the clip's own picture under it, zoomed to cover the frame, blurred and darkened, and
+        // its corners rounded (a vertical video in a horizontal frame); drawn where the clip is
+        // placed (`filmcraft_render::blur_fill`)
+        video(
+            "blur_fill",
+            "Blur Fill",
+            CANVAS,
+            vec![
+                fs("blurriness", "Blurriness", 60.0, (0.0, 200.0), (0.0, 100.0), "", 1),
+                f("darken", "Darken", 25.0, 0.0, 100.0, "%"),
+                fs("zoom", "Zoom", 100.0, (100.0, 400.0), (100.0, 200.0), "%", 0),
+                f("rounding", "Corner Rounding", 0.0, 0.0, 50.0, "%"),
             ],
         ),
         video(

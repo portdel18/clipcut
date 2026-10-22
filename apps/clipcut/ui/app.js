@@ -1762,6 +1762,44 @@ async function removeBackground(id) {
   }
 }
 
+/* Background fill (CapCut's Canvas › Blur): a clip that doesn't fill the frame shows its own
+   picture behind it, zoomed to cover the frame, blurred and darkened (the engine's Blur Fill) */
+const FILL_DEFAULT = { blur: 60, darken: 25, zoom: 100, rounding: 0 };
+function fillControls(s, one, ids) {
+  const fill = one.props.fill;
+  const on = document.createElement('label');
+  on.className = 'check';
+  on.innerHTML = '<input type="checkbox" id="fill-on"> Fill the frame behind it, blurred';
+  const box = on.querySelector('input');
+  box.checked = !!fill;
+  box.addEventListener('change', () => box.checked ? setFill(ids, {}) : edit('set_fill', { clips: ids, fill: null, merge: null }));
+  s.appendChild(on);
+  if (!fill) {
+    const p = document.createElement('p');
+    p.className = 'hint';
+    p.textContent = 'For a vertical video in a horizontal one, or the other way round: the empty sides show the same video, zoomed in and blurred.';
+    s.appendChild(p);
+    return;
+  }
+  const read = k => c => (c.props.fill || FILL_DEFAULT)[k];
+  s.appendChild(customSlider('Blur', 'fill-blur', { min: 0, max: 100, step: 1, unit: '', read: read('blur'), send: (v, m) => setFill(ids, { blur: v }, m) }));
+  s.appendChild(customSlider('Darken', 'fill-darken', { min: 0, max: 100, step: 1, unit: '%', read: read('darken'), send: (v, m) => setFill(ids, { darken: v }, m) }));
+  s.appendChild(customSlider('Zoom', 'fill-zoom', { min: 100, max: 200, step: 1, unit: '%', read: read('zoom'), send: (v, m) => setFill(ids, { zoom: v }, m) }));
+  s.appendChild(customSlider('Corners', 'fill-rounding', { min: 0, max: 50, step: 1, unit: '%', read: read('rounding'), send: (v, m) => setFill(ids, { rounding: v }, m) }));
+  const all = buttons([['Apply to all clips', 'Give every clip on the main track this background', () => {
+    const cur = (clipById(one.id) || one).props.fill || FILL_DEFAULT;
+    const clips = mainClips().filter(c => c.kind === 'video' || c.kind === 'image').map(c => c.id);
+    if (clips.length) edit('set_fill', { clips, fill: { ...cur }, merge: null }).then(tl => { if (tl) toast(`Background fill on ${clips.length} clip${clips.length === 1 ? '' : 's'}`); });
+  }]]);
+  all.firstChild.id = 'fill-all';
+  s.appendChild(all);
+}
+/** The fill with `change` over the clip's current one (or the defaults). */
+function setFill(ids, change, merge = null) {
+  const cur = (clipById(ids[0]) || {}).props?.fill || FILL_DEFAULT;
+  return latest('set_fill', { clips: ids, fill: { ...cur, ...change }, merge });
+}
+
 /* Remove a colour (green screen): the engine's Ultra Key on picture clips */
 const KY = { picking: null, color: '#00b140' };
 function keyControls(s, one, ids) {
@@ -3160,7 +3198,7 @@ function renderProps() {
     return;
   }
   const one = sel.length === 1 ? sel[0] : null;
-  const sig = one ? `${one.id}:${one.kind}:${isCap(one) || isMain(one)}:${!isCap(one) && hasSound(one)}:${keyTimes(one).length > 0}:${pictureClip(one)}:${S.kf && S.kf.clip === one.id ? S.kf.t : ''}:${(chOf(one) || {}).mode || ''}:${!!one.props.key}:${one.link || ''}:${(soundOf(one) || {}).track || ''}:${!!one.props.freeze}:${one.cutFrom != null}` : `n:${sel.map(c => c.id).join(',')}`;
+  const sig = one ? `${one.id}:${one.kind}:${isCap(one) || isMain(one)}:${!isCap(one) && hasSound(one)}:${keyTimes(one).length > 0}:${pictureClip(one)}:${S.kf && S.kf.clip === one.id ? S.kf.t : ''}:${(chOf(one) || {}).mode || ''}:${!!one.props.key}:${!!one.props.fill}:${one.link || ''}:${(soundOf(one) || {}).track || ''}:${!!one.props.freeze}:${one.cutFrom != null}` : `n:${sel.map(c => c.id).join(',')}`;
   $('#props-title').textContent = one ? (one.graphic ? 'Graphic' : one.title ? 'Title' : { text: 'Text', audio: 'Sound', image: 'Picture', caption: 'Caption' }[one.kind] || (isMain(one) ? 'Clip' : 'Overlay')) : sel.length ? `${sel.length} clips` : 'Project';
   if (sig === propsSig) { syncProps(one); return; }
   propsSig = sig;
@@ -3235,6 +3273,7 @@ function renderProps() {
   if (visual(one) || hasSound(one)) keyframeControls(section('Keyframes'), one);
   trimControls(section('Trim'), one);
   if (pictureClip(one) && one.kind === 'image' && !one.graphic && !one.title && ids.length === 1) cutoutControls(section('Remove background'), one);
+  if (pictureClip(one) && (one.kind === 'video' || one.kind === 'image') && !one.graphic && !one.title) fillControls(section('Background'), one, ids);
   if (pictureClip(one) && (one.kind === 'video' || one.kind === 'image') && !one.graphic && !one.title) keyControls(section('Remove a colour'), one, ids);
   if (pictureClip(one)) adjustControls(box, ids);
   if (one.kind !== 'text' && one.kind !== 'image') {

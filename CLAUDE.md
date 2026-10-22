@@ -168,6 +168,11 @@ remote `upstream`). Read `README.md` for what it is and the roadmap.
   `cutout_clip` saves the PNG in `Cut-outs` beside `Graphics` and swaps it into the clip in place
   (`cutouts.rs`: same size only; a clip marker "ClipCut cut-out" keeps the original's item, for
   Put background back, `ClipView.cut_from`).
+- Background fill (CapCut's Canvas › Blur; `fill.rs`, the Background section, `fillControls`): the
+  engine's Blur Fill effect on a picture clip (`render/src/blur_fill.rs`, hooked in `item_layer_ex`
+  after the clip's effects): its own picture zoomed to cover the frame, blurred, darkened, under it,
+  and its corners rounded. Not a GPU effect, so `plan.rs` renders such a clip on the CPU (exports
+  match). It sits in its own `Canvas` folder, outside Premiere's effect list (`vfx.rs` catalogue test).
 - Waveforms are drawn as loud as they will play (clip and lane volume, `playGain`); past full
   scale their bars get red edges (`--sound-loud`), and the Sound panel says by how much, with
   Lower to fit (`loudHint`, `overBy`).

@@ -68,7 +68,7 @@ fn parse_hex(s: &str) -> Option<String> {
 
 impl Studio {
     /// The picture clips among `clips` (video and pictures; not text, sound or captions).
-    fn pictures_of(&self, clips: &[u64]) -> Result<Vec<u64>> {
+    pub(crate) fn pictures_of(&self, clips: &[u64]) -> Result<Vec<u64>> {
         let q = self.session.active_sequence().ok_or(Error::NothingOpen)?;
         Ok(clips
             .iter()
