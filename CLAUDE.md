@@ -179,6 +179,13 @@ remote `upstream`). Read `README.md` for what it is and the roadmap.
   compensated by the engine. DeNoise ignores digital silence and lets the first 0.25 s of sound
   through while it learns the floor (`audio-dsp/src/effects/restoration.rs`), so it works from a
   clip's start and right after a seek.
+  Reduce noise's AI (the default, `Voice::ai`) is DeepFilterNet 3 (`ai_denoise.rs`, the official
+  `deep_filter` crate from its git tag, MIT/Apache, model built in): an engine audio effect ClipCut
+  adds with `filmcraft_audio_dsp::register_effect` (its project entry is in the `Application`
+  folder, skipped by the engine's DSP catalogue test), so it is latency-compensated, cached and
+  exported like any other. The model isn't `Send`: each effect leases a worker thread from a small
+  pool (`lease`), which starts from a clone of the loaded model. 48 kHz, 1 or 2 channels only;
+  anything else passes through. Its latency is a 480-sample frame plus the model's 1440.
 - Waveforms are drawn as loud as they will play (clip and lane volume, `playGain`); past full
   scale their bars get red edges (`--sound-loud`), and the Sound panel says by how much, with
   Lower to fit (`loudHint`, `overBy`).

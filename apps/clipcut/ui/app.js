@@ -1762,10 +1762,10 @@ async function removeBackground(id) {
   }
 }
 
-/* Voice cleanup (CapCut's Reduce noise / Enhance voice): the engine's DeNoise and Enhance Speech
-   on the clip's sound (voice.rs) */
-const VOICE_DEFAULT = { noise: 50, enhance: 100 };
-const voiceOf = c => { const snd = c && (soundOf(c) || c); return (snd && snd.props.voice) || { noise: null, enhance: null, tone: 'low' }; };
+/* Voice cleanup (CapCut's Reduce noise / Enhance voice): AI noise reduction (DeepFilterNet,
+   ai_denoise.rs) or the engine's DeNoise, and Enhance Speech, on the clip's sound (voice.rs) */
+const VOICE_DEFAULT = { noise: 100, enhance: 100 };
+const voiceOf = c => { const snd = c && (soundOf(c) || c); return (snd && snd.props.voice) || { noise: null, ai: false, enhance: null, tone: 'low' }; };
 const voiceSig = c => { const v = voiceOf(c); return `${v.noise != null}${v.enhance != null}`; };
 function voiceControls(s, one, ids) {
   const v = voiceOf(one);
@@ -1778,9 +1778,14 @@ function voiceControls(s, one, ids) {
     s.appendChild(row);
     return row.firstChild;
   };
-  const noise = check('voice-noise', 'Reduce noise', v.noise != null, 'Takes steady background noise out: hiss, fans, air conditioning, room tone');
-  noise.addEventListener('change', () => setVoice(ids, { noise: noise.checked ? VOICE_DEFAULT.noise : null }));
+  const noise = check('voice-noise', 'Reduce noise', v.noise != null, 'Takes background noise out from under the voice: hiss, fans, traffic, wind, room tone');
+  noise.addEventListener('change', () => setVoice(ids, noise.checked ? { noise: VOICE_DEFAULT.noise, ai: true } : { noise: null }));
   if (v.noise != null) {
+    const ways = [[true, 'AI', 'Learns what a voice is and keeps only that: takes out traffic, wind, chatter and music too'], [false, 'Standard', 'Takes out steady noise only (hiss, hum, fans) and changes the voice least']];
+    const how = buttons(ways.map(([ai, l, t]) => [l, t, () => setVoice(ids, { ai })]));
+    how.id = 'voice-noise-how';
+    controls.push({ el: how, read: c => !!voiceOf(c).ai, write: (el, ai) => { [...el.children].forEach((b, i) => b.setAttribute('aria-pressed', String(ways[i][0] === ai))); } });
+    s.appendChild(how);
     s.appendChild(customSlider('Strength', 'voice-noise-amount', { min: 0, max: 100, step: 1, unit: '%', read: c => voiceOf(c).noise ?? VOICE_DEFAULT.noise, send: (x, m) => setVoice(ids, { noise: x }, m) }));
   }
   const enh = check('voice-enhance', 'Enhance voice', v.enhance != null, 'Makes speech clearer and more even: less mud, more presence');
@@ -1797,7 +1802,7 @@ function voiceControls(s, one, ids) {
 /** The voice cleanup with `change` over the clip's current one. */
 function setVoice(ids, change, merge = null) {
   const v = voiceOf(clipById(ids[0]));
-  const voice = { noise: v.noise ?? null, enhance: v.enhance ?? null, high: v.tone === 'high', ...change };
+  const voice = { noise: v.noise ?? null, ai: !!v.ai, enhance: v.enhance ?? null, high: v.tone === 'high', ...change };
   return latest('set_voice', { clips: ids, voice, merge });
 }
 

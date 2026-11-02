@@ -62,6 +62,12 @@ mic. ClipCut measures the two sides and offers the fix: "Each side has its own v
 "Only the left side has sound" for one microphone, and **Even out** sets the louder voice down to the
 quieter one.
 
+**Voice cleanup.** Under Sound, **Reduce noise** takes background noise out from under speech. **AI**
+(the default) is DeepFilterNet 3, a small speech model that runs on this computer as the clip plays:
+it keeps the voice and takes out hiss, fans, traffic, wind and chatter. **Standard** takes out
+steady noise only and changes the voice least. **Strength** sets how far the noise goes down.
+**Enhance voice** makes speech clearer and more even.
+
 **Speed, reverse, freeze.** Speed keeps the voice's pitch (switch it off under Speed for the tape
 effect); **Reverse** plays the clip backwards; **Freeze** (the toolbar, or `F`) puts a 3-second still of
 the frame at the playhead into the video and pushes the rest along (trim the still to change its
@@ -279,3 +285,6 @@ ClipCut is MIT OR Apache-2.0, like FilmCraft, whose engine it uses: see [NOTICE]
 Team and the FilmCraft contributors; its own README is kept at
 [docs/filmcraft-README.md](docs/filmcraft-README.md). ClipCut is an independent project, not made or
 endorsed by them. Every asset is listed in [ATTRIBUTION.md](ATTRIBUTION.md).
+AI noise reduction is [DeepFilterNet](https://github.com/Rikorose/DeepFilterNet) by Hendrik
+Schröter and contributors (MIT OR Apache-2.0), with its DeepFilterNet3 model, built in from its own
+`deep_filter` crate.
