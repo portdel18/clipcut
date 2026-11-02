@@ -173,6 +173,12 @@ remote `upstream`). Read `README.md` for what it is and the roadmap.
   after the clip's effects): its own picture zoomed to cover the frame, blurred, darkened, under it,
   and its corners rounded. Not a GPU effect, so `plan.rs` renders such a clip on the CPU (exports
   match). It sits in its own `Canvas` folder, outside Premiere's effect list (`vfx.rs` catalogue test).
+- Voice cleanup (`voice.rs`, `voiceControls` in the Sound section): Reduce noise and Enhance voice are
+  the engine's DeNoise and Enhance Speech put straight on the sound clip (not Essential Sound, whose
+  audio types would clash with ducked music), after its other effects, noise first; their delay is
+  compensated by the engine. DeNoise ignores digital silence and lets the first 0.25 s of sound
+  through while it learns the floor (`audio-dsp/src/effects/restoration.rs`), so it works from a
+  clip's start and right after a seek.
 - Waveforms are drawn as loud as they will play (clip and lane volume, `playGain`); past full
   scale their bars get red edges (`--sound-loud`), and the Sound panel says by how much, with
   Lower to fit (`loudHint`, `overBy`).

@@ -937,6 +937,22 @@ pub async fn set_key(clips: Vec<u64>, key: Option<KeyArgs>, merge: Option<String
     edit(&app, move |s| s.set_key(&clips, key.as_ref().map(|k| (k.color.as_str(), k.strength.as_str(), k.soften, k.spill)), merge.as_deref())).await
 }
 
+/// Voice cleanup as the interface sends it: each amount 0…100, or null for off.
+#[derive(serde::Deserialize)]
+pub struct VoiceArgs {
+    noise: Option<f64>,
+    enhance: Option<f64>,
+    #[serde(default)]
+    high: bool,
+}
+
+/// Reduce noise and Enhance voice on the sound of `clips`.
+#[tauri::command]
+pub async fn set_voice(clips: Vec<u64>, voice: VoiceArgs, merge: Option<String>, app: tauri::State<'_, App>) -> Result<TimelineView, String> {
+    let v = clipcut_core::Voice { noise: voice.noise, enhance: voice.enhance, high: voice.high };
+    edit(&app, move |s| s.set_voice(&clips, v, merge.as_deref())).await
+}
+
 /// A background fill as the interface sends it.
 #[derive(serde::Deserialize)]
 pub struct FillArgs {

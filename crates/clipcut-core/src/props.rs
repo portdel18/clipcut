@@ -26,6 +26,8 @@ pub struct ClipProps {
     pub ducking: Option<f64>,
     /// Sound with two channels: how its two sides play.
     pub channels: Option<crate::channels::ChannelsView>,
+    /// Sound: Reduce noise and Enhance voice.
+    pub voice: Option<crate::voice::VoiceView>,
     /// Sound: keeps its pitch when played faster or slower.
     pub keep_pitch: bool,
     /// Pictures and text: where the clip's centre sits, in canvas pixels.
@@ -132,6 +134,7 @@ pub(crate) fn clip_props_at(s: &filmcraft_engine::Session, q: &Sequence, track: 
         let two = s.project.item(i.item).and_then(|it| it.as_media()).and_then(|m| m.info.audio_streams.get(i.audio_stream)).is_some_and(|a| a.channels >= 2);
         p.channels = two.then(|| crate::channels::channels_of(i));
         p.keep_pitch = crate::timing::keeps_pitch(i);
+        p.voice = Some(crate::voice::voice_of(i));
         for t in &track.transitions {
             if t.to == Some(i.id) && t.from.is_none() {
                 p.fade_in = t.duration.seconds();
