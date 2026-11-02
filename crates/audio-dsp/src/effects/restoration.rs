@@ -101,6 +101,10 @@ const MS_WINDOW_S: f32 = 1.5;
 /// Bias compensation of the minimum of smoothed periodograms (≈ +4 dB).
 const MS_BIAS: f32 = 2.5;
 const PSD_SMOOTH: f32 = 0.8;
+/// Real sound heard before the floor is trusted (s).
+const WARM_S: f32 = 0.25;
+/// Samples below this (about −140 dBFS) are digital silence.
+const SILENCE: f32 = 1e-7;
 
 #[derive(Clone, Debug)]
 struct NoiseState {
@@ -111,6 +115,8 @@ struct NoiseState {
     frames_in_sub: usize,
     gains: Vec<f32>,
     started: bool,
+    /// Frames of real sound (not digital silence) analysed so far.
+    seen: usize,
 }
 
 impl NoiseState {
@@ -123,6 +129,7 @@ impl NoiseState {
             frames_in_sub: 0,
             gains: vec![1.0; bins],
             started: false,
+            seen: 0,
         }
     }
     fn reset(&mut self) {
@@ -133,6 +140,7 @@ impl NoiseState {
         self.ring_pos = 0;
         self.frames_in_sub = 0;
         self.started = false;
+        self.seen = 0;
     }
 }
 
@@ -145,6 +153,8 @@ pub struct DeNoise {
     n: usize,
     hop: usize,
     sub_frames: usize,
+    /// Frames of real sound heard before reducing (a quarter of a second).
+    warm: usize,
     spec: Spectral,
     stft: Vec<StftChannel>,
     noise: Vec<NoiseState>,
@@ -172,6 +182,7 @@ impl DeNoise {
             n,
             hop,
             sub_frames,
+            warm: ((WARM_S * sample_rate / hop as f32).round() as usize).max(1),
             spec: Spectral::new(n, true),
             stft: vec![StftChannel::new(n); ch],
             noise: vec![NoiseState::new(bins); ch],
@@ -204,7 +215,7 @@ impl AudioEffect for DeNoise {
     fn process(&mut self, channels: &mut [&mut [f32]]) {
         let len = block_len(channels);
         let nch = channels.len().min(self.stft.len());
-        let (n, hop, sub_frames) = (self.n, self.hop, self.sub_frames);
+        let (n, hop, sub_frames, warm) = (self.n, self.hop, self.sub_frames, self.warm);
         let (floor, thr, release) = (self.floor, self.thr, self.release);
         let scale = 1.0 / (n as f32 * 2.0);
         for ch in 0..nch {
@@ -214,21 +225,30 @@ impl AudioEffect for DeNoise {
             let mut frame = |input: &[f32], out: &mut [f32]| {
                 spec.analyse(input);
                 let bins = n / 2 + 1;
-                for k in 0..bins {
-                    let p = spec.re[k] * spec.re[k] + spec.im[k] * spec.im[k];
-                    st.psd[k] = if st.started { PSD_SMOOTH * st.psd[k] + (1.0 - PSD_SMOOTH) * p } else { p };
-                    st.cur_min[k] = st.cur_min[k].min(st.psd[k]);
+                // Digital silence (before a clip starts, or the analysis window still filling) is not
+                // the noise floor: learning it would hold the estimate at zero, and nothing be
+                // reduced, until it left the minimum window.
+                let silent = input.iter().filter(|v| v.abs() < SILENCE).count() > input.len() / 16;
+                if !silent {
+                    for k in 0..bins {
+                        let p = spec.re[k] * spec.re[k] + spec.im[k] * spec.im[k];
+                        st.psd[k] = if st.started { PSD_SMOOTH * st.psd[k] + (1.0 - PSD_SMOOTH) * p } else { p };
+                        st.cur_min[k] = st.cur_min[k].min(st.psd[k]);
+                    }
+                    st.started = true;
+                    st.frames_in_sub += 1;
+                    st.seen = st.seen.saturating_add(1);
                 }
-                st.started = true;
-                st.frames_in_sub += 1;
-                let rotate = st.frames_in_sub == sub_frames;
+                // until a little real sound has been heard there is no floor yet: let it through
+                let learning = st.seen < warm;
+                let rotate = !silent && st.frames_in_sub == sub_frames;
                 for k in 0..bins {
                     let mut m = st.cur_min[k];
                     for u in 0..MS_SUBWINDOWS {
                         m = m.min(st.ring[u * bins + k]);
                     }
                     let noise = m * MS_BIAS;
-                    let target = if st.psd[k] > noise * thr { 1.0 } else { floor };
+                    let target = if learning || st.psd[k] > noise * thr { 1.0 } else { floor };
                     let g = &mut st.gains[k];
                     let c = if target > *g { 0.7 } else { release };
                     *g += (target - *g) * c;
@@ -289,6 +309,30 @@ mod tests {
         let mut y = hum(50.0);
         d60.process(&mut [&mut y]);
         assert!(db(tone_amplitude(&y[n / 2..], 50.0, SR as f64) / 0.2) > -3.0);
+    }
+
+    #[test]
+    fn denoise_reduces_noise_soon_after_digital_silence() {
+        // a clip that starts after silence (or a read that starts with the window still empty):
+        // the silence must not count as the noise floor, or nothing is reduced for seconds
+        let mut d = DeNoise::new(SR, 1);
+        d.set_param("reduction", 30.0);
+        let lat = d.latency();
+        let lead = SR as usize / 2;
+        let n = lead + SR as usize * 2;
+        let mut rng = Rng::new(5);
+        let x: Vec<f32> = (0..n).map(|i| if i < lead { 0.0 } else { rng.uniform() * 0.05 }).collect();
+        let mut y = x.clone();
+        d.process(&mut [&mut y]);
+        // 0.5–0.8 s into the noise
+        let s = lead + SR as usize / 2;
+        let w = s + lat..s + lat + (0.3 * SR) as usize;
+        let red = db(rms(&y[w.clone()]) / rms(&x[w.start - lat..w.end - lat]));
+        assert!(red < -10.0, "half a second in, only {red} dB");
+        // the first moments of sound pass while it learns
+        let first = lead + lat..lead + lat + SR as usize / 20;
+        let kept = db(rms(&y[first.clone()]) / rms(&x[first.start - lat..first.end - lat]));
+        assert!(kept > -3.0, "the first 50 ms: {kept} dB");
     }
 
     #[test]

@@ -1762,6 +1762,45 @@ async function removeBackground(id) {
   }
 }
 
+/* Voice cleanup (CapCut's Reduce noise / Enhance voice): the engine's DeNoise and Enhance Speech
+   on the clip's sound (voice.rs) */
+const VOICE_DEFAULT = { noise: 50, enhance: 100 };
+const voiceOf = c => { const snd = c && (soundOf(c) || c); return (snd && snd.props.voice) || { noise: null, enhance: null, tone: 'low' }; };
+const voiceSig = c => { const v = voiceOf(c); return `${v.noise != null}${v.enhance != null}`; };
+function voiceControls(s, one, ids) {
+  const v = voiceOf(one);
+  const check = (id, label, on, tip) => {
+    const row = document.createElement('label');
+    row.className = 'check';
+    row.title = tip;
+    row.innerHTML = `<input type="checkbox" id="${id}"> ${label}`;
+    row.firstChild.checked = on;
+    s.appendChild(row);
+    return row.firstChild;
+  };
+  const noise = check('voice-noise', 'Reduce noise', v.noise != null, 'Takes steady background noise out: hiss, fans, air conditioning, room tone');
+  noise.addEventListener('change', () => setVoice(ids, { noise: noise.checked ? VOICE_DEFAULT.noise : null }));
+  if (v.noise != null) {
+    s.appendChild(customSlider('Strength', 'voice-noise-amount', { min: 0, max: 100, step: 1, unit: '%', read: c => voiceOf(c).noise ?? VOICE_DEFAULT.noise, send: (x, m) => setVoice(ids, { noise: x }, m) }));
+  }
+  const enh = check('voice-enhance', 'Enhance voice', v.enhance != null, 'Makes speech clearer and more even: less mud, more presence');
+  enh.addEventListener('change', () => setVoice(ids, { enhance: enh.checked ? VOICE_DEFAULT.enhance : null }));
+  if (v.enhance != null) {
+    s.appendChild(customSlider('Amount', 'voice-enhance-amount', { min: 0, max: 100, step: 1, unit: '%', read: c => voiceOf(c).enhance ?? VOICE_DEFAULT.enhance, send: (x, m) => setVoice(ids, { enhance: x }, m) }));
+    const tones = [['low', 'Lower voice', 'For a lower speaking voice'], ['high', 'Higher voice', 'For a higher speaking voice']];
+    const seg = buttons(tones.map(([k, l, t]) => [l, t, () => setVoice(ids, { high: k === 'high' })]));
+    seg.id = 'voice-tone';
+    controls.push({ el: seg, read: c => voiceOf(c).tone, write: (el, t) => { [...el.children].forEach((b, i) => b.setAttribute('aria-pressed', String(tones[i][0] === t))); } });
+    s.appendChild(seg);
+  }
+}
+/** The voice cleanup with `change` over the clip's current one. */
+function setVoice(ids, change, merge = null) {
+  const v = voiceOf(clipById(ids[0]));
+  const voice = { noise: v.noise ?? null, enhance: v.enhance ?? null, high: v.tone === 'high', ...change };
+  return latest('set_voice', { clips: ids, voice, merge });
+}
+
 /* Background fill (CapCut's Canvas › Blur): a clip that doesn't fill the frame shows its own
    picture behind it, zoomed to cover the frame, blurred and darkened (the engine's Blur Fill) */
 const FILL_DEFAULT = { blur: 60, darken: 25, zoom: 100, rounding: 0 };
@@ -3198,7 +3237,7 @@ function renderProps() {
     return;
   }
   const one = sel.length === 1 ? sel[0] : null;
-  const sig = one ? `${one.id}:${one.kind}:${isCap(one) || isMain(one)}:${!isCap(one) && hasSound(one)}:${keyTimes(one).length > 0}:${pictureClip(one)}:${S.kf && S.kf.clip === one.id ? S.kf.t : ''}:${(chOf(one) || {}).mode || ''}:${!!one.props.key}:${!!one.props.fill}:${one.link || ''}:${(soundOf(one) || {}).track || ''}:${!!one.props.freeze}:${one.cutFrom != null}` : `n:${sel.map(c => c.id).join(',')}`;
+  const sig = one ? `${one.id}:${one.kind}:${isCap(one) || isMain(one)}:${!isCap(one) && hasSound(one)}:${keyTimes(one).length > 0}:${pictureClip(one)}:${S.kf && S.kf.clip === one.id ? S.kf.t : ''}:${(chOf(one) || {}).mode || ''}:${!!one.props.key}:${!!one.props.fill}:${voiceSig(one)}:${one.link || ''}:${(soundOf(one) || {}).track || ''}:${!!one.props.freeze}:${one.cutFrom != null}` : `n:${sel.map(c => c.id).join(',')}`;
   $('#props-title').textContent = one ? (one.graphic ? 'Graphic' : one.title ? 'Title' : { text: 'Text', audio: 'Sound', image: 'Picture', caption: 'Caption' }[one.kind] || (isMain(one) ? 'Clip' : 'Overlay')) : sel.length ? `${sel.length} clips` : 'Project';
   if (sig === propsSig) { syncProps(one); return; }
   propsSig = sig;
@@ -3250,6 +3289,7 @@ function renderProps() {
     s.appendChild(slider('Fade in', ids, 'fadeIn', { min: 0, max: 10, step: 0.1, unit: 's', read: c => (soundOf(c) || c).props.fadeIn }));
     s.appendChild(slider('Fade out', ids, 'fadeOut', { min: 0, max: 10, step: 0.1, unit: 's', read: c => (soundOf(c) || c).props.fadeOut }));
     if (chOf(one)) channelControls(s, one, ids);
+    voiceControls(s, one, ids);
     if (!isMain(one) && !isMainSound(one)) {
       duckingControls(s, ids);
       beatControls(s, ids);

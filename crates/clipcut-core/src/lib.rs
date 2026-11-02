@@ -38,6 +38,7 @@ mod timing;
 mod titles;
 mod transitions;
 mod trimming;
+mod voice;
 
 use std::sync::Arc;
 
@@ -67,6 +68,7 @@ pub use timeline::{ClipView, Keep, LaneView, MediaView, ProjectView, TimelineVie
 pub use timing::FREEZE_SECONDS;
 pub use titles::{MY_TITLES, TitleView};
 pub use transitions::{DEFAULT_SECONDS as TRANSITION_SECONDS, TRANSITIONS, TransitionPresetView, TransitionView, transition_presets, transition_previews};
+pub use voice::{Voice, VoiceView};
 
 /// What went wrong, in words the app can show as they are.
 #[derive(Debug, thiserror::Error)]

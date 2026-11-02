@@ -482,6 +482,7 @@ fn main() {
             editing::set_keep_pitch,
             editing::set_key,
             editing::set_fill,
+            editing::set_voice,
             editing::pick_colour,
             editing::set_look,
             editing::reset_colour,
