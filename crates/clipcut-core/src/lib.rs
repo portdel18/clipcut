@@ -64,7 +64,7 @@ pub use props::{ClipProps, PEAKS_PER_SECOND, Peaks, TextProps};
 pub use replace::Replaced;
 pub use scopes::SCOPES;
 pub use shuttle::Stretcher;
-pub use timeline::{ClipView, Keep, LaneView, MediaView, ProjectView, TimelineView};
+pub use timeline::{ClipView, Keep, LaneView, MediaView, ProjectView, TimelineView, heavy};
 pub use timing::FREEZE_SECONDS;
 pub use titles::{MY_TITLES, TitleView};
 pub use transitions::{DEFAULT_SECONDS as TRANSITION_SECONDS, TRANSITIONS, TransitionPresetView, TransitionView, transition_presets, transition_previews};

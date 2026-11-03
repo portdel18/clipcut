@@ -81,11 +81,40 @@ pub struct MediaView {
     pub kind: &'static str,
     pub width: u32,
     pub height: u32,
+    /// Frames a second (video), 0 otherwise.
+    pub fps: f64,
+    /// The video's codec: `h264`, `hevc`, else the engine's label in lower case; empty otherwise.
+    pub codec: String,
+    /// Too big to play smoothly from the file itself on many computers (4K, or more than 1080p at
+    /// 30 fps): ClipCut makes it a proxy by itself (see [`heavy`]).
+    pub heavy: bool,
     /// A proxy (a small copy for smooth playback) is attached.
     pub proxy: bool,
     /// Why the engine can't show its picture, in the user's words (it shows the "unreadable"
     /// slate instead; the sound still plays). See [`Studio::check_picture`].
     pub unreadable: Option<String>,
+}
+
+/// A short id for the engine's codec label ("H.264 (High)" → `h264`, "HEVC" → `hevc`), the
+/// label in lower case for others.
+fn codec_id(label: &str) -> String {
+    let l = label.to_lowercase();
+    if l.contains("hevc") || l.contains("h.265") || l.contains("h265") {
+        "hevc".into()
+    } else if l.contains("h.264") || l.contains("h264") || l.contains("avc") {
+        "h264".into()
+    } else {
+        l
+    }
+}
+
+/// A video `w × h` at `fps` that many computers can't play smoothly from the file itself: 4K and
+/// up, or more pixels a second than 1080p at 30 fps (1080p at 60 fps, 1440p...). Its frames are
+/// worth a proxy.
+pub fn heavy(w: u32, h: u32, fps: f64) -> bool {
+    let px = f64::from(w) * f64::from(h);
+    let fps = if fps.is_finite() { fps.clamp(0.0, 1000.0) } else { 0.0 };
+    px >= 3840.0 * 2160.0 * 0.9 || px * fps > 1920.0 * 1080.0 * 30.5
 }
 
 /// Everything the timeline and Media panel draw, after any change.
@@ -217,6 +246,8 @@ impl Studio {
                     _ => "video",
                 };
                 let (w, h) = m.info.video.as_ref().map(|v| (v.width, v.height)).unwrap_or((0, 0));
+                let fps = m.info.video.as_ref().filter(|_| kind == "video").map_or(0.0, |v| v.frame_rate.as_f64());
+                let codec = m.info.video.as_ref().filter(|_| kind == "video").map(|v| codec_id(&v.codec)).unwrap_or_default();
                 Some((
                     it.created,
                     MediaView {
@@ -227,6 +258,9 @@ impl Studio {
                         kind,
                         width: w,
                         height: h,
+                        fps,
+                        heavy: kind == "video" && heavy(w, h, fps),
+                        codec,
                         proxy: m.proxy.is_some(),
                         unreadable: self
                             .session
