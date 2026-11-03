@@ -10,6 +10,7 @@
 
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
 
+mod ai_denoise;
 mod animations;
 mod beats;
 mod captions;
@@ -218,6 +219,8 @@ impl Default for Studio {
 
 impl Studio {
     pub fn new() -> Self {
+        // AI noise reduction, among the engine's audio effects
+        ai_denoise::register();
         let mut session = Session::default();
         // a clip of another size fits the frame when it's added (CapCut-style), through its Scale,
         // so it stays sharp when zoomed in; the engine's own default leaves it at its pixel size

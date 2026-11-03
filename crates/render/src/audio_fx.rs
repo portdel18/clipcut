@@ -71,6 +71,8 @@ pub(crate) fn mapping(id: &str) -> Option<Mapping> {
         "lowpass" => Mapping { dsp: "parametric_eq", preroll: |_, _| 0.05, apply: |d, e, t| band(d, 3.0, f(e, "cutoff", t), 0.707) },
         "bandpass" => Mapping { dsp: "parametric_eq", preroll: |_, _| 0.05, apply: |d, e, t| band(d, 6.0, f(e, "center", t), f(e, "q", t)) },
         // Amount 0…100 % → 0…40 dB of reduction.
+        // registered by the application (ClipCut's DeepFilterNet); Amount 0…100 %
+        "ai_denoise" => Mapping { dsp: "ai_denoise", preroll: |_, _| 0.5, apply: |d, e, t| ignore(d.set_param("amount", f(e, "amount", t))) },
         "denoise" => Mapping { dsp: "denoise", preroll: |_, _| 1.0, apply: |d, e, t| ignore(d.set_param("reduction", f(e, "amount", t) * 0.4)) },
         // Gain is the notch depth: the wet/dry amount that leaves 10^(gain/20) of the hum.
         "dehummer" => Mapping {
@@ -295,7 +297,14 @@ fn band(d: &mut dyn AudioEffect, kind: f32, freq: f32, q: f32) {
 
 /// The item's enabled, DSP-backed audio effects in rack order.
 fn active(item: &TrackItem) -> Vec<(&EffectInstance, Mapping)> {
-    item.effects.iter().filter(|e| e.enabled && !e.def().is_some_and(|d| d.intrinsic)).filter_map(|e| mapping(&e.effect).map(|m| (e, m))).collect()
+    // an effect whose processing isn't there (one an application registers, in a build without
+    // it) plays the clip as it is, and leaves the others' order alone
+    item.effects
+        .iter()
+        .filter(|e| e.enabled && !e.def().is_some_and(|d| d.intrinsic))
+        .filter_map(|e| mapping(&e.effect).map(|m| (e, m)))
+        .filter(|(_, m)| filmcraft_audio_dsp::effect_info(m.dsp).is_some())
+        .collect()
 }
 
 /// Whether the item has audio effects that change its signal.
@@ -409,6 +418,10 @@ mod tests {
     fn every_audio_effect_has_dsp() {
         for d in effect_defs().iter().filter(|d| d.kind == EffectKind::Audio && !d.intrinsic) {
             let m = mapping(d.id).unwrap_or_else(|| panic!("{} has no DSP mapping", d.id));
+            // added by an application at run time, not built in
+            if d.category.first() == Some(&"Application") {
+                continue;
+            }
             assert!(filmcraft_audio_dsp::effect_info(m.dsp).is_some(), "{} → unknown DSP {}", d.id, m.dsp);
             let inst = d.instance();
             let mut fx = configured(&inst, Tick::ZERO, 48000).unwrap();

@@ -22,10 +22,16 @@ filmcraft-color = { workspace = true }
 # speech-to-text for captions: Whisper on the CPU (pure Rust) and its model download
 filmcraft-speech = { workspace = true, features = ["whisper", "download"] }
 filmcraft-time = { workspace = true }
+# AI noise reduction: DeepFilterNet 3 (MIT OR Apache-2.0, model included), pure Rust through tract;
+# the authors' release, pinned
+deep_filter = { git = "https://github.com/Rikorose/DeepFilterNet", tag = "v0.5.6", default-features = false, features = ["tract", "default-model"] }
+ndarray = "0.15"
 serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
 
 [dev-dependencies]
 filmcraft-testkit = { workspace = true }
+# speech for the AI noise reduction tests (the engine's own voice: no media in the repository)
+filmcraft-tts = { workspace = true }
 filmcraft-export = { workspace = true }

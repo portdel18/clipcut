@@ -1,5 +1,6 @@
 //! Voice cleanup: Reduce noise takes steady hiss out of the gaps between words and leaves the voice;
-//! Enhance voice changes it; both are one undo step and follow the clip's sound.
+//! Enhance voice changes it; both are one undo step and follow the clip's sound. AI noise reduction
+//! (DeepFilterNet) takes the hiss out much further, in step with the picture.
 
 use std::path::PathBuf;
 use std::process::Command;
@@ -57,7 +58,7 @@ fn reduce_noise_quiets_the_gaps_and_keeps_the_voice() {
     let (gap0, word0) = (rms(&s, 3.6, 0.3), rms(&s, 3.1, 0.3));
 
     // the video clip's own sound gets it
-    s.set_voice(&[pic], Voice { noise: Some(80.0), enhance: None, high: false }, None).unwrap();
+    s.set_voice(&[pic], Voice { noise: Some(80.0), enhance: None, high: false, ai: false }, None).unwrap();
     let v = s.timeline();
     assert_eq!(v.undo_label.as_deref(), Some("Voice Cleanup"));
     assert_eq!(v.clips.iter().find(|c| c.id == snd).unwrap().props.voice.as_ref().and_then(|x| x.noise), Some(80.0));
@@ -66,14 +67,14 @@ fn reduce_noise_quiets_the_gaps_and_keeps_the_voice() {
     assert!(db(word1) > db(word0) - 3.0, "the voice: {:.1} dB → {:.1} dB", db(word0), db(word1));
 
     // Enhance voice on as well: the sound changes, Reduce noise stays
-    s.set_voice(&[snd], Voice { noise: Some(80.0), enhance: Some(100.0), high: true }, None).unwrap();
+    s.set_voice(&[snd], Voice { noise: Some(80.0), enhance: Some(100.0), high: true, ai: false }, None).unwrap();
     let x = s.timeline().clips.iter().find(|c| c.id == snd).unwrap().props.voice.clone().unwrap();
     assert_eq!((x.noise, x.enhance, x.tone), (Some(80.0), Some(100.0), "high"));
     assert!((db(rms(&s, 3.1, 0.3)) - db(word1)).abs() > 0.1, "Enhance voice changes the voice");
 
     // a dragged slider is one undo step; both off; undo brings them back
-    s.set_voice(&[snd], Voice { noise: Some(40.0), enhance: Some(100.0), high: true }, Some("noise")).unwrap();
-    s.set_voice(&[snd], Voice { noise: Some(30.0), enhance: Some(100.0), high: true }, Some("noise")).unwrap();
+    s.set_voice(&[snd], Voice { noise: Some(40.0), enhance: Some(100.0), high: true, ai: false }, Some("noise")).unwrap();
+    s.set_voice(&[snd], Voice { noise: Some(30.0), enhance: Some(100.0), high: true, ai: false }, Some("noise")).unwrap();
     s.set_voice(&[snd], Voice::default(), None).unwrap();
     assert_eq!(s.timeline().clips.iter().find(|c| c.id == snd).unwrap().props.voice.as_ref().map(|x| (x.noise, x.enhance)), Some((None, None)));
     assert!((db(rms(&s, 3.6, 0.3)) - db(gap0)).abs() < 0.5, "off: as it was");
@@ -82,5 +83,41 @@ fn reduce_noise_quiets_the_gaps_and_keeps_the_voice() {
     s.undo().unwrap();
     assert_eq!(s.timeline().clips.iter().find(|c| c.id == snd).unwrap().props.voice.as_ref().and_then(|x| x.noise), Some(80.0));
     // hostile numbers are refused
-    assert!(s.set_voice(&[snd], Voice { noise: Some(f64::NAN), enhance: None, high: false }, None).is_err());
+    assert!(s.set_voice(&[snd], Voice { noise: Some(f64::NAN), enhance: None, high: false, ai: false }, None).is_err());
+}
+
+#[test]
+fn ai_noise_reduction_takes_the_hiss_out_and_stays_in_step() {
+    let Some(path) = noisy() else { return };
+    let mut s = Studio::new();
+    s.add_clip(path.to_str().unwrap()).unwrap();
+    let v = s.timeline();
+    let snd = v.clips.iter().find(|c| c.track == "A1").unwrap().id;
+    let gap0 = rms(&s, 3.6, 0.3);
+
+    s.set_voice(&[snd], Voice { noise: Some(100.0), ai: true, ..Voice::default() }, None).unwrap();
+    let x = s.timeline().clips.iter().find(|c| c.id == snd).unwrap().props.voice.clone().unwrap();
+    assert_eq!((x.noise, x.ai), (Some(100.0), true));
+    let gap1 = rms(&s, 3.6, 0.3);
+    assert!(db(gap1) < db(gap0) - 20.0, "the hiss between words: {:.1} dB → {:.1} dB", db(gap0), db(gap1));
+    // the engine makes up for the model's look-ahead: at Strength 0 the sound is as it was, in step
+    let mix = |s: &Studio| {
+        let feed = s.audio_feed().unwrap();
+        let rate = feed.sample_rate as usize;
+        feed.mix(rate as i64 * 2, rate / 2).iter().step_by(2).copied().collect::<Vec<f32>>()
+    };
+    s.set_voice(&[snd], Voice::default(), None).unwrap();
+    let dry = mix(&s);
+    s.set_voice(&[snd], Voice { noise: Some(0.0), ai: true, ..Voice::default() }, None).unwrap();
+    let wet = mix(&s);
+    let err = dry.iter().zip(&wet).map(|(a, b)| f64::from(a - b).powi(2)).sum::<f64>();
+    let all = dry.iter().map(|a| f64::from(*a).powi(2)).sum::<f64>();
+    assert!(10.0 * (err / all).log10() < -20.0, "out of step or changed: {:.1} dB", 10.0 * (err / all).log10());
+
+    // Standard instead: the AI goes, the strength stays; undo brings the AI back
+    s.set_voice(&[snd], Voice { noise: Some(100.0), ai: false, ..Voice::default() }, None).unwrap();
+    let x = s.timeline().clips.iter().find(|c| c.id == snd).unwrap().props.voice.clone().unwrap();
+    assert_eq!((x.noise, x.ai), (Some(100.0), false));
+    s.undo().unwrap();
+    assert!(s.timeline().clips.iter().find(|c| c.id == snd).unwrap().props.voice.as_ref().is_some_and(|x| x.ai));
 }

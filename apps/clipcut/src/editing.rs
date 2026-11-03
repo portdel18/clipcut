@@ -941,6 +941,8 @@ pub async fn set_key(clips: Vec<u64>, key: Option<KeyArgs>, merge: Option<String
 #[derive(serde::Deserialize)]
 pub struct VoiceArgs {
     noise: Option<f64>,
+    #[serde(default)]
+    ai: bool,
     enhance: Option<f64>,
     #[serde(default)]
     high: bool,
@@ -949,7 +951,7 @@ pub struct VoiceArgs {
 /// Reduce noise and Enhance voice on the sound of `clips`.
 #[tauri::command]
 pub async fn set_voice(clips: Vec<u64>, voice: VoiceArgs, merge: Option<String>, app: tauri::State<'_, App>) -> Result<TimelineView, String> {
-    let v = clipcut_core::Voice { noise: voice.noise, enhance: voice.enhance, high: voice.high };
+    let v = clipcut_core::Voice { noise: voice.noise, ai: voice.ai, enhance: voice.enhance, high: voice.high };
     edit(&app, move |s| s.set_voice(&clips, v, merge.as_deref())).await
 }
 

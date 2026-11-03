@@ -8,6 +8,8 @@
 use super::{A_AMP, A_DELAY, A_FILTER, A_NOISE, A_REVERB, A_SPECIAL, A_STEREO, A_TIME, EffectDef, ParamDef, audio, b, ch, f, fs, grp};
 
 const A_MOD: &[&str] = &["Audio Effects", "Modulation"];
+/// Effects an application adds (not in the Effects panel's folders).
+const A_APP: &[&str] = &["Application"];
 /// Loose items at the end of the Audio Effects bin.
 const A_ROOT: &[&str] = &["Audio Effects"];
 
@@ -426,6 +428,9 @@ pub(super) fn defs() -> Vec<EffectDef> {
             vec![f("amount", "Amount", 50.0, 0.0, 100.0, "%"), fs("rt60", "Decay Time (RT60)", 0.8, (0.1, 5.0), (0.1, 3.0), "s", 2)],
         ),
         audio("speech_enhance", "Enhance Speech", A_NOISE, vec![f("mix", "Mix", 100.0, 0.0, 100.0, "%"), ch("tone", "Voice", &["Low Tone", "High Tone"], 0)]),
+        // a speech model an application registers (`filmcraft_audio_dsp::register_effect`); without
+        // it the clip plays as it is. Outside Premiere's bin.
+        audio("ai_denoise", "AI Noise Reduction", A_APP, vec![f("amount", "Amount", 100.0, 0.0, 100.0, "%")]),
         // ---- Reverb ----
         audio(
             "convolution_reverb",

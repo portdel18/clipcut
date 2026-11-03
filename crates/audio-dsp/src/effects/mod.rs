@@ -150,9 +150,27 @@ pub fn effects() -> &'static [EffectInfo] {
     REGISTRY
 }
 
-/// Look up an effect by id.
+/// Effects an application adds to the built-in ones ([`register_effect`]).
+fn added() -> &'static std::sync::RwLock<Vec<&'static EffectInfo>> {
+    static ADDED: std::sync::OnceLock<std::sync::RwLock<Vec<&'static EffectInfo>>> = std::sync::OnceLock::new();
+    ADDED.get_or_init(Default::default)
+}
+
+/// Adds an effect an application provides (one too heavy for the engine itself, such as a speech
+/// model), so clip effects and [`create_effect`] find it by id. A built-in id, or one added
+/// already, is not replaced: returns `false`.
+pub fn register_effect(info: EffectInfo) -> bool {
+    if effect_info(info.id).is_some() {
+        return false;
+    }
+    let mut v = added().write().unwrap_or_else(std::sync::PoisonError::into_inner);
+    v.push(Box::leak(Box::new(info)));
+    true
+}
+
+/// Look up an effect by id (built-in, or added with [`register_effect`]).
 pub fn effect_info(id: &str) -> Option<&'static EffectInfo> {
-    REGISTRY.iter().find(|e| e.id == id)
+    REGISTRY.iter().find(|e| e.id == id).or_else(|| added().read().unwrap_or_else(std::sync::PoisonError::into_inner).iter().copied().find(|e| e.id == id))
 }
 
 /// Instantiate an effect by id.
@@ -165,6 +183,21 @@ mod tests {
     use super::*;
     use crate::Unit;
     use crate::testutil::*;
+
+    #[test]
+    fn an_application_adds_an_effect_and_cannot_replace_one() {
+        fn quiet(_: f32, _: usize) -> Box<dyn AudioEffect> {
+            Box::new(Mute::new(48000.0, 2))
+        }
+        let info = |id: &'static str| EffectInfo { id, name: "Test", category: Category::Special, params: Mute::PARAMS, create: quiet };
+        assert!(effect_info("test_added_effect").is_none());
+        assert!(register_effect(info("test_added_effect")));
+        assert!(create_effect("test_added_effect", 48000.0, 2).is_some());
+        assert!(!register_effect(info("test_added_effect")), "added already");
+        assert!(!register_effect(info("denoise")), "built-in");
+        assert_eq!(effect_info("denoise").map(|e| e.name), Some("DeNoise"));
+        assert!(!effects().iter().any(|e| e.id == "test_added_effect"), "the built-in list stays as it is");
+    }
 
     const SR: f32 = 48000.0;
 
