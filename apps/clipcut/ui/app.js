@@ -548,8 +548,12 @@ function renderMedia() {
   }
   if (!sounds.children.length) sounds.innerHTML = '<p class="hint">No sound imported yet.</p>';
 }
-/* Proxies: small copies of the videos for smooth playback (exports use the originals) */
-const PX = { job: null };
+/* Proxies: small copies of the videos for smooth playback (exports use the originals). Heavy
+   videos (4K, 1080p at 60 fps...: MediaView.heavy) get theirs by themselves, one at a time, each
+   used as soon as it is made, unless "Make them by themselves" is off (clipcut.autoProxies). */
+const PX = { busy: false, job: null, item: null, auto: true, tried: new Set(), hevc: undefined };
+try { PX.auto = localStorage.getItem('clipcut.autoProxies') !== 'off'; } catch (_) { /* default */ }
+const mediaName = item => (S.tl.media.find(m => m.item === item) || {}).name || 'the video';
 function renderProxies() {
   const videos = S.tl.media.filter(m => m.kind === 'video');
   $('#proxies').hidden = !videos.length;
@@ -557,40 +561,84 @@ function renderProxies() {
   const have = videos.filter(m => m.proxy).length;
   $('#proxy-use').checked = S.tl.proxies;
   $('#proxy-use').disabled = !have;
-  $('#proxy-make').disabled = PX.job != null || have === videos.length;
-  if (PX.job == null) {
+  $('#proxy-auto').checked = PX.auto;
+  $('#proxy-make').disabled = PX.busy || have === videos.length;
+  if (!PX.busy) {
+    const heavy = videos.filter(m => m.heavy && !m.proxy).length;
     $('#proxy-note').textContent = have === videos.length ? 'Every video has a proxy.'
       : have ? `${have} of ${videos.length} videos have a proxy.`
+      : heavy ? 'These videos are big (4K or 60 fps): they play smoothly from proxies, small copies made in the background.'
       : 'Big or 4K videos play more smoothly from proxies: small copies made in the background.';
   }
+  hevcHint(videos);
+  autoProxies();
 }
-async function makeProxies() {
-  if (PX.job != null) return;
-  const missing = S.tl.media.filter(m => m.kind === 'video' && !m.proxy).map(m => m.item);
-  try { PX.job = await invoke('make_proxies', { items: missing }); } catch (e) { toast(e, true); return; }
+/** Says so when HEVC video can't be decoded by this computer's graphics card (Windows without
+ *  Microsoft's HEVC Video Extensions): it then plays from the processor, far too slowly at 4K. */
+async function hevcHint(videos) {
+  const el = $('#proxy-hevc');
+  const hevc = videos.some(m => m.codec === 'hevc');
+  if (hevc && PX.hevc === undefined) {
+    PX.hevc = null;
+    try { PX.hevc = await invoke('hevc_hardware'); } catch (_) { PX.hevc = null; }
+  }
+  el.hidden = !(hevc && PX.hevc === false);
+}
+/** Starts the next heavy video's proxy when nothing else is being made. */
+function autoProxies() {
+  if (!PX.auto || PX.busy) return;
+  const next = S.tl.media.find(m => m.kind === 'video' && m.heavy && !m.proxy && !m.unreadable && !PX.tried.has(m.item));
+  if (next) makeProxies([next.item], true);
+}
+async function makeProxies(items, auto = false) {
+  if (PX.busy) return;
+  const missing = items || S.tl.media.filter(m => m.kind === 'video' && !m.proxy).map(m => m.item);
+  if (!missing.length) return;
+  // taken before the first await: a redraw meanwhile must not start another
+  PX.busy = true;
+  missing.forEach(i => PX.tried.add(i));
+  PX.item = missing.length === 1 ? missing[0] : null;
+  try { PX.job = await invoke('make_proxies', { items: missing }); } catch (e) {
+    PX.busy = false;
+    PX.item = null;
+    if (!auto) toast(e, true);
+    return;
+  }
   $('#proxy-bar').hidden = false;
   renderProxies();
+  const what = PX.item != null ? `a proxy of ${mediaName(PX.item)}` : 'proxies';
+  let ok = false;
   for (;;) {
     await sleep(400);
     let st = null;
     try { st = await invoke('export_status', { job: PX.job }); } catch (_) { /* keep waiting */ }
     if (!st) break;
     $('#proxy-bar').firstChild.style.width = (st.progress * 100).toFixed(1) + '%';
-    $('#proxy-note').textContent = st.finished ? '' : `Making proxies… ${Math.floor(st.progress * 100)}%${st.status ? ' · ' + st.status : ''}`;
+    $('#proxy-note').textContent = st.finished ? '' : `Making ${what} so it plays smoothly… ${Math.floor(st.progress * 100)}%`;
     if (st.finished) {
-      if (st.error) toast(/cancel/i.test(st.error) ? 'The proxies were cancelled.' : `The proxies could not be made: ${st.error}`, true);
+      ok = !st.error;
+      if (st.error) toast(/cancel/i.test(st.error) ? 'The proxies were cancelled.' : `The proxy could not be made: ${st.error}`, true);
       break;
     }
   }
   PX.job = null;
+  PX.item = null;
+  PX.busy = false;
   $('#proxy-bar').hidden = true;
   const tl = await invoke('poll_jobs').catch(() => null);
   if (tl) {
     // made proxies are used straight away
     apply(tl);
-    if (!S.tl.proxies) await edit('set_proxies', { on: true });
-    toast('Proxies made: the videos now play from them. Exports still use the originals.');
+    if (ok && !S.tl.proxies) await edit('set_proxies', { on: true });
+    // another one already started (the redraw above), or about to
+    const waiting = PX.busy || (PX.auto && S.tl.media.some(m => m.kind === 'video' && m.heavy && !m.proxy && !PX.tried.has(m.item)));
+    if (ok && !waiting) toast('Proxies made: the videos now play smoothly from them. Exports still use the originals.');
   }
+  renderProxies();
+}
+function setAutoProxies(on) {
+  PX.auto = on;
+  try { localStorage.setItem('clipcut.autoProxies', on ? 'on' : 'off'); } catch (_) { /* remembered for this session */ }
   renderProxies();
 }
 
@@ -4435,7 +4483,8 @@ click('#tab-transitions', () => showTab('transitions'));
 click('#tab-graphics', () => openGraphics());
 click('#tab-filters', () => showTab('filters'));
 click('#tab-mixer', () => showTab('mixer'));
-click('#proxy-make', makeProxies);
+click('#proxy-make', () => makeProxies(null));
+$('#proxy-auto').addEventListener('change', e => setAutoProxies(e.target.checked));
 $('#proxy-use').addEventListener('change', e => edit('set_proxies', { on: e.target.checked }));
 // the player's quality is the viewer's own choice
 try { const q = localStorage.getItem('clipcut.quality'); if (q && [...$('#quality').options].some(o => o.value === q)) $('#quality').value = q; } catch (_) {}

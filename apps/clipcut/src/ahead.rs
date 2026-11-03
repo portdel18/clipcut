@@ -15,6 +15,15 @@ use clipcut_core::{Frame, FrameFeed};
 /// Frames rendered ahead of the playhead.
 const LOOKAHEAD: i64 = 8;
 
+/// Every how many frames the player renders one while playing at `speed` a sequence of `fps`:
+/// about 30 pictures a second whatever the speed (a 60 fps sequence shows every other frame,
+/// like a 30 fps one at 2×). The sound plays every sample either way.
+pub fn render_step(speed: f64, fps: f64) -> i64 {
+    let speed = if speed.is_finite() { speed.abs().clamp(0.25, 8.0) } else { 1.0 };
+    let per = if fps.is_finite() { (fps / 30.0).round().clamp(1.0, 8.0) } else { 1.0 };
+    (speed * per).ceil().clamp(1.0, 32.0) as i64
+}
+
 pub struct Ahead {
     feed: FrameFeed,
     frames: Mutex<BTreeMap<i64, Arc<Frame>>>,
@@ -39,7 +48,7 @@ impl Ahead {
             feed,
             frames: Mutex::default(),
             next: AtomicI64::new(first),
-            step: step.clamp(1, 8),
+            step: step.clamp(1, 32),
             head: AtomicI64::new(first),
             stop: AtomicBool::new(false),
             threads: Mutex::default(),
@@ -121,6 +130,24 @@ impl Drop for Ahead {
 mod tests {
     use super::*;
     use std::time::Instant;
+
+    #[test]
+    fn about_thirty_pictures_a_second() {
+        assert_eq!(render_step(1.0, 30.0), 1);
+        assert_eq!(render_step(1.0, 29.97), 1);
+        assert_eq!(render_step(1.0, 25.0), 1);
+        assert_eq!(render_step(1.0, 24.0), 1);
+        assert_eq!(render_step(1.0, 60.0), 2, "60 fps shows every other frame");
+        assert_eq!(render_step(1.0, 59.94), 2);
+        assert_eq!(render_step(1.0, 50.0), 2);
+        assert_eq!(render_step(1.0, 120.0), 4);
+        assert_eq!(render_step(2.0, 30.0), 2, "shuttle speeds as before");
+        assert_eq!(render_step(1.5, 30.0), 2);
+        assert_eq!(render_step(2.0, 60.0), 4);
+        assert_eq!(render_step(8.0, 120.0), 32);
+        assert_eq!(render_step(f64::NAN, f64::NAN), 1);
+        assert_eq!(render_step(-2.0, 0.0), 2);
+    }
 
     /// Plays three seconds of a 1080p clip on a 30 fps clock and counts the frames shown on time.
     #[test]

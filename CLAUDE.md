@@ -102,8 +102,15 @@ remote `upstream`). Read `README.md` for what it is and the roadmap.
 - The player's frames come from `FrameFeed` (`clipcut-core/src/preview.rs`: a project snapshot
   that renders on any thread at a scale snapped to 1, ½, ¼, ⅛ by `preview_scale`). While playing,
   `apps/clipcut/src/ahead.rs` renders ahead on 2–3 workers and `frame` serves from it without the
-  studio lock. Proxies are the engine's (`media.createProxies`); `Studio::poll` attaches finished
-  ones, and the Media panel calls it when the job ends.
+  studio lock. It draws about 30 pictures a second at any speed and frame rate (`render_step`: a
+  60 fps video shows every other frame while playing; the sound has every sample). Proxies are the
+  engine's (`media.createProxies`, beside the project, or in the data folder while it is unsaved,
+  never beside media on a slow drive); `Studio::poll` attaches finished ones, and the Media panel
+  calls it when the job ends. Heavy videos (`MediaView.heavy`, `heavy()`: 4K, or more than 1080p
+  at 30 fps) get one by themselves, one at a time (`autoProxies`, off with
+  `clipcut.autoProxies`), each used when made. Phone 4K 60 decoded on the processor runs at 5–12
+  fps (HEVC 10-bit the slowest); on Windows HEVC reaches the GPU only with Microsoft's HEVC Video
+  Extensions (`hevc_hardware`, the Media panel says so).
 - Graphics follow the video: opening Graphics calls `CS.hosted.setBackdrop` with the frame at the
   playhead (`graphic_backdrop`, which leaves out the graphic being changed), and after a Ratio
   change `offerRemake` re-renders graphics in the old shape through `CS.hosted.add` one by one

@@ -98,11 +98,12 @@ fn play(from: f64, max_width: Option<u32>, quality: Option<String>, speed: Optio
         let s = lock(&app.studio);
         (s.audio_feed().map_err(|e| e.to_string())?, s.info().map_err(|e| e.to_string())?.duration_seconds, s.frame_feed(max_width, &quality).ok())
     };
+    // about 30 pictures a second at any speed and frame rate (a 60 fps video shows every other
+    // frame while it plays): faster, the picture shows every second, third... frame
+    let step = frames.as_ref().map_or(1, |f| ahead::render_step(speed, f.fps()));
     // decoding is one frame at a time, so a few workers are enough: while one decodes, the others
     // finish the frames before (2 or 3, leaving a core for the sound and the window)
     let cores = std::thread::available_parallelism().map(usize::from).unwrap_or(2);
-    // faster, the picture shows every second, third... frame: as many renders a second as at 1×
-    let step = speed.ceil() as i64;
     let ahead = frames.map(|f| ahead::Ahead::start(f, from, cores.saturating_sub(1).clamp(2, 3), step, max_width, &quality));
     lock(&app.player).play(feed, from, end, speed, ahead);
     Ok(())
@@ -113,6 +114,31 @@ fn pause(app: tauri::State<'_, App>) -> playback::State {
     let mut p = lock(&app.player);
     p.stop();
     p.state()
+}
+
+/// Whether this computer's graphics card can decode HEVC (H.265) video: on Windows that needs
+/// a Media Foundation HEVC decoder (Microsoft's HEVC Video Extensions) and a GPU that lists HEVC.
+/// `None` where ClipCut can't tell (other systems); without it, 4K HEVC decodes on the processor.
+#[tauri::command]
+async fn hevc_hardware() -> Option<bool> {
+    #[cfg(target_os = "windows")]
+    {
+        let caps =
+            tauri::async_runtime::spawn_blocking(|| std::panic::catch_unwind(filmcraft_platform::media_foundation::capabilities).ok()).await.ok().flatten()?;
+        Some(hevc_listed(&caps))
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        None
+    }
+}
+
+/// Whether Media Foundation's capability report (`media_foundation::capabilities`) lists an HEVC
+/// decoder and the GPU's HEVC profile.
+#[cfg_attr(not(target_os = "windows"), allow(dead_code))]
+fn hevc_listed(caps: &str) -> bool {
+    let line = |name: &str| caps.lines().find_map(|l| l.strip_prefix(name)).map(|v| v.trim().to_string());
+    line("HEVC decoder MFTs:").is_some_and(|v| !v.is_empty() && v != "none") && line("DXVA HEVC Main:").as_deref() == Some("true")
 }
 
 #[tauri::command]
@@ -510,6 +536,7 @@ fn main() {
             editing::save_title,
             editing::remove_title,
             editing::make_proxies,
+            hevc_hardware,
             editing::poll_jobs,
             editing::set_proxies,
             editing::props_at,
@@ -589,5 +616,24 @@ fn main() {
     if let Err(e) = built {
         eprintln!("ClipCut could not start: {e}");
         std::process::exit(1);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::hevc_listed;
+
+    #[test]
+    fn hevc_needs_a_decoder_and_the_gpu_profile() {
+        let report = |mfts: &str, main: bool| {
+            format!(
+                "adapter: Intel(R) UHD Graphics\nH.264 decoder MFTs: Microsoft H264 Video Decoder MFT\nHEVC decoder MFTs: {mfts}\nDXVA H.264 VLD: true\nDXVA HEVC Main: {main}\nDXVA HEVC Main 10: {main}\n"
+            )
+        };
+        assert!(hevc_listed(&report("Microsoft H265 Video Decoder MFT", true)));
+        assert!(!hevc_listed(&report("none", true)), "no HEVC Video Extensions");
+        assert!(!hevc_listed(&report("Microsoft H265 Video Decoder MFT", false)), "a GPU without HEVC");
+        assert!(!hevc_listed("no Media Foundation / Direct3D 11 video device: E_FAIL"));
+        assert!(!hevc_listed(""));
     }
 }

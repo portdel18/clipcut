@@ -125,7 +125,8 @@ impl Studio {
 
 impl Studio {
     /// Starts making proxies of the video media `items` (all video when empty): small ProRes
-    /// copies, about 960 pixels wide, in the project's folder. Returns the export-style job id;
+    /// copies, about 960 pixels wide, in the project's folder (ClipCut's data folder while the
+    /// project isn't saved). Returns the export-style job id;
     /// [`Studio::poll`] attaches them when the job finishes.
     pub fn make_proxies(&mut self, items: &[u64]) -> Result<u64> {
         let p = &self.session.project;
@@ -144,7 +145,15 @@ impl Studio {
         // 4K and up at a quarter, the rest at half: about 960 wide either way
         let preset = if videos.iter().any(|(_, w)| *w >= 2560) { "prores_proxy_quarter" } else { "prores_proxy_half" };
         let mut q = serde_json::json!({"items": videos.iter().map(|(i, _)| i).collect::<Vec<_>>(), "preset": preset});
-        if let Some(dir) = self.session.path.as_deref().and_then(|p| std::path::Path::new(p).parent()) {
+        // beside the project when it is saved, else in ClipCut's own folder on this computer (not
+        // next to the media, which may be on a slow or removable drive)
+        let dir = self
+            .session
+            .path
+            .as_deref()
+            .and_then(|p| std::path::Path::new(p).parent())
+            .or_else(|| self.session.prefs_path.as_deref().and_then(std::path::Path::parent));
+        if let Some(dir) = dir {
             q["destination"] = serde_json::json!(dir.join("Proxies").to_string_lossy());
         }
         let r = self.session.execute("media.createProxies", q).map_err(engine)?;
