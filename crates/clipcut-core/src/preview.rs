@@ -123,8 +123,9 @@ impl Studio {
     }
 }
 
-/// A video media file for the Playback check: where it is, what it is, and its source (the
-/// original, never a proxy), to read and decode from any thread without the studio.
+/// A video media file for the Playback check: where it is, what it is, and a source of its own
+/// (the original file opened afresh, never a proxy or the player's cached one), to read and decode
+/// from any thread without the studio.
 pub struct MediaProbe {
     pub name: String,
     pub path: String,
@@ -142,17 +143,17 @@ impl Studio {
             .filter_map(|i| {
                 let m = i.as_media()?;
                 let filmcraft_project::MediaRef::File { path } = &m.media else { return None };
-                (m.info.kind == filmcraft_media::MediaKind::Movie && m.info.video.is_some())
-                    .then(|| (i.created, i.id, i.name.clone(), path.clone(), m.info.clone()))
+                (m.info.kind == filmcraft_media::MediaKind::Movie && m.info.video.is_some()).then(|| (i.created, i.name.clone(), path.clone(), m.info.clone()))
             })
             .collect();
         items.sort_by_key(|(created, ..)| *created);
         items
             .into_iter()
-            .filter_map(|(_, id, name, path, info)| {
+            .filter_map(|(_, name, path, info)| {
                 // the file the engine actually reads (relinked, followed)
                 let path = self.session.media.follow(&path).unwrap_or(path);
-                let source = self.session.media.full_res_source(p, id, &*self.session.services)?;
+                // a fresh copy of the file, not the player's: its cache would hide the decoding
+                let source = self.session.media.open_file(&path, &*self.session.services).ok()?;
                 Some(MediaProbe { name, path, info, source })
             })
             .take(max)

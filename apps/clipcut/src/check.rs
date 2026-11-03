@@ -215,7 +215,7 @@ pub fn run(probes: &[MediaProbe], caps: Option<&str>) -> Report {
                 let slow = seq < need * 2.0 || jump > 30.0;
                 ok &= !slow;
                 findings.push(format!(
-                    "Drive: reads {seq:.0} MB a second (the video needs {need:.0}); jumping within the file takes {jump:.0} ms{}",
+                    "Drive: reads {seq:.0} MB a second (the video needs {need:.1}); jumping within the file takes {jump:.1} ms{}",
                     if slow { ", too slow for smooth playback." } else { ", fast enough." }
                 ));
             }
@@ -275,12 +275,18 @@ mod tests {
         }
         let mut s = clipcut_core::Studio::new();
         s.add_clip(out.to_str().unwrap()).unwrap();
+        // the player has shown these frames: the check must not count its cached ones
+        for k in 0..90 {
+            let _ = s.preview_frame(f64::from(k) / 30.0, 640, "auto");
+        }
         let r = run(&s.media_probes(8), Some("adapter: Test GPU"));
         let _ = std::fs::remove_file(&out);
         assert_eq!(r.videos.len(), 1);
         let v = &r.videos[0];
         assert!(v.findings.iter().any(|f| f.starts_with("Your processor decodes it") || f.starts_with("Your graphics card decodes it")), "{v:?}");
-        assert!(v.findings.iter().any(|f| f.starts_with("Decoding: ")), "{v:?}");
+        // decoded for real, not served from the player's cache (which once read 1.4 million fps)
+        let fps: f64 = v.findings.iter().find_map(|f| f.strip_prefix("Decoding: ")?.split(' ').next()?.parse().ok()).unwrap();
+        assert!(fps > 0.0 && fps < 20_000.0, "{fps} frames a second");
         assert!(v.findings.iter().any(|f| f.starts_with("Drive: reads")), "{v:?}");
         assert!(
             r.text.contains("playback check") && r.text.contains("adapter: Test GPU") && r.text.contains("640x360") && r.text.contains("30.00 fps"),
