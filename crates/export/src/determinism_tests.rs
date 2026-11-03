@@ -275,6 +275,34 @@ fn a_batch_rendered_ahead_with_missing_media_is_never_encoded() {
 }
 
 #[test]
+fn a_paused_job_waits_between_frames_and_carries_on() {
+    let s = ExportSettings { format: Format::Mjpeg, path: tmp("pause.mov"), ..Default::default() };
+    let (p, seq, m) = project();
+    let prog = std::sync::Arc::new(Progress::default());
+    let mut ex = Exporter::new(p, seq, &s, &prog).unwrap();
+    ex.set_batch(2);
+    assert!(matches!(ex.step(&m, &prog).unwrap(), Step::Progress));
+    let done = prog.done.load(Ordering::Relaxed);
+    prog.paused.store(true, Ordering::Relaxed);
+    let resume = {
+        let prog = prog.clone();
+        std::thread::spawn(move || {
+            std::thread::sleep(std::time::Duration::from_millis(300));
+            assert_eq!(prog.done.load(Ordering::Relaxed), done, "nothing was made while paused");
+            prog.paused.store(false, Ordering::Relaxed);
+        })
+    };
+    let t0 = std::time::Instant::now();
+    assert!(matches!(ex.step(&m, &prog).unwrap(), Step::Progress | Step::Pending));
+    assert!(t0.elapsed() >= std::time::Duration::from_millis(250), "the step waited while paused");
+    resume.join().unwrap();
+    // a paused job can still be cancelled
+    prog.paused.store(true, Ordering::Relaxed);
+    prog.cancel.store(true, Ordering::Relaxed);
+    assert!(matches!(ex.step(&m, &prog), Err(ExportError::Cancelled)));
+}
+
+#[test]
 fn cancelling_drops_the_batch_rendered_ahead() {
     let s = ExportSettings { format: Format::Mjpeg, path: tmp("cancel.mov"), ..Default::default() };
     let (p, seq, m) = project();

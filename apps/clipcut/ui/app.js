@@ -551,7 +551,7 @@ function renderMedia() {
 /* Proxies: small copies of the videos for smooth playback (exports use the originals). Heavy
    videos (4K, 1080p at 60 fps...: MediaView.heavy) get theirs by themselves, one at a time, each
    used as soon as it is made, unless "Make them by themselves" is off (clipcut.autoProxies). */
-const PX = { busy: false, job: null, item: null, auto: true, tried: new Set(), hevc: undefined };
+const PX = { busy: false, job: null, item: null, auto: true, tried: new Set(), hevc: undefined, held: false, checking: false };
 try { PX.auto = localStorage.getItem('clipcut.autoProxies') !== 'off'; } catch (_) { /* default */ }
 const mediaName = item => (S.tl.media.find(m => m.item === item) || {}).name || 'the video';
 function renderProxies() {
@@ -613,8 +613,16 @@ async function makeProxies(items, auto = false) {
     let st = null;
     try { st = await invoke('export_status', { job: PX.job }); } catch (_) { /* keep waiting */ }
     if (!st) break;
+    // the processor goes to playback (and the playback check): the proxy waits meanwhile
+    const hold = S.playing || PX.checking;
+    if (hold !== PX.held && !st.finished) {
+      PX.held = hold;
+      invoke('pause_job', { job: PX.job, on: hold }).catch(() => {});
+    }
     $('#proxy-bar').firstChild.style.width = (st.progress * 100).toFixed(1) + '%';
-    $('#proxy-note').textContent = st.finished ? '' : `Making ${what} so it plays smoothly… ${Math.floor(st.progress * 100)}%`;
+    $('#proxy-note').textContent = st.finished ? ''
+      : hold ? `Making ${what} waits while the video plays (${Math.floor(st.progress * 100)}% done)`
+      : `Making ${what} so it plays smoothly… ${Math.floor(st.progress * 100)}%`;
     if (st.finished) {
       ok = !st.error;
       if (st.error) toast(/cancel/i.test(st.error) ? 'The proxies were cancelled.' : `The proxy could not be made: ${st.error}`, true);
@@ -623,6 +631,7 @@ async function makeProxies(items, auto = false) {
   }
   PX.job = null;
   PX.item = null;
+  PX.held = false;
   PX.busy = false;
   $('#proxy-bar').hidden = true;
   const tl = await invoke('poll_jobs').catch(() => null);
@@ -636,6 +645,44 @@ async function makeProxies(items, auto = false) {
   }
   renderProxies();
 }
+/* Check playback: on this computer, which decoder each video gets (the graphics card or the
+   processor, and why), how fast it decodes and how fast its drive reads it (check.rs). The
+   report can be copied to send along. */
+async function checkPlayback() {
+  const dlg = $('#check-dlg');
+  const body = $('#check-body');
+  body.innerHTML = '<p class="meta">Testing each video on this computer: a few seconds each…</p>';
+  $('#check-copy').disabled = true;
+  $('#check-text').value = '';
+  if (!dlg.open) dlg.showModal();
+  if (S.playing) await pause();
+  PX.checking = true;
+  let r = null;
+  try { r = await invoke('playback_check'); } catch (e) { body.innerHTML = ''; const p = document.createElement('p'); p.className = 'meta'; p.textContent = String(e); body.appendChild(p); }
+  PX.checking = false;
+  if (!r) return;
+  body.innerHTML = '';
+  for (const v of r.videos) {
+    const h = document.createElement('h3');
+    h.textContent = `${v.ok ? '✓' : '✗'} ${v.name}`;
+    h.className = v.ok ? 'ok' : 'bad';
+    body.appendChild(h);
+    const ul = document.createElement('ul');
+    for (const f of v.findings) { const li = document.createElement('li'); li.textContent = f; ul.appendChild(li); }
+    body.appendChild(ul);
+  }
+  if (!r.videos.length) body.innerHTML = '<p class="meta">There are no videos in this project to check.</p>';
+  $('#check-text').value = r.text;
+  $('#check-copy').disabled = false;
+}
+async function copyCheck() {
+  const box = $('#check-text');
+  try { await navigator.clipboard.writeText(box.value); toast('The report is copied: paste it in your message.'); return; } catch (_) { /* below */ }
+  box.hidden = false;
+  box.select();
+  try { document.execCommand('copy'); toast('The report is copied: paste it in your message.'); } catch (_) { toast('Select the report and copy it with Ctrl+C.', true); }
+}
+
 function setAutoProxies(on) {
   PX.auto = on;
   try { localStorage.setItem('clipcut.autoProxies', on ? 'on' : 'off'); } catch (_) { /* remembered for this session */ }
@@ -4484,6 +4531,9 @@ click('#tab-graphics', () => openGraphics());
 click('#tab-filters', () => showTab('filters'));
 click('#tab-mixer', () => showTab('mixer'));
 click('#proxy-make', () => makeProxies(null));
+click('#proxy-check', checkPlayback);
+click('#check-copy', copyCheck);
+click('#check-close', () => $('#check-dlg').close());
 $('#proxy-auto').addEventListener('change', e => setAutoProxies(e.target.checked));
 $('#proxy-use').addEventListener('change', e => edit('set_proxies', { on: e.target.checked }));
 // the player's quality is the viewer's own choice

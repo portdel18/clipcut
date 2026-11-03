@@ -140,6 +140,9 @@ pub fn transcode(
             as u32,
         part_of_batch: true,
         prores_profile: preset.prores.to_string(),
+        // a proxy shrinks 4K: on the GPU when there is one (colour conversion and scaling), so
+        // making it leaves the processor to the person editing; the CPU renders the same otherwise
+        gpu_rendering: filmcraft_export::GpuRendering::Auto,
         ..Default::default()
     };
     let project = Arc::new(p);

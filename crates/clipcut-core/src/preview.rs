@@ -123,7 +123,42 @@ impl Studio {
     }
 }
 
+/// A video media file for the Playback check: where it is, what it is, and its source (the
+/// original, never a proxy), to read and decode from any thread without the studio.
+pub struct MediaProbe {
+    pub name: String,
+    pub path: String,
+    pub info: filmcraft_media::MediaInfo,
+    pub source: filmcraft_media::SharedSource,
+}
+
 impl Studio {
+    /// The video media files in the project, for the Playback check (at most `max`).
+    pub fn media_probes(&self, max: usize) -> Vec<MediaProbe> {
+        let p = &self.session.project;
+        let mut items: Vec<_> = p
+            .items
+            .values()
+            .filter_map(|i| {
+                let m = i.as_media()?;
+                let filmcraft_project::MediaRef::File { path } = &m.media else { return None };
+                (m.info.kind == filmcraft_media::MediaKind::Movie && m.info.video.is_some())
+                    .then(|| (i.created, i.id, i.name.clone(), path.clone(), m.info.clone()))
+            })
+            .collect();
+        items.sort_by_key(|(created, ..)| *created);
+        items
+            .into_iter()
+            .filter_map(|(_, id, name, path, info)| {
+                // the file the engine actually reads (relinked, followed)
+                let path = self.session.media.follow(&path).unwrap_or(path);
+                let source = self.session.media.full_res_source(p, id, &*self.session.services)?;
+                Some(MediaProbe { name, path, info, source })
+            })
+            .take(max)
+            .collect()
+    }
+
     /// Starts making proxies of the video media `items` (all video when empty): small ProRes
     /// copies, about 960 pixels wide, in the project's folder (ClipCut's data folder while the
     /// project isn't saved). Returns the export-style job id;
