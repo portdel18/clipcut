@@ -8,7 +8,7 @@ use std::io::{Read, Seek, SeekFrom};
 use std::sync::{Mutex, PoisonError};
 use std::time::{Duration, Instant};
 
-use clipcut_core::MediaProbe;
+use clipcut_core::{FrameFeed, MediaProbe};
 use filmcraft_time::Tick;
 use serde::Serialize;
 
@@ -142,6 +142,36 @@ fn decode(p: &MediaProbe) -> Decode {
     })
 }
 
+/// The player at work on `p`'s clip on the timeline (`span`, seconds): up to 2 seconds of its
+/// middle drawn as playback draws it (draft, every `render_step`-th frame, 3 workers). Returns the
+/// pictures drawn a second and the pictures a second the player shows there.
+fn player(feed: &FrameFeed, span: (f64, f64)) -> (f64, f64) {
+    let (start, end) = span;
+    let t0 = start.max((start + end) / 2.0 - 1.0);
+    let step = crate::ahead::render_step(1.0, feed.fps());
+    let (first, last) = (feed.frame_at(t0), feed.frame_at(end.min(t0 + 2.0)));
+    let next = std::sync::atomic::AtomicI64::new(first);
+    let drawn = std::sync::atomic::AtomicU32::new(0);
+    let t = Instant::now();
+    std::thread::scope(|sc| {
+        for _ in 0..3 {
+            sc.spawn(|| {
+                while t.elapsed() < Duration::from_secs(10) {
+                    let k = next.fetch_add(step, std::sync::atomic::Ordering::Relaxed);
+                    if k >= last {
+                        break;
+                    }
+                    if feed.render(k, true).is_ok() {
+                        drawn.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                    }
+                }
+            });
+        }
+    });
+    let shown = feed.fps() / step as f64;
+    (f64::from(drawn.into_inner()) / t.elapsed().as_secs_f64().max(1e-6), shown)
+}
+
 fn colour_words(p: &MediaProbe) -> String {
     let Some(v) = p.info.video.as_ref() else { return String::new() };
     let tf = format!("{:?}", v.color.transfer).to_lowercase();
@@ -158,7 +188,7 @@ fn colour_words(p: &MediaProbe) -> String {
 
 /// Checks each of `probes` (blocking: a few seconds each). `caps` is the system's decoder report
 /// (Windows: Media Foundation's capabilities); `version` is ClipCut's, as installed.
-pub fn run(probes: &[MediaProbe], caps: Option<&str>, version: &str) -> Report {
+pub fn run(probes: &[MediaProbe], caps: Option<&str>, version: &str, feed: Option<&FrameFeed>) -> Report {
     let mut videos = Vec::new();
     let mut text = format!(
         "ClipCut {version} playback check\nSystem: {} {}\nHardware decoding: {}\n",
@@ -178,6 +208,8 @@ pub fn run(probes: &[MediaProbe], caps: Option<&str>, version: &str) -> Report {
         let need = size as f64 / 1e6 / secs;
         let disk = drive(&p.path, size);
         let d = decode(p);
+        // the whole player (decoding, colour, drawing), where the video is on the timeline
+        let drawn = feed.zip(p.on_timeline).map(|(f, span)| player(f, span));
         let notes = decoder_notes();
         let mut findings = Vec::new();
         let mut ok = true;
@@ -220,11 +252,27 @@ pub fn run(probes: &[MediaProbe], caps: Option<&str>, version: &str) -> Report {
             }
             None => findings.push("Drive: ClipCut couldn't read the file to measure it.".into()),
         }
-        if ok {
-            findings.push("Decoding and the drive keep up: if it still stutters, the slowdown is in drawing the picture. Send this report.".into());
+        // the player as a whole: decoding, the colour conversion (HDR to normal) and drawing
+        match drawn {
+            Some((pps, shown)) => {
+                let keeps_up = pps >= shown * 0.95;
+                if ok && !keeps_up {
+                    findings.push(format!(
+                        "Player: draws {pps:.0} pictures a second where it shows {shown:.0}: decoding and the drive keep up, so drawing the picture (and its HDR colour) is what slows it."
+                    ));
+                } else {
+                    findings.push(format!(
+                        "Player: draws {pps:.0} pictures a second where it shows {shown:.0}{}",
+                        if keeps_up { ", so it plays smoothly." } else { "." }
+                    ));
+                }
+                ok &= keeps_up;
+            }
+            None if feed.is_some() => findings.push("Player: not timed (the video isn't on the timeline).".into()),
+            None => {}
         }
         text += &format!(
-            "\n{}\n  {what}, {w}x{h}, {fps:.2} fps, {:.0} MB, {secs:.1} s, {need:.1} MB/s\n  file: {}\n  decode: first frame {:.0} ms, then {:.1} fps over {} frames, {} by the graphics card{}\n  drive: {}\n",
+            "\n{}\n  {what}, {w}x{h}, {fps:.2} fps, {:.0} MB, {secs:.1} s, {need:.1} MB/s\n  file: {}\n  decode: first frame {:.0} ms, then {:.1} fps over {} frames, {} by the graphics card{}\n  drive: {}\n  player: {}\n",
             p.name,
             size as f64 / 1e6,
             p.path,
@@ -234,6 +282,7 @@ pub fn run(probes: &[MediaProbe], caps: Option<&str>, version: &str) -> Report {
             d.by_gpu,
             d.error.as_ref().map(|e| format!(", error: {e}")).unwrap_or_default(),
             disk.map(|(s, j)| format!("{s:.0} MB/s, {j:.1} ms a jump")).unwrap_or_else(|| "not measured".into()),
+            drawn.map(|(d, s)| format!("{d:.1} pictures a second drawn, {s:.0} shown")).unwrap_or_else(|| "not timed".into()),
         );
         if !notes.is_empty() {
             text += &format!("  decoder notes: {}\n", notes.join(" | "));
@@ -278,7 +327,8 @@ mod tests {
         for k in 0..90 {
             let _ = s.preview_frame(f64::from(k) / 30.0, 640, "auto");
         }
-        let r = run(&s.media_probes(8), Some("adapter: Test GPU"), "0.4.6");
+        let feed = s.frame_feed(320, "auto").ok();
+        let r = run(&s.media_probes(8), Some("adapter: Test GPU"), "0.4.6", feed.as_ref());
         let _ = std::fs::remove_file(&out);
         assert_eq!(r.videos.len(), 1);
         let v = &r.videos[0];
@@ -295,7 +345,9 @@ mod tests {
             "{}",
             r.text
         );
-        assert!(run(&[], None, "0.4.6").text.contains("No videos"));
+        assert!(v.findings.iter().any(|f| f.starts_with("Player: draws")), "{v:?}");
+        assert!(r.text.contains("pictures a second drawn, 30 shown"), "{}", r.text);
+        assert!(run(&[], None, "0.4.6", None).text.contains("No videos"));
     }
 
     #[test]

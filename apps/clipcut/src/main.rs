@@ -132,13 +132,17 @@ fn decoder_caps() -> Option<String> {
 /// Check playback: which decoder each video gets and why, its decoding speed and its drive's,
 /// measured here (a few seconds a video, at most 8 videos).
 #[tauri::command]
-async fn playback_check(handle: tauri::AppHandle, app: tauri::State<'_, App>) -> Result<check::Report, String> {
-    let probes = lock(&app.studio).media_probes(8);
+async fn playback_check(max_width: Option<u32>, handle: tauri::AppHandle, app: tauri::State<'_, App>) -> Result<check::Report, String> {
+    // the player as it is now: its size, at automatic quality
+    let (probes, feed) = {
+        let s = lock(&app.studio);
+        (s.media_probes(8), s.frame_feed(max_width.unwrap_or(960).clamp(16, 7680), "auto").ok())
+    };
     // the installed version (the release stamps it), not the crate's
     let version = handle.package_info().version.to_string();
     blocking(move || {
         let caps = decoder_caps();
-        std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| check::run(&probes, caps.as_deref(), &version)))
+        std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| check::run(&probes, caps.as_deref(), &version, feed.as_ref())))
             .map_err(|_| "the playback check failed; please try again".to_string())
     })
     .await

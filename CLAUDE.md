@@ -123,7 +123,12 @@ remote `upstream`). Read `README.md` for what it is and the roadmap.
   back at half size each way (`biplanar::to_frame_halved`, marked draft so exports and stills
   never get them; `HybridDecoder::set_draft` reaches the hardware decoder; `GopCache::finish`
   scales a clean-aperture crop for them, `region_within`), and logs its decode / copy back /
-  convert time per picture every 240 pictures, which the report's decoder notes show.
+  convert time per picture every 240 pictures, which the report's decoder notes show. The
+  second report: decode 57 fps (decode 1.2–2.8 ms, copy back 2.3 ms, convert 5–7 ms a picture)
+  but playback still choppy. The check also times the whole player now (`check::player`: the
+  timeline's frames at the player's size, draft, `render_step`, 3 workers) against the pictures a
+  second it shows. HLG conversion to SDR was measured right (exact BT.2100 bars: within 2 %,
+  export = player); a duller look next to the phone is HDR shown as HDR there.
 - Graphics follow the video: opening Graphics calls `CS.hosted.setBackdrop` with the frame at the
   playhead (`graphic_backdrop`, which leaves out the graphic being changed), and after a Ratio
   change `offerRemake` re-renders graphics in the old shape through `CS.hosted.add` one by one
@@ -206,6 +211,12 @@ remote `upstream`). Read `README.md` for what it is and the roadmap.
   exported like any other. The model isn't `Send`: each effect leases a worker thread from a small
   pool (`lease`), which starts from a clone of the loaded model. 48 kHz, 1 or 2 channels only;
   anything else passes through. Its latency is a 480-sample frame plus the model's 1440.
+  The engine reuses a clip's effect chain only for a request that starts where the last one ended
+  (`audio_fx::process`); any other request builds the chain again with its warm-up (0.5 s of
+  sound through the AI model, 1 s for DeNoise). The player reads a little past each chunk to
+  interpolate, so `playback.rs` keeps that overlap itself (`Held`) and asks the mix only for new
+  samples: overlapping reads once made AI noise reduction mix at 0.2× real time and slowed the
+  whole player.
 - Waveforms are drawn as loud as they will play (clip and lane volume, `playGain`); past full
   scale their bars get red edges (`--sound-loud`), and the Sound panel says by how much, with
   Lower to fit (`loudHint`, `overBy`).
