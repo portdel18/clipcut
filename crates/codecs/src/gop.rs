@@ -17,6 +17,19 @@ use filmcraft_frame::{Region, VideoFrame};
 use crate::CodecError;
 use crate::video::VideoDecoder;
 
+/// Crop region `r`, in the stream's full-size pixels, for a draft picture a decoder delivered
+/// smaller than that (a hardware decoder reads 4K back at half size for playback): divided by the
+/// power of two that makes it fit `w × h`.
+fn region_within(r: Region, w: u32, h: u32) -> Region {
+    let (w, h) = (w as usize, h as usize);
+    let fits = |k: usize| r.x.saturating_add(r.w).div_ceil(k) <= w && r.y.saturating_add(r.h).div_ceil(k) <= h;
+    let mut k = 1usize;
+    while k < 16 && !fits(k) {
+        k *= 2;
+    }
+    if k == 1 { r } else { Region { x: r.x / k, y: r.y / k, w: r.w.div_ceil(k), h: r.h.div_ceil(k) } }
+}
+
 /// Process-wide decode counters of every [`GopCache`] (benchmarks and diagnostics).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct GopStats {
@@ -538,20 +551,20 @@ impl GopCache {
 
     /// Colour signalled by the container wins over the bitstream's (YUV frames only); the
     /// container's clean aperture and then its display rotation are applied.
-    fn finish(&self, mut f: VideoFrame) -> VideoFrame {
+    fn finish(&self, mut f: VideoFrame, draft: bool) -> VideoFrame {
         if let Some(c) = self.explicit_color
             && !matches!(f.data, filmcraft_frame::PixelData::Rgba8(_) | filmcraft_frame::PixelData::RgbaF32(_))
         {
             f.color = c;
         }
         if let Some(r) = self.crop {
-            f = f.cropped(r);
+            f = f.cropped(if draft { region_within(r, f.width, f.height) } else { r });
         }
         if self.rotation != 0 { f.rotated(self.rotation) } else { f }
     }
 
     fn store(&self, st: &mut State, pts: i64, f: VideoFrame, draft: bool) {
-        self.store_finished(st, pts, self.finish(f), draft);
+        self.store_finished(st, pts, self.finish(f, draft), draft);
     }
 
     /// Cache a frame [`Self::finish`] has been applied to.
@@ -780,9 +793,9 @@ impl GopCache {
             .into_iter()
             .filter(|p| p.pts <= want_pts)
             .max_by_key(|p| p.pts)
-            .map(|p| p.frame)
+            .map(|p| (p.frame, p.draft))
             .ok_or_else(|| CodecError::Decode("frame not produced".into()))?;
-        Ok(Arc::new(self.finish(f)))
+        Ok(Arc::new(self.finish(f.0, f.1)))
     }
 
     /// Decode with `d` (positioned at `next`) until the picture with `want_pts` (sample `i`) comes out.
@@ -851,7 +864,7 @@ impl GopCache {
         // crop and rotate before taking the lock: that work runs on rayon (see `isolated`)
         let res = res.map(|out| {
             count_frames(&out);
-            out.into_iter().map(|d| (d.pts, self.finish(d.frame), d.draft)).collect::<Vec<_>>()
+            out.into_iter().map(|d| (d.pts, self.finish(d.frame, d.draft), d.draft)).collect::<Vec<_>>()
         });
         let mut st = self.shared.state.lock().unwrap_or_else(|e| e.into_inner());
         if st.spare.len() < 16 {
@@ -867,6 +880,18 @@ impl GopCache {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_crop_fits_a_draft_picture_read_back_at_half_size() {
+        let r = Region { x: 8, y: 4, w: 3824, h: 2152 };
+        assert_eq!(region_within(r, 3840, 2160), r, "a full-size picture keeps it");
+        assert_eq!(region_within(r, 1920, 1080), Region { x: 4, y: 2, w: 1912, h: 1076 });
+        assert_eq!(region_within(r, 960, 540), Region { x: 2, y: 1, w: 956, h: 538 });
+        // hostile numbers don't overflow or loop
+        let wild = Region { x: usize::MAX, y: usize::MAX, w: usize::MAX, h: usize::MAX };
+        let _ = region_within(wild, 1, 1);
+        let _ = region_within(r, 0, 0);
+    }
     use crate::video::DecodedFrame;
     use std::collections::VecDeque;
 

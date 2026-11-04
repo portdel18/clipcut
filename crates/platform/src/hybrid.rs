@@ -245,6 +245,10 @@ impl VideoDecoder for HybridDecoder {
 
     fn set_draft(&mut self, on: bool) {
         self.draft = on;
+        // the hardware decoder too: it reads big pictures back at half size for draft playback
+        if let Some(hw) = self.hw.as_mut() {
+            hw.set_draft(on);
+        }
         if let Some(sw) = self.sw.as_mut() {
             sw.set_draft(on);
         }
