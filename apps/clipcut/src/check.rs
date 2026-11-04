@@ -157,12 +157,11 @@ fn colour_words(p: &MediaProbe) -> String {
 }
 
 /// Checks each of `probes` (blocking: a few seconds each). `caps` is the system's decoder report
-/// (Windows: Media Foundation's capabilities).
-pub fn run(probes: &[MediaProbe], caps: Option<&str>) -> Report {
+/// (Windows: Media Foundation's capabilities); `version` is ClipCut's, as installed.
+pub fn run(probes: &[MediaProbe], caps: Option<&str>, version: &str) -> Report {
     let mut videos = Vec::new();
     let mut text = format!(
-        "ClipCut {} playback check\nSystem: {} {}\nHardware decoding: {}\n",
-        env!("CARGO_PKG_VERSION"),
+        "ClipCut {version} playback check\nSystem: {} {}\nHardware decoding: {}\n",
         std::env::consts::OS,
         std::env::consts::ARCH,
         filmcraft_codecs::hw::hw_backend().unwrap_or("none registered"),
@@ -279,7 +278,7 @@ mod tests {
         for k in 0..90 {
             let _ = s.preview_frame(f64::from(k) / 30.0, 640, "auto");
         }
-        let r = run(&s.media_probes(8), Some("adapter: Test GPU"));
+        let r = run(&s.media_probes(8), Some("adapter: Test GPU"), "0.4.6");
         let _ = std::fs::remove_file(&out);
         assert_eq!(r.videos.len(), 1);
         let v = &r.videos[0];
@@ -289,11 +288,14 @@ mod tests {
         assert!(fps > 0.0 && fps < 20_000.0, "{fps} frames a second");
         assert!(v.findings.iter().any(|f| f.starts_with("Drive: reads")), "{v:?}");
         assert!(
-            r.text.contains("playback check") && r.text.contains("adapter: Test GPU") && r.text.contains("640x360") && r.text.contains("30.00 fps"),
+            r.text.contains("ClipCut 0.4.6 playback check")
+                && r.text.contains("adapter: Test GPU")
+                && r.text.contains("640x360")
+                && r.text.contains("30.00 fps"),
             "{}",
             r.text
         );
-        assert!(run(&[], None).text.contains("No videos"));
+        assert!(run(&[], None, "0.4.6").text.contains("No videos"));
     }
 
     #[test]

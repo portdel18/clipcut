@@ -116,7 +116,14 @@ remote `upstream`). Read `README.md` for what it is and the roadmap.
   **Check playback** (Media panel, `check.rs`, `playback_check`) measures on the user's computer
   which decoder each video gets (`hw_stats` frames by hardware; the engine's "declined" log lines,
   kept by `check::keep_log`), its decode fps and its drive's speed, with a report to copy: ask the
-  user for it before guessing at playback problems on their hardware.
+  user for it before guessing at playback problems on their hardware. The first report (Intel Arc
+  140V, S26 4K 60 HEVC 10-bit HLG) showed the GPU decoding but only 21 fps: the full 4K P010
+  readback and its conversion on the CPU were the bottleneck. In draft mode (playback at ½ or
+  less; not exports or proxies) the Media Foundation decoder reads pictures 1400 px or more on their short side
+  back at half size each way (`biplanar::to_frame_halved`, marked draft so exports and stills
+  never get them; `HybridDecoder::set_draft` reaches the hardware decoder; `GopCache::finish`
+  scales a clean-aperture crop for them, `region_within`), and logs its decode / copy back /
+  convert time per picture every 240 pictures, which the report's decoder notes show.
 - Graphics follow the video: opening Graphics calls `CS.hosted.setBackdrop` with the frame at the
   playhead (`graphic_backdrop`, which leaves out the graphic being changed), and after a Ratio
   change `offerRemake` re-renders graphics in the old shape through `CS.hosted.add` one by one
