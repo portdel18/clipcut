@@ -110,7 +110,13 @@ remote `upstream`). Read `README.md` for what it is and the roadmap.
   at 30 fps) get one by themselves, one at a time (`autoProxies`, off with
   `clipcut.autoProxies`), each used when made. Phone 4K 60 decoded on the processor runs at 5–12
   fps (HEVC 10-bit the slowest); on Windows HEVC reaches the GPU only with Microsoft's HEVC Video
-  Extensions (`hevc_hardware`, the Media panel says so).
+  Extensions (`hevc_hardware`, the Media panel says so). A proxy being made waits while the
+  player plays or the check runs (`pause_job` → the engine's `Progress::paused`, held between
+  frames in `Exporter::step`) and renders on the GPU when there is one (`proxies.rs`).
+  **Check playback** (Media panel, `check.rs`, `playback_check`) measures on the user's computer
+  which decoder each video gets (`hw_stats` frames by hardware; the engine's "declined" log lines,
+  kept by `check::keep_log`), its decode fps and its drive's speed, with a report to copy: ask the
+  user for it before guessing at playback problems on their hardware.
 - Graphics follow the video: opening Graphics calls `CS.hosted.setBackdrop` with the frame at the
   playhead (`graphic_backdrop`, which leaves out the graphic being changed), and after a Ratio
   change `offerRemake` re-renders graphics in the old shape through `CS.hosted.add` one by one

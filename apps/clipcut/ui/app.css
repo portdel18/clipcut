@@ -453,3 +453,12 @@ h3.sub { margin: 12px 0 6px; font-size: 11px; font-weight: 600; color: var(--mut
 .prop:has(> input[type="color"]) > span:first-child { flex: 0 0 74px; }
 .cap-style .cs-line, .prop .check:has(> input[type="color"]) { gap: 6px; }
 html.dropping, html.dropping * { cursor: crosshair !important; }
+
+/* Check playback */
+#proxy-check { justify-self: start; }
+.check-body { max-height: 52vh; overflow: auto; }
+.check-body h3 { margin: 12px 0 4px; font-size: 13px; }
+.check-body h3.ok { color: var(--ok); }
+.check-body h3.bad { color: var(--accent); }
+.check-body ul { margin: 0; padding-left: 18px; color: var(--muted); font-size: 12px; line-height: 1.5; }
+.check-text { width: 100%; height: 160px; margin-top: 10px; font: 11px/1.4 var(--mono); background: var(--well); color: var(--text); border: 1px solid var(--line); border-radius: 6px; }

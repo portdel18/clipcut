@@ -12,6 +12,7 @@
 
 mod ahead;
 mod captioning;
+mod check;
 mod cutout;
 mod editing;
 mod graphics;
@@ -116,6 +117,37 @@ fn pause(app: tauri::State<'_, App>) -> playback::State {
     p.state()
 }
 
+/// The Media Foundation capability report (adapter, decoders, the GPU's profiles) on Windows.
+fn decoder_caps() -> Option<String> {
+    #[cfg(target_os = "windows")]
+    {
+        std::panic::catch_unwind(filmcraft_platform::media_foundation::capabilities).ok()
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        None
+    }
+}
+
+/// Check playback: which decoder each video gets and why, its decoding speed and its drive's,
+/// measured here (a few seconds a video, at most 8 videos).
+#[tauri::command]
+async fn playback_check(app: tauri::State<'_, App>) -> Result<check::Report, String> {
+    let probes = lock(&app.studio).media_probes(8);
+    blocking(move || {
+        let caps = decoder_caps();
+        std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| check::run(&probes, caps.as_deref())))
+            .map_err(|_| "the playback check failed; please try again".to_string())
+    })
+    .await
+}
+
+/// Holds a background job (a proxy being made) while `on`, so it doesn't compete with playback.
+#[tauri::command]
+fn pause_job(job: u64, on: bool, app: tauri::State<'_, App>) -> bool {
+    lock(&app.studio).pause_job(job, on)
+}
+
 /// Whether this computer's graphics card can decode HEVC (H.265) video: on Windows that needs
 /// a Media Foundation HEVC decoder (Microsoft's HEVC Video Extensions) and a GPU that lists HEVC.
 /// `None` where ClipCut can't tell (other systems); without it, 4K HEVC decodes on the processor.
@@ -123,8 +155,7 @@ fn pause(app: tauri::State<'_, App>) -> playback::State {
 async fn hevc_hardware() -> Option<bool> {
     #[cfg(target_os = "windows")]
     {
-        let caps =
-            tauri::async_runtime::spawn_blocking(|| std::panic::catch_unwind(filmcraft_platform::media_foundation::capabilities).ok()).await.ok().flatten()?;
+        let caps = tauri::async_runtime::spawn_blocking(decoder_caps).await.ok().flatten()?;
         Some(hevc_listed(&caps))
     }
     #[cfg(not(target_os = "windows"))]
@@ -299,6 +330,8 @@ impl filmcraft_export::FrameRenderer for GpuFrameRenderer {
 }
 
 fn register_engine_accelerators() {
+    // the engine's notes (why a hardware decoder declined a video) for Check playback
+    check::keep_log();
     // Hardware video decoding (Media Foundation on Windows), with FilmCraft's decoders behind it
     let _ = filmcraft_platform::register();
     filmcraft_export::register_frame_renderer(|| {
@@ -537,6 +570,8 @@ fn main() {
             editing::remove_title,
             editing::make_proxies,
             hevc_hardware,
+            playback_check,
+            pause_job,
             editing::poll_jobs,
             editing::set_proxies,
             editing::props_at,

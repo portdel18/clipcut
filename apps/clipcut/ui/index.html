@@ -55,6 +55,7 @@
           <button class="btn" id="proxy-make" title="Make small copies of the videos for smooth playback. Exports always use the originals.">Make proxies</button>
           <label class="check" title="Play from the small copies where clips have them (exports always use the originals)"><input type="checkbox" id="proxy-use"> Use for playback</label>
         </div>
+        <button class="btn" id="proxy-check" title="Tests each video on this computer: which part decodes it (graphics card or processor) and why, how fast, and how fast its drive reads it">Check playback</button>
         <label class="check" title="4K and 60 fps videos get a proxy by themselves when you add them, one at a time, each used as soon as it is made"><input type="checkbox" id="proxy-auto"> Make them by themselves for 4K and 60 fps videos</label>
         <div class="bar" id="proxy-bar" hidden><div></div></div>
         <p class="hint" id="proxy-note"></p>
@@ -318,6 +319,16 @@
     <button class="btn primary" id="export-go">Export…</button>
   </div>
 </dialog>
+<dialog class="dlg wide" id="check-dlg" aria-labelledby="check-title">
+  <h2 id="check-title">Playback check</h2>
+  <div class="check-body" id="check-body"></div>
+  <textarea class="check-text" id="check-text" readonly hidden aria-label="The report, to copy"></textarea>
+  <div class="dlg-actions">
+    <button class="btn" id="check-copy" disabled>Copy report</button>
+    <button class="btn primary" id="check-close">Close</button>
+  </div>
+</dialog>
+
 <dialog class="dlg" id="export-dlg" aria-labelledby="export-title">
   <h2 id="export-title">Exporting</h2>
   <p class="path" id="export-path"></p>
