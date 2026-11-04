@@ -19,7 +19,9 @@ concurrency:
 jobs:
   windows:
     runs-on: windows-latest
-    timeout-minutes: 150
+    # tests, the installer and the end-to-end update take about 2 hours since AI noise reduction
+    # (tract) joined the build, and the build cache is saved after them: room to finish
+    timeout-minutes: 240
     env:
       CARGO_TERM_COLOR: always
       CARGO_INCREMENTAL: "0"
