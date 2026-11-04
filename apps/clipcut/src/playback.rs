@@ -273,12 +273,10 @@ fn mix(slot: &Mutex<Arc<AudioFeed>>, from: f64, speed: f64, clock: &Arc<Clock>, 
     let step = f64::from(src_rate) / f64::from(rate);
     let target = ((AHEAD * f64::from(rate)) as usize).max(CHUNK) * 2;
     let mut out = Vec::with_capacity(CHUNK * 2);
-    // at another speed the resampler reads the stretched sound (from output sample 0), kept from
-    // `held_start` on so the overlapping reads find it again
+    // at another speed the resampler reads the stretched sound (from output sample 0)
     let mut stretch = ((speed - 1.0).abs() > 1e-6).then(|| clipcut_core::Stretcher::new(src_rate, (from * f64::from(src_rate)) as i64, speed));
-    let mut held: Vec<f32> = Vec::new();
-    let mut held_start = 0i64;
     let mut pos = if stretch.is_some() { 0.0 } else { from * f64::from(src_rate) };
+    let mut held = Held::new(pos.floor() as i64);
     while !stop.load(Ordering::Acquire) {
         let len = queue.lock().unwrap_or_else(PoisonError::into_inner).len();
         if len >= target {
@@ -290,18 +288,8 @@ fn mix(slot: &Mutex<Arc<AudioFeed>>, from: f64, speed: f64, clock: &Arc<Clock>, 
         let need = (CHUNK as f64 * step).ceil() as usize + 2;
         let feed = slot.lock().unwrap_or_else(PoisonError::into_inner).clone();
         let src = match &mut stretch {
-            None => feed.mix(first, need),
-            Some(st) => {
-                let have = held_start + (held.len() / 2) as i64;
-                let want = first + need as i64;
-                if want > have {
-                    held.extend(st.next(&feed, usize::try_from(want - have).unwrap_or(0)));
-                }
-                let drop = usize::try_from(first - held_start).unwrap_or(0).min(held.len() / 2);
-                held.drain(..drop * 2);
-                held_start += drop as i64;
-                held.get(..need * 2).map(<[f32]>::to_vec).unwrap_or_default()
-            }
+            None => held.take(first, need, |at, n| feed.mix(at, n)),
+            Some(st) => held.take(first, need, |_, n| st.next(&feed, n)),
         };
         out.clear();
         for i in 0..CHUNK {
@@ -319,6 +307,47 @@ fn mix(slot: &Mutex<Arc<AudioFeed>>, from: f64, speed: f64, clock: &Arc<Clock>, 
     }
 }
 
+/// The source sound read so far and not yet used (interleaved stereo from `start`). Each chunk
+/// reads a little past where the next one starts (the sample to interpolate towards): the overlap is
+/// kept here, so the mix is only ever asked for the samples after the last ones it gave. Its
+/// effects carry on from there (`audio_fx`'s chains continue a request that starts where the last
+/// ended); a request that overlapped started every effect again, with its warm-up, on every chunk:
+/// AI noise reduction then took longer than the sound played, and slowed the picture with it.
+struct Held {
+    samples: Vec<f32>,
+    start: i64,
+}
+
+impl Held {
+    fn new(start: i64) -> Self {
+        Held { samples: Vec::new(), start }
+    }
+
+    /// Samples `[first, first + need)`, reading only the ones not held yet with `read(at, n)` (the
+    /// `n` samples from `at`, always right after the last ones read). A jump backwards, or past
+    /// what is held, starts again at `first`.
+    fn take(&mut self, first: i64, need: usize, mut read: impl FnMut(i64, usize) -> Vec<f32>) -> Vec<f32> {
+        let have = self.start.saturating_add((self.samples.len() / 2) as i64);
+        if first < self.start || first > have {
+            self.samples.clear();
+            self.start = first;
+        }
+        let have = self.start.saturating_add((self.samples.len() / 2) as i64);
+        let want = first.saturating_add(need as i64);
+        if want > have {
+            let n = usize::try_from(want - have).unwrap_or(0);
+            let mut got = read(have, n);
+            // a short read is silence, so the samples stay in step
+            got.resize(n * 2, 0.0);
+            self.samples.extend(got);
+        }
+        let drop = usize::try_from(first - self.start).unwrap_or(0).min(self.samples.len() / 2);
+        self.samples.drain(..drop * 2);
+        self.start = self.start.saturating_add(drop as i64);
+        self.samples.get(..need * 2).map(<[f32]>::to_vec).unwrap_or_default()
+    }
+}
+
 /// Without a device: mixes along with the wall clock and drops the sound, so the meters still move.
 fn mix_silent(slot: &Mutex<Arc<AudioFeed>>, from: f64, speed: f64, clock: &Arc<Clock>, stop: &Arc<AtomicBool>) {
     let rate = f64::from(slot.lock().unwrap_or_else(PoisonError::into_inner).sample_rate.max(1));
@@ -333,5 +362,49 @@ fn mix_silent(slot: &Mutex<Arc<AudioFeed>>, from: f64, speed: f64, clock: &Arc<C
         let feed = slot.lock().unwrap_or_else(PoisonError::into_inner).clone();
         let _ = feed.mix(pos, n);
         pos = pos.saturating_add(n as i64);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::Held;
+
+    /// Stereo samples whose value is their position.
+    fn source(at: i64, n: usize) -> Vec<f32> {
+        (0..n as i64).flat_map(|i| [(at + i) as f32, -((at + i) as f32)]).collect()
+    }
+
+    #[test]
+    fn overlapping_chunks_ask_the_mix_only_for_new_samples() {
+        let mut held = Held::new(1000);
+        let mut asked: Vec<(i64, usize)> = Vec::new();
+        // chunks of 1024 device frames at 44.1 → 48 kHz: 941 source samples, plus 2 to interpolate
+        let step: f64 = 48_000.0 / 44_100.0;
+        let mut pos = 1000.0f64;
+        for _ in 0..50 {
+            let first = pos.floor() as i64;
+            let need = (1024.0 * step).ceil() as usize + 2;
+            let got = held.take(first, need, |at, n| {
+                asked.push((at, n));
+                source(at, n)
+            });
+            assert_eq!(got, source(first, need), "the samples asked for, in order");
+            pos += 1024.0 * step;
+        }
+        // every read starts where the one before ended: the effects carry on, nothing restarts
+        for w in asked.windows(2) {
+            assert_eq!(w[1].0, w[0].0 + w[0].1 as i64, "{asked:?}");
+        }
+        assert_eq!(asked[0].0, 1000);
+        // a seek backwards starts again there
+        let got = held.take(10, 4, source);
+        assert_eq!(got, source(10, 4));
+    }
+
+    #[test]
+    fn a_short_read_is_silence_in_step() {
+        let mut held = Held::new(0);
+        assert_eq!(held.take(0, 4, |_, _| vec![1.0, 1.0]), vec![1.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]);
+        assert_eq!(held.take(2, 3, source), [vec![0.0, 0.0, 0.0, 0.0], source(4, 1)].concat());
     }
 }

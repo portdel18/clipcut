@@ -658,7 +658,7 @@ async function checkPlayback() {
   if (S.playing) await pause();
   PX.checking = true;
   let r = null;
-  try { r = await invoke('playback_check'); } catch (e) { body.innerHTML = ''; const p = document.createElement('p'); p.className = 'meta'; p.textContent = String(e); body.appendChild(p); }
+  try { r = await invoke('playback_check', { maxWidth: previewWidth() }); } catch (e) { body.innerHTML = ''; const p = document.createElement('p'); p.className = 'meta'; p.textContent = String(e); body.appendChild(p); }
   PX.checking = false;
   if (!r) return;
   body.innerHTML = '';

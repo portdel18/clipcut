@@ -131,6 +131,9 @@ pub struct MediaProbe {
     pub path: String,
     pub info: filmcraft_media::MediaInfo,
     pub source: filmcraft_media::SharedSource,
+    /// Where the first clip showing it is on the timeline (start, end in seconds), to time the
+    /// player there.
+    pub on_timeline: Option<(f64, f64)>,
 }
 
 impl Studio {
@@ -143,18 +146,27 @@ impl Studio {
             .filter_map(|i| {
                 let m = i.as_media()?;
                 let filmcraft_project::MediaRef::File { path } = &m.media else { return None };
-                (m.info.kind == filmcraft_media::MediaKind::Movie && m.info.video.is_some()).then(|| (i.created, i.name.clone(), path.clone(), m.info.clone()))
+                (m.info.kind == filmcraft_media::MediaKind::Movie && m.info.video.is_some())
+                    .then(|| (i.created, i.id, i.name.clone(), path.clone(), m.info.clone()))
             })
             .collect();
         items.sort_by_key(|(created, ..)| *created);
         items
             .into_iter()
-            .filter_map(|(_, name, path, info)| {
+            .filter_map(|(_, id, name, path, info)| {
                 // the file the engine actually reads (relinked, followed)
                 let path = self.session.media.follow(&path).unwrap_or(path);
                 // a fresh copy of the file, not the player's: its cache would hide the decoding
                 let source = self.session.media.open_file(&path, &*self.session.services).ok()?;
-                Some(MediaProbe { name, path, info, source })
+                let on_timeline = self.session.active_sequence().and_then(|q| {
+                    q.video_tracks
+                        .iter()
+                        .flat_map(|t| t.items.iter())
+                        .filter(|c| c.item == id && c.enabled)
+                        .min_by_key(|c| c.start)
+                        .map(|c| (c.start.seconds(), c.end().seconds()))
+                });
+                Some(MediaProbe { name, path, info, source, on_timeline })
             })
             .take(max)
             .collect()
