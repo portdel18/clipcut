@@ -55,6 +55,12 @@ for text the words, font, size, bold and italic, alignment, colour, outline, box
 drag is one undo step. **Ratio** (under the player) turns the canvas into 9:16 for TikTok, Reels and
 Shorts, 1:1 or 4:5; clips are refitted to the new shape.
 
+**Voiceover.** The **Audio** tab's Voiceover section reads a script aloud: type what the voice
+says (`[pause 1s]` adds a pause), pick a voice and a speed, **Listen**, then **Add at the playhead**:
+it goes on a sound lane as `Voiceover 1.wav`, saved beside the project. The built-in voices need no
+download but sound robotic; the natural voices (Kokoro-82M, Apache-2.0) are a one-time download of
+about 340 MB, kept with the speech models and checked file by file.
+
 **Two-mic recordings.** A clip recorded with a microphone on each side (one person on the left, one
 on the right) chooses how its sides play under Sound: **As recorded**, **Left mic** or **Right mic**
 (that side in both ears), or **Both mics** (both sides mixed into both ears), with a level for each

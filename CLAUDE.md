@@ -242,6 +242,12 @@ remote `upstream`). Read `README.md` for what it is and the roadmap.
   interpolate, so `playback.rs` keeps that overlap itself (`Held`) and asks the mix only for new
   samples: overlapping reads once made AI noise reduction mix at 0.2× real time and slowed the
   whole player.
+- Voiceover (`narration.rs`, the Audio tab's `#vo-*`, app `narration.rs`): the engine's text to speech
+  (`filmcraft_tts`, with its `kokoro` feature) called from clipcut-core, not the engine's `tts.create`
+  (which places clips without ClipCut's lanes and keeps voices in the engine's own data folder).
+  Natural voices download into ClipCut's models folder (`download_voices`, `voice-progress`,
+  `cancel_voices`); `speak` runs off the studio; the WAV goes to `Voiceovers` beside the project
+  (`voiceover_dir`) and onto a sound lane through `add_to_lane`.
 - Waveforms are drawn as loud as they will play (clip and lane volume, `playGain`); past full
   scale their bars get red edges (`--sound-loud`), and the Sound panel says by how much, with
   Lower to fit (`loudHint`, `overBy`).
