@@ -617,6 +617,13 @@ pub(crate) fn item_layer_ex(
 /// has an alpha plane, the whole picture otherwise (opaque when it has no alpha at all, or when its
 /// alpha is opaque everywhere).
 fn plain_layer(frame: &Arc<VideoFrame>, n: usize, opacity: f32, blend: Blend) -> Layer {
+    // Draft playback: shrink in Y'CbCr and convert each drawn pixel once (see `colorman::decode`)
+    if n > 1
+        && filmcraft_media::cancel::draft()
+        && let Some(small) = frame.box_decimated(n)
+    {
+        return plain_layer(&Arc::new(small), 1, opacity, blend);
+    }
     match frame.alpha_region(n) {
         Some(r) => {
             let (r, px) = frame.to_linear_f32_region(n, None, r);

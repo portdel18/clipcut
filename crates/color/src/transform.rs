@@ -33,6 +33,8 @@ pub const REFERENCE_WHITE_NITS: f64 = 203.0;
 /// without metadata.
 pub const HDR_PEAK_NITS: f64 = 1000.0;
 const HLG_GAMMA: f64 = 1.2;
+/// Scene light the HLG gain table covers (signal 1.0 is 1.0; super-whites a little above).
+const HLG_GAIN_MAX: f32 = 1.5;
 /// Source peak assumed when tone mapping log media: the curve's own peak, capped here so the
 /// BT.2390 knee starts above mid grey (≈ 45 cd/m², i.e. 0.22 in working units).
 pub const LOG_PEAK_NITS: f64 = 4000.0;
@@ -129,19 +131,22 @@ pub fn bt2390_eetf(nits: f64, src_peak: f64, dst_peak: f64) -> f64 {
 pub struct ToneMap {
     pub src_peak_nits: f64,
     pub dst_peak_nits: f64,
-    /// max(R,G,B) (working units) → scale factor, sampled in the PQ domain.
+    /// The source peak in working units: max(R,G,B) at or above it clips to the target peak.
+    peak: f32,
+    /// max(R,G,B) → scale factor, sampled on √(max / peak): fine in the shadows like the PQ axis
+    /// it replaced, but found with a square root per pixel instead of the PQ curve's two powers.
     table: DecodeTable,
 }
 
 impl ToneMap {
     pub fn new(src_peak_nits: f64, dst_peak_nits: f64) -> Self {
         let (s, d) = (src_peak_nits, dst_peak_nits);
-        // sample on a PQ-encoded axis so the shadows get enough resolution
-        let table = DecodeTable::new(0.0, 1.0, 4096, |e| {
-            let nits = pq_eotf(e as f32) as f64 * 10_000.0;
+        let peak = s / REFERENCE_WHITE_NITS;
+        let table = DecodeTable::new(0.0, 1.0, 8192, |v| {
+            let nits = v * v * peak * REFERENCE_WHITE_NITS;
             if nits <= 1e-6 { 1.0 } else { bt2390_eetf(nits, s, d) / nits }
         });
-        ToneMap { src_peak_nits, dst_peak_nits, table }
+        ToneMap { src_peak_nits, dst_peak_nits, peak: peak as f32, table }
     }
     #[inline]
     pub fn apply(&self, c: [f32; 3]) -> [f32; 3] {
@@ -149,12 +154,11 @@ impl ToneMap {
         if m <= 0.0 {
             return c;
         }
-        let nits = m * REFERENCE_WHITE_NITS as f32;
-        let k = if nits >= self.src_peak_nits as f32 {
+        let k = if m >= self.peak {
             // above the source peak: clip to the target peak
             (self.dst_peak_nits / REFERENCE_WHITE_NITS) as f32 / m
         } else {
-            self.table.lookup(pq_inverse_eotf(nits / 10_000.0))
+            self.table.lookup((m / self.peak).sqrt())
         };
         [c[0] * k, c[1] * k, c[2] * k]
     }
@@ -193,6 +197,9 @@ pub struct InputTransform {
     identity_matrix: bool,
     /// HLG OOTF luma weights (BT.2020) and the scale to working units.
     hlg: Option<([f32; 3], f32)>,
+    /// The HLG OOTF's gain, k · Ys^(γ−1), sampled on √(Ys / [`HLG_GAIN_MAX`]) (a power per
+    /// pixel otherwise).
+    hlg_gain: Option<DecodeTable>,
     tone: Option<ToneMap>,
     compress: bool,
     /// Display-referred wide-gamut media (BT.2020 / P3 / HDR): desaturate into the working gamut
@@ -224,7 +231,21 @@ impl InputTransform {
         let compress = wider && src.is_log();
         let l = wg.luma();
         let desaturate = (wider && !src.is_log()).then(|| [l[0] as f32, l[1] as f32, l[2] as f32]);
-        InputTransform { source: src, table: DecodeTable::for_curve(curve, range), matrix: to_f32(&m), identity_matrix, hlg, tone, compress, desaturate }
+        let hlg_gain = hlg.map(|(_, k)| {
+            let (k, max) = (f64::from(k), f64::from(HLG_GAIN_MAX));
+            DecodeTable::new(0.0, 1.0, 8192, move |v| k * (v * v * max).powf(HLG_GAMMA - 1.0))
+        });
+        InputTransform {
+            source: src,
+            table: DecodeTable::for_curve(curve, range),
+            matrix: to_f32(&m),
+            identity_matrix,
+            hlg,
+            hlg_gain,
+            tone,
+            compress,
+            desaturate,
+        }
     }
 
     /// Whether anything happens after the per-channel table.
@@ -237,7 +258,10 @@ impl InputTransform {
     pub fn apply(&self, mut c: [f32; 3]) -> [f32; 3] {
         if let Some((l, k)) = self.hlg {
             let ys = (l[0] * c[0] + l[1] * c[1] + l[2] * c[2]).max(0.0);
-            let g = k * ys.powf((HLG_GAMMA - 1.0) as f32);
+            let g = match &self.hlg_gain {
+                Some(t) if ys < HLG_GAIN_MAX => t.lookup((ys / HLG_GAIN_MAX).sqrt()),
+                _ => k * ys.powf((HLG_GAMMA - 1.0) as f32),
+            };
             c = c.map(|v| v * g);
         }
         if !self.identity_matrix {
@@ -408,6 +432,34 @@ pub fn domain_value(v: f64, range: Range, d: Domain) -> f64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_hdr_tables_match_the_exact_curves() {
+        // tone mapping: the √ axis table against BT.2390 itself, over the whole source range
+        for (src, dst) in [(1000.0, REFERENCE_WHITE_NITS), (4000.0, REFERENCE_WHITE_NITS), (1000.0, 600.0)] {
+            let t = ToneMap::new(src, dst);
+            for i in 1..4000 {
+                let m = (i as f64 / 4000.0).powi(3) * src / REFERENCE_WHITE_NITS * 1.2;
+                let nits = m * REFERENCE_WHITE_NITS;
+                let want = if nits >= src { dst / REFERENCE_WHITE_NITS / m } else { bt2390_eetf(nits, src, dst) / nits };
+                let got = t.apply([m as f32, 0.0, 0.0])[0] as f64 / m;
+                assert!((got - want).abs() <= 2e-3 * want.max(1e-3), "{src}→{dst} nits at {m}: {got} vs {want}");
+            }
+        }
+        // the HLG OOTF gain: the table against k · Ys^0.2, and the direct power above it
+        let pipe = ColorPipeline::default();
+        let t = InputTransform::new(ColorSpace::Rec2100Hlg, Range::Full, &pipe, None);
+        let (l, k) = t.hlg.unwrap();
+        for i in 1..3000 {
+            let ys = (i as f32 / 1500.0).powi(2);
+            let c = [ys, ys, ys];
+            let exact = k * (l[0] * c[0] + l[1] * c[1] + l[2] * c[2]).powf((HLG_GAMMA - 1.0) as f32) * ys;
+            let mut fast = InputTransform { tone: None, desaturate: None, identity_matrix: true, compress: false, ..t.clone() };
+            fast.hlg = t.hlg;
+            let got = fast.apply(c)[0];
+            assert!((got - exact).abs() <= 2e-3 * exact.max(1e-4), "Ys {ys}: {got} vs {exact}");
+        }
+    }
     use crate::spaces::WorkingSpace;
 
     fn hdr(w: WorkingSpace) -> ColorPipeline {
