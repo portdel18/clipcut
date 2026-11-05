@@ -49,8 +49,12 @@ pub(crate) fn timeline_of(c: &TrackItem, m: Tick) -> Option<Tick> {
     if c.frame_hold.is_some() || m < c.source_in || m >= c.source_out() {
         return None;
     }
+    if !c.reverse {
+        // a speed ramp's own timing included
+        return Some(Tick(c.start.0.saturating_add(c.time_to_media(m).0)));
+    }
     let speed = c.speed.abs().max(1e-6);
-    let d = if c.reverse { c.source_out().0 - 1 - m.0 } else { m.0 - c.source_in.0 };
+    let d = c.source_out().0 - 1 - m.0;
     Some(Tick(c.start.0.saturating_add((d as f64 / speed).round() as i64)))
 }
 

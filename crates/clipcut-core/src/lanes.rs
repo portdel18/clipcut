@@ -49,8 +49,7 @@ pub(crate) fn is_main_sound(q: &Sequence, links: &std::collections::HashSet<u64>
 
 /// The timeline time at which sound `a` (of the same media as picture `v`) is in step with it.
 fn in_step(v: &filmcraft_project::TrackItem, a: &filmcraft_project::TrackItem) -> Tick {
-    let speed = v.speed.abs().max(1e-6);
-    Tick(v.start.0.saturating_add(((a.source_in.0 - v.source_in.0) as f64 / speed).round() as i64))
+    Tick(v.start.0.saturating_add(v.time_to_media(a.source_in).0))
 }
 
 fn tracks(q: &Sequence, lane: Lane) -> &[filmcraft_project::Track] {

@@ -189,6 +189,15 @@ remote `upstream`). Read `README.md` for what it is and the roadmap.
   source of its own at 256 px, draft (`SceneScan::run`, `scene-progress` events, `cancel_scenes`);
   then `split_at_scenes` razors the clip at each change through `group_follow` (one undo step), not
   the engine's `clip.sceneEditDetection`, whose plain razor skips captions and linkage.
+- Speed curves (CapCut's curve speed; `ramps.rs`, `rampControls` in the Speed section): the engine's
+  Time Remapping Speed keyframed at media times on the picture and its sound (a sound clip gets a
+  `time_remap` instance of its own). The engine follows it (`crates/project/src/ramp.rs`): with
+  one, `source_time_at` / `source_out` integrate 1 / speed over a grid fixed in media time (so
+  splits carry on exactly), razor and head trims hand the media over through `media_after_start`,
+  and the sound is read sample by sample at the moving speed (`audio.rs` `ramped`, pitch follows).
+  `set_ramp` keeps the clip's footage: `clip.speedDuration` gives it the ramp's length (main track
+  rippled), then the keyframes go on at speed 1. Any one-speed or Reverse edit calls `drop_ramps`
+  first. Code that maps media time to timeline uses `TrackItem::time_to_media`, never `/ speed`.
 - Markers with notes (`markers.rs`, the Markers tab `#panel-markers`, `#marker-btn`, `M`, app
   `markers.rs`): the engine's sequence markers (`custom_color`, `comment` = notes), edited straight
   through `edit_sequence`, one undo step each (notes typing merges). `group_follow` holds them

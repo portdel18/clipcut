@@ -32,6 +32,7 @@ mod mixer;
 mod narration;
 mod preview;
 mod props;
+mod ramps;
 mod replace;
 mod returns;
 mod scenes;

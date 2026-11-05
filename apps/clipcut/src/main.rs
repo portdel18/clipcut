@@ -547,6 +547,7 @@ fn main() {
             editing::channel_levels,
             editing::freeze,
             editing::set_reverse,
+            editing::set_ramp,
             markers::add_marker,
             markers::edit_marker,
             markers::delete_marker,

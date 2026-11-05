@@ -228,25 +228,29 @@ impl Studio {
             if s_is_still(&self.session, i) {
                 continue;
             }
-            targets.push((*c, i.speed.abs() * 100.0));
+            targets.push(*c);
         }
         if targets.is_empty() {
             return Err(Error::Invalid("pictures and stills have nothing to play backwards: select a video or sound clip".into()));
         }
         self.group_follow(if on { "Reverse" } else { "Play Forwards" }, None, |s| {
-            for (c, speed) in &targets {
+            // backwards plays at one speed: a speed curve gives way to it
+            s.drop_ramps(&targets)?;
+            for c in &targets {
+                let q = s.session.active_sequence().ok_or(Error::NothingOpen)?;
+                let Some((_, i)) = q.find_item(ClipId(*c)) else { continue };
+                let speed = i.speed.abs() * 100.0;
                 let main = s.on_main(*c);
                 s.session.execute("clip.speedDuration", json!({"clips": [c], "speed": speed, "reverse": on, "ripple": main})).map_err(engine)?;
             }
-            let ids: Vec<u64> = targets.iter().map(|(c, _)| *c).collect();
-            s.fit_pitch(&ids)?;
+            s.fit_pitch(&targets)?;
             s.pack_main()
         })
     }
 }
 
 /// A still picture or a graphic: nothing to play backwards.
-fn s_is_still(s: &filmcraft_engine::Session, i: &filmcraft_project::TrackItem) -> bool {
+pub(crate) fn s_is_still(s: &filmcraft_engine::Session, i: &filmcraft_project::TrackItem) -> bool {
     match s.project.item(i.item).map(|it| &it.kind) {
         Some(filmcraft_project::ItemKind::Media(m)) => m.info.kind == filmcraft_media::MediaKind::Still,
         Some(_) => true,

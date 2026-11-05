@@ -20,6 +20,7 @@ pub mod keyframe;
 mod marker_color;
 pub use marker_color::HexColor;
 mod marker_url;
+pub mod ramp;
 pub use marker_url::marker_web_url;
 pub mod mask;
 pub mod mixer;

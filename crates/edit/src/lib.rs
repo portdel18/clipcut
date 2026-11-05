@@ -103,7 +103,8 @@ pub fn split_track_at(track: &mut Track, t: Tick, ctx: &mut EditCtx, links: &mut
     right.start = t;
     right.duration -= cut;
     if !right.reverse && right.frame_hold.is_none() {
-        right.source_in += Tick((cut.0 as f64 * right.speed.abs()).round() as i64);
+        // a speed ramp carries on where it was ([`TrackItem::media_after_start`])
+        right.source_in = right.media_after_start(cut);
     } else if right.reverse {
         // reversed: the left piece now shows the later media; keep content continuous
         let left_ref = &mut track.items[idx];
@@ -775,7 +776,7 @@ pub fn move_edge(it: &mut TrackItem, edge: Edge, d: Tick, move_start: bool) {
     match edge {
         Edge::In => {
             if !it.reverse && it.frame_hold.is_none() {
-                it.source_in += src_of(d, speed);
+                it.source_in = it.media_after_start(d);
             }
             it.duration -= d;
             if move_start {
@@ -1004,7 +1005,7 @@ pub fn roll(seq: &mut Sequence, left: ClipId, right: ClipId, delta: Tick, ctx: &
         r.start += d;
         r.duration -= d;
         if !r.reverse {
-            r.source_in += src_of(d, rs);
+            r.source_in = if r.frame_hold.is_none() { r.media_after_start(d) } else { r.source_in + src_of(d, rs) };
         }
     }
     transitions_follow_cuts(&before, seq);
@@ -1084,7 +1085,7 @@ pub fn slide(seq: &mut Sequence, clip: ClipId, delta: Tick, ctx: &mut EditCtx) -
         ni.start += d;
         ni.duration -= d;
         if !n.reverse {
-            ni.source_in += src_of(d, n.speed);
+            ni.source_in = if n.frame_hold.is_none() { n.media_after_start(d) } else { ni.source_in + src_of(d, n.speed) };
         }
     }
     let me = t.item_mut(clip).ok_or(EditError::NoItem(clip))?;

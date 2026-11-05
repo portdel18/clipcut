@@ -918,6 +918,13 @@ pub async fn set_reverse(clips: Vec<u64>, on: bool, app: tauri::State<'_, App>) 
     edit(&app, move |s| s.set_reverse(&clips, on)).await
 }
 
+/// A speed curve on clip `clip`: points `[place in its footage 0…1, speed (1 = normal)]`, or
+/// none (empty: normal speed).
+#[tauri::command]
+pub async fn set_ramp(clip: u64, points: Vec<[f64; 2]>, app: tauri::State<'_, App>) -> Result<TimelineView, String> {
+    edit(&app, move |s| s.set_ramp(clip, &points)).await
+}
+
 #[tauri::command]
 pub async fn set_keep_pitch(clips: Vec<u64>, on: bool, app: tauri::State<'_, App>) -> Result<TimelineView, String> {
     edit(&app, move |s| s.set_keep_pitch(&clips, on)).await
