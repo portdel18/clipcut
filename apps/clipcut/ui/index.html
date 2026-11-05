@@ -72,6 +72,21 @@
       </button>
       <div class="media-list sounds" id="audio-list"></div>
       <p class="hint">Sound sits on its own lane and stays where you put it when the main track changes. Select it to set its volume and fades.</p>
+      <h2 class="sub">Voiceover</h2>
+      <div class="vo props">
+        <textarea id="vo-text" rows="4" placeholder="Type what the voice says. [pause 1s] adds a pause." aria-label="What the voice says"></textarea>
+        <label class="prop wide"><span>Voice</span><select id="vo-voice"></select></label>
+        <label class="prop wide"><span>Speed</span><select id="vo-pace"><option value="0.85">Slower</option><option value="1" selected>Normal</option><option value="1.15">Faster</option><option value="1.3">Fast</option></select></label>
+        <p class="hint" id="vo-note"></p>
+        <div class="vo-get" id="vo-get" hidden>
+          <button class="btn" id="vo-download">Download natural voices</button>
+          <div class="bar" id="vo-bar-wrap" hidden><div id="vo-bar"></div></div>
+        </div>
+        <div class="vo-actions">
+          <button class="btn" id="vo-listen">Listen</button>
+          <button class="btn primary" id="vo-add">Add at the playhead</button>
+        </div>
+      </div>
     </section>
     <section class="panel" id="panel-captions" role="tabpanel" aria-labelledby="tab-captions" hidden>
       <h2>Captions</h2>

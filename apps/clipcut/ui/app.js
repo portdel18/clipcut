@@ -752,6 +752,7 @@ function showTab(id) {
   if (id === 'filters') renderFiltersPanel();
   if (id === 'mixer') { MX.sig = ''; renderMixer(); }
   if (id === 'text') renderTitles();
+  if (id === 'audio' && !VO.voices) loadVoices();
 }
 
 /* ---------- captions: auto captions, their look, cleaning up the speech, the transcript ---------- */
@@ -4734,6 +4735,82 @@ async function pasteClips() {
   const r = await make('paste_clips', { seconds: S.t });
   if (r) renderSelection();
 }
+/* ---------- Voiceover (Audio tab): a script spoken onto a sound lane ---------- */
+const VO = { voices: null, missing: 0, size: 0, busy: false, audio: null };
+const mb = n => `${Math.round(n / 1e6)} MB`;
+async function loadVoices() {
+  let r;
+  try { r = await invoke('voiceover_voices'); } catch (e) { toast(e, true); return; }
+  VO.voices = r.voices; VO.missing = r.missing; VO.size = r.size;
+  const sel = $('#vo-voice');
+  let want = sel.value;
+  try { want = want || localStorage.getItem('clipcut.voice') || ''; } catch (_) {}
+  sel.innerHTML = '';
+  for (const [label, natural] of [['Natural', true], ['Built in', false]]) {
+    const g = document.createElement('optgroup');
+    g.label = natural ? `Natural${VO.missing ? ' (download once)' : ''}` : 'Built in (robotic, no download)';
+    for (const v of r.voices.filter(v => v.natural === natural)) {
+      const o = document.createElement('option');
+      o.value = v.id;
+      o.textContent = natural ? `${v.name} · ${v.gender}` : v.name;
+      g.appendChild(o);
+    }
+    if (g.children.length) sel.appendChild(g);
+  }
+  const ready = r.voices.filter(v => v.installed);
+  sel.value = r.voices.some(v => v.id === want) ? want : (ready.find(v => v.natural) || ready[0] || r.voices[0] || {}).id || '';
+  voiceNote();
+}
+function voiceNote() {
+  const v = (VO.voices || []).find(x => x.id === $('#vo-voice').value);
+  const need = !!(v && !v.installed);
+  $('#vo-get').hidden = !need;
+  $('#vo-download').textContent = `Download natural voices (${mb(VO.missing || VO.size)}, once)`;
+  $('#vo-note').textContent = v ? (v.description || '') : '';
+  $('#vo-listen').disabled = $('#vo-add').disabled = need || VO.busy;
+}
+function voArgs() {
+  return { text: $('#vo-text').value, voice: $('#vo-voice').value, pace: Number($('#vo-pace').value) || 1 };
+}
+async function listenVoiceover() {
+  if (VO.busy) return;
+  VO.busy = true; voiceNote();
+  $('#vo-listen').textContent = 'Speaking…';
+  try {
+    const bytes = await invoke('preview_voiceover', voArgs());
+    if (VO.audio) { VO.audio.pause(); URL.revokeObjectURL(VO.audio.src); }
+    VO.audio = new Audio(URL.createObjectURL(new Blob([bytes], { type: 'audio/wav' })));
+    await VO.audio.play();
+  } catch (e) { toast(e, true); }
+  VO.busy = false; voiceNote();
+  $('#vo-listen').textContent = 'Listen';
+}
+async function addVoiceover() {
+  if (VO.busy || !has()) { if (!has()) toast('Open a video first, then add a voiceover to it.', true); return; }
+  if (VO.audio) VO.audio.pause();
+  VO.busy = true; voiceNote();
+  $('#vo-add').textContent = 'Speaking…';
+  const r = await make('add_voiceover', () => ({ ...voArgs(), seconds: S.t }));
+  VO.busy = false; voiceNote();
+  $('#vo-add').textContent = 'Add at the playhead';
+  if (r) toast('The voiceover is on a sound lane at the playhead.');
+}
+async function downloadVoices() {
+  if (VO.busy) { invoke('cancel_voices'); return; }
+  VO.busy = true;
+  $('#vo-download').textContent = 'Stop';
+  $('#vo-bar-wrap').hidden = false;
+  try { await invoke('download_voices'); toast('The natural voices are ready.'); } catch (e) { if (!/stopped/i.test(String(e))) toast(e, true); }
+  VO.busy = false;
+  $('#vo-bar-wrap').hidden = true;
+  await loadVoices();
+}
+listen('voice-progress', e => { $('#vo-bar').style.width = (100 * (Number(e.payload) || 0)).toFixed(1) + '%'; });
+$('#vo-voice').addEventListener('change', e => { try { localStorage.setItem('clipcut.voice', e.target.value); } catch (_) {} voiceNote(); });
+click('#vo-listen', listenVoiceover);
+click('#vo-add', addVoiceover);
+click('#vo-download', downloadVoices);
+
 /** Split at scene changes: looks at every frame of `clip` (with progress and Stop), then cuts it
     wherever a new shot starts, in one undo step. */
 async function splitScenes(clip) {
