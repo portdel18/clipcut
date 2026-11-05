@@ -17,6 +17,7 @@ mod captions;
 mod channels;
 mod clipboard;
 mod colour;
+mod colour_check;
 mod cutouts;
 mod ducking;
 mod exporting;
@@ -57,6 +58,7 @@ pub use animations::{ANIMATIONS_IN, ANIMATIONS_OUT, AnimView, TextAnimations, te
 pub use captions::{CaptionStyleView, CaptionView, CaptionsView, ModelView, TranscribeJob, WordView, caption_presets, download_model, speech_models};
 pub use channels::{ChannelLevels, ChannelsView};
 pub use colour::{ADJUST, ColourView, looks};
+pub use colour_check::{ColourReport, ColourVideo, Saturation, colour_check};
 pub use ducking::DUCK_DB;
 pub use exporting::{ExportChoice, LOUDNESS_LUFS};
 pub use graphics::{GRAPHIC_FILE, GRAPHIC_SOUND, read_graphic};

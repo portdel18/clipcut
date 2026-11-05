@@ -1044,10 +1044,12 @@ version = "0.17.0"
 dependencies = [
  "deep_filter",
  "filmcraft-audio-dsp",
+ "filmcraft-codecs",
  "filmcraft-color",
  "filmcraft-edit",
  "filmcraft-engine",
  "filmcraft-export",
+ "filmcraft-frame",
  "filmcraft-geom",
  "filmcraft-media",
  "filmcraft-project",

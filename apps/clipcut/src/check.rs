@@ -142,14 +142,29 @@ fn decode(p: &MediaProbe) -> Decode {
     })
 }
 
+/// The player at work on a clip, as [`player`] times it.
+struct Played {
+    /// Pictures drawn a second with the player's 3 workers, and with one worker in order.
+    pps: f64,
+    in_order: f64,
+    /// Pictures a second the player shows there.
+    shown: f64,
+    /// Drawing one picture the decoder already has (the colour conversion and the rest), ms.
+    draw_ms: f64,
+    /// What the decoders did meanwhile.
+    gop: filmcraft_codecs::GopStats,
+    hw: filmcraft_codecs::hw::HwStats,
+}
+
 /// The player at work on `p`'s clip on the timeline (`span`, seconds): up to 2 seconds of its
-/// middle drawn as playback draws it (draft, every `render_step`-th frame, 3 workers). Returns the
-/// pictures drawn a second and the pictures a second the player shows there.
-fn player(feed: &FrameFeed, span: (f64, f64)) -> (f64, f64) {
+/// middle drawn as playback draws it (draft, every `render_step`-th frame, 3 workers), then a
+/// second of it by one worker in order, and one picture drawn again from the decoder's cache.
+fn player(feed: &FrameFeed, span: (f64, f64)) -> Played {
     let (start, end) = span;
     let t0 = start.max((start + end) / 2.0 - 1.0);
     let step = crate::ahead::render_step(1.0, feed.fps());
     let (first, last) = (feed.frame_at(t0), feed.frame_at(end.min(t0 + 2.0)));
+    let (gop0, hw0) = (filmcraft_codecs::gop_stats(), filmcraft_codecs::hw::hw_stats());
     let next = std::sync::atomic::AtomicI64::new(first);
     let drawn = std::sync::atomic::AtomicU32::new(0);
     let t = Instant::now();
@@ -168,8 +183,71 @@ fn player(feed: &FrameFeed, span: (f64, f64)) -> (f64, f64) {
             });
         }
     });
-    let shown = feed.fps() / step as f64;
-    (f64::from(drawn.into_inner()) / t.elapsed().as_secs_f64().max(1e-6), shown)
+    let pps = f64::from(drawn.into_inner()) / t.elapsed().as_secs_f64().max(1e-6);
+    let (gop1, hw1) = (filmcraft_codecs::gop_stats(), filmcraft_codecs::hw::hw_stats());
+    // one worker, in order, from where the workers left off (back to the start when that is the end)
+    let from = if last + 30 * step <= feed.frame_at(end) { last } else { first };
+    let t = Instant::now();
+    let mut n = 0u32;
+    for k in (from..from + 30 * step).step_by(usize::try_from(step).unwrap_or(1).max(1)) {
+        if t.elapsed() > Duration::from_secs(10) {
+            break;
+        }
+        if feed.render(k, true).is_ok() {
+            n += 1;
+        }
+    }
+    let in_order = f64::from(n) / t.elapsed().as_secs_f64().max(1e-6);
+    // the same picture again: the decoder has it, so this is the drawing alone
+    let again = from + (i64::from(n.max(1)) - 1) * step;
+    let t = Instant::now();
+    let tries = 5;
+    for _ in 0..tries {
+        let _ = feed.render(again, true);
+    }
+    let draw_ms = t.elapsed().as_secs_f64() * 1000.0 / f64::from(tries);
+    let gop = filmcraft_codecs::GopStats {
+        hits: gop1.hits.saturating_sub(gop0.hits),
+        misses: gop1.misses.saturating_sub(gop0.misses),
+        seeks: gop1.seeks.saturating_sub(gop0.seeks),
+        decoded: gop1.decoded.saturating_sub(gop0.decoded),
+        evicted: gop1.evicted.saturating_sub(gop0.evicted),
+        decode_ns: gop1.decode_ns.saturating_sub(gop0.decode_ns),
+        skipped: gop1.skipped.saturating_sub(gop0.skipped),
+        draft: gop1.draft.saturating_sub(gop0.draft),
+        frames: gop1.frames.saturating_sub(gop0.frames),
+    };
+    let hw = filmcraft_codecs::hw::HwStats {
+        frames: hw1.frames.saturating_sub(hw0.frames),
+        sessions: hw1.sessions.saturating_sub(hw0.sessions),
+        declined: hw1.declined.saturating_sub(hw0.declined),
+        fallbacks: hw1.fallbacks.saturating_sub(hw0.fallbacks),
+    };
+    Played { pps, in_order, shown: feed.fps() / step as f64, draw_ms, gop, hw }
+}
+
+/// The player's numbers in the report: what drew, what decoded, how.
+fn played_words(p: &Played) -> String {
+    let g = &p.gop;
+    let per = if g.decoded > 0 { g.decode_ns as f64 / 1e6 / g.decoded as f64 } else { 0.0 };
+    format!(
+        "{:.1} pictures a second drawn, {:.0} shown; one worker in order {:.1}; drawing alone {:.0} ms a picture\n  while playing: {} pictures decoded ({:.1} ms each, {} by the graphics card), {} seeks, {} of {} requests from the cache, {} draft, {} evicted, {} new hardware decoders, {} turned down, {} fell back to the processor",
+        p.pps,
+        p.shown,
+        p.in_order,
+        p.draw_ms,
+        g.decoded,
+        per,
+        p.hw.frames,
+        g.seeks,
+        g.hits,
+        g.hits + g.misses,
+        g.draft,
+        g.evicted,
+        p.hw.sessions,
+        p.hw.declined,
+        p.hw.fallbacks,
+    )
 }
 
 fn colour_words(p: &MediaProbe) -> String {
@@ -253,7 +331,7 @@ pub fn run(probes: &[MediaProbe], caps: Option<&str>, version: &str, feed: Optio
             None => findings.push("Drive: ClipCut couldn't read the file to measure it.".into()),
         }
         // the player as a whole: decoding, the colour conversion (HDR to normal) and drawing
-        match drawn {
+        match drawn.as_ref().map(|p| (p.pps, p.shown)) {
             Some((pps, shown)) => {
                 let keeps_up = pps >= shown * 0.95;
                 if ok && !keeps_up {
@@ -282,7 +360,7 @@ pub fn run(probes: &[MediaProbe], caps: Option<&str>, version: &str, feed: Optio
             d.by_gpu,
             d.error.as_ref().map(|e| format!(", error: {e}")).unwrap_or_default(),
             disk.map(|(s, j)| format!("{s:.0} MB/s, {j:.1} ms a jump")).unwrap_or_else(|| "not measured".into()),
-            drawn.map(|(d, s)| format!("{d:.1} pictures a second drawn, {s:.0} shown")).unwrap_or_else(|| "not timed".into()),
+            drawn.as_ref().map(played_words).unwrap_or_else(|| "not timed".into()),
         );
         if !notes.is_empty() {
             text += &format!("  decoder notes: {}\n", notes.join(" | "));
@@ -347,7 +425,26 @@ mod tests {
         );
         assert!(v.findings.iter().any(|f| f.starts_with("Player: draws")), "{v:?}");
         assert!(r.text.contains("pictures a second drawn, 30 shown"), "{}", r.text);
+        // what decoded the player's pictures and how long drawing alone takes
+        assert!(
+            r.text.contains("one worker in order") && r.text.contains("drawing alone") && r.text.contains("while playing:") && r.text.contains("seeks"),
+            "{}",
+            r.text
+        );
         assert!(run(&[], None, "0.4.6", None).text.contains("No videos"));
+    }
+
+    /// Check playback on a clip of your own: `CHECK_CLIP=clip.mp4 cargo test -p clipcut --bin
+    /// clipcut check_a_clip -- --ignored --nocapture`.
+    #[test]
+    #[ignore]
+    fn check_a_clip() {
+        let Ok(path) = std::env::var("CHECK_CLIP") else { return };
+        let mut s = clipcut_core::Studio::new();
+        s.add_clip(&path).unwrap();
+        let feed = s.frame_feed(960, "auto").ok();
+        eprintln!("{}", run(&s.media_probes(8), None, "test", feed.as_ref()).text);
+        eprintln!("{}", clipcut_core::colour_check(&s.media_probes(8), feed.as_ref(), "test").text);
     }
 
     #[test]

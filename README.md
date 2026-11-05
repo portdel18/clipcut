@@ -74,6 +74,10 @@ it keeps the voice and takes out hiss, fans, traffic, wind and chatter. **Standa
 steady noise only and changes the voice least. **Strength** sets how far the noise goes down.
 **Enhance voice** makes speech clearer and more even.
 
+**Check colour.** In the Media panel, **Check colour** measures how saturated each video is at three
+moments: the footage as recorded, a standard conversion of it to normal (SDR) video, and the picture
+the player shows, with a report to copy and send.
+
 **Split at scene changes.** For a clip that is already edited (a broadcast segment, someone
 else's video), **Split at scene changes** under Speed looks at every frame of the clip and cuts it
 wherever a new shot starts, with its sound, in one undo step. A bar shows how far it has got, and

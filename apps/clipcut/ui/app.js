@@ -651,6 +651,7 @@ async function makeProxies(items, auto = false) {
 async function checkPlayback() {
   const dlg = $('#check-dlg');
   const body = $('#check-body');
+  $('#check-title').textContent = 'Playback check';
   body.innerHTML = '<p class="meta">Testing each video on this computer: a few seconds each…</p>';
   $('#check-copy').disabled = true;
   $('#check-text').value = '';
@@ -672,6 +673,37 @@ async function checkPlayback() {
     body.appendChild(ul);
   }
   if (!r.videos.length) body.innerHTML = '<p class="meta">There are no videos in this project to check.</p>';
+  $('#check-text').value = r.text;
+  $('#check-copy').disabled = false;
+}
+/* Check colour: each video's saturation as recorded, as a standard SDR conversion shows it and
+   as the player shows it (colour_check.rs), with the report to copy. */
+async function checkColour() {
+  const dlg = $('#check-dlg');
+  const body = $('#check-body');
+  $('#check-title').textContent = 'Colour check';
+  body.innerHTML = '<p class="meta">Measuring each video at three moments…</p>';
+  $('#check-copy').disabled = true;
+  $('#check-text').value = '';
+  if (!dlg.open) dlg.showModal();
+  if (S.playing) await pause();
+  let r = null;
+  try { r = await invoke('colour_check', { maxWidth: previewWidth() }); } catch (e) { body.innerHTML = ''; const p = document.createElement('p'); p.className = 'meta'; p.textContent = String(e); body.appendChild(p); }
+  if (!r) return;
+  body.innerHTML = '';
+  for (const v of r.videos) {
+    const h = document.createElement('h3');
+    h.textContent = v.name;
+    body.appendChild(h);
+    const ul = document.createElement('ul');
+    for (const f of v.findings) { const li = document.createElement('li'); li.textContent = f; ul.appendChild(li); }
+    body.appendChild(ul);
+  }
+  if (!r.videos.length) body.innerHTML = '<p class="meta">There are no videos in this project to check.</p>';
+  const pre = document.createElement('pre');
+  pre.className = 'check-pre';
+  pre.textContent = r.text;
+  body.appendChild(pre);
   $('#check-text').value = r.text;
   $('#check-copy').disabled = false;
 }
@@ -4678,6 +4710,7 @@ click('#tab-mixer', () => showTab('mixer'));
 click('#proxy-make', () => makeProxies(null));
 click('#proxy-check', checkPlayback);
 click('#check-copy', copyCheck);
+click('#colour-check', checkColour);
 click('#check-close', () => $('#check-dlg').close());
 $('#proxy-auto').addEventListener('change', e => setAutoProxies(e.target.checked));
 $('#proxy-use').addEventListener('change', e => edit('set_proxies', { on: e.target.checked }));
@@ -4744,8 +4777,19 @@ $('#stage').addEventListener('pointermove', e => {
   $('#stage').classList.toggle('corner', !!c && cornerAt(c, (e.clientX - r.left) * k, (e.clientY - r.top) * k, k));
 });
 $('#stage').addEventListener('wheel', stageWheel, { passive: false });
-// buttons don't keep the focus, so Space and the editing keys always reach the timeline
-document.addEventListener('mousedown', e => { if (e.target.closest('button')) e.preventDefault(); });
+// Buttons don't take focus (no focus ring after a click), but a click on one does take it away from
+// a box, so the keyboard shortcuts work again straight after (J K L once Play was clicked).
+document.addEventListener('mousedown', e => {
+  if (!e.target.closest('button')) return;
+  e.preventDefault();
+  const f = document.activeElement;
+  if (f && f !== document.body && f.matches('input, select, textarea, [contenteditable]') && !f.closest('dialog') && !e.target.closest('dialog')) f.blur();
+});
+// a slider, tick box, choice or number that has changed gives the keys back too
+document.addEventListener('change', e => {
+  const t = e.target;
+  if (t instanceof HTMLElement && t.matches('select, input[type=range], input[type=checkbox], input[type=radio], input[type=number], input[type=color]') && !t.closest('dialog')) t.blur();
+});
 
 $('#ruler').addEventListener('pointerdown', e => scrubFrom(e, false));
 content().addEventListener('pointerdown', e => {
@@ -5111,9 +5155,19 @@ function saveKeys() {
 rebuildKeymap();
 invoke('load_shortcuts').then(useKeyChanges).catch(() => useKeyChanges({}));
 
+/** Whether a key pressed in `el` is someone typing (or choosing) there, so shortcuts leave it alone:
+ * text and number boxes, notes, dropdowns; a slider keeps its own arrow keys. Tick boxes, buttons and
+ * sliders otherwise pass every key on. */
+function typingIn(el, e) {
+  if (!(el instanceof HTMLElement)) return false;
+  if (el.isContentEditable || el.matches('textarea, select')) return true;
+  if (!el.matches('input')) return false;
+  if (el.type === 'range') return /^(Arrow|Page|Home|End)/.test(e.key);
+  return !/^(checkbox|radio|color|button|submit|reset|file)$/.test(el.type);
+}
 document.addEventListener('keydown', e => {
   if (!$('#graphics-view').hidden) { if (e.key === 'Escape') { e.preventDefault(); closeGraphics(); } return; }
-  if (e.target.closest('input, textarea, select') || document.querySelector('dialog[open]') || S.dragging) return;
+  if (typingIn(e.target, e) || document.querySelector('dialog[open]') || S.dragging) return;
   if (KY.picking && e.key === 'Escape') { e.preventDefault(); stopPicking(); return; }
   const combo = comboOf(e);
   const a = combo && KEYMAP.get(combo);

@@ -137,6 +137,20 @@ remote `upstream`). Read `README.md` for what it is and the roadmap.
   keeps bright colours' full saturation, so HDR video (PQ, HLG; not log) now loses half of what
   per-channel mapping would take from them (`HIGHLIGHT_DESAT`, also written out in
   `composite.wgsl`).
+- The 0.4.9 report: decode 63 fps but the player drew 2.7 of 30 (0.4.8: 21), not reproduced here
+  (no Media Foundation; drawing on the CPU is as before, ~100 ms a 1080×1920 HLG picture on 4
+  cores). Since then the check's player line also gives one worker in order, the drawing alone,
+  and the decoders' counts meanwhile (`played_words`: by the graphics card, seeks, cache hits,
+  new hardware decoders, fallbacks): read those before changing the player. By hand:
+  `tests/player_speed.rs` and `check::tests::check_a_clip` (`PLAYER_CLIP` / `CHECK_CLIP`).
+- **Check colour** (Media panel, `colour_check.rs`, `#colour-check`): for each video at three
+  moments of its first clip, HSV saturation (mean, 90th percentile) and Y'CbCr chroma of the
+  footage's own signal, of the ITU conversion to SDR BT.709 (no tone mapping: the colorimetric
+  target) and of the player's picture, with the ratios; a report to copy, like Check playback.
+- Keyboard focus: buttons never take focus (`mousedown` is prevented), and a click on one takes it
+  away from a box; sliders, tick boxes, choices and numbers give it back on `change`. Shortcuts are
+  held only while typing (`typingIn`: text and number boxes, notes, dropdowns; a slider keeps its
+  arrow keys).
 - Graphics follow the video: opening Graphics calls `CS.hosted.setBackdrop` with the frame at the
   playhead (`graphic_backdrop`, which leaves out the graphic being changed), and after a Ratio
   change `offerRemake` re-renders graphics in the old shape through `CS.hosted.add` one by one
