@@ -45,7 +45,7 @@ pub(crate) struct LaneHold {
 }
 
 /// Timeline time at which main clip `c` plays media time `m` (`None` outside it).
-fn timeline_of(c: &TrackItem, m: Tick) -> Option<Tick> {
+pub(crate) fn timeline_of(c: &TrackItem, m: Tick) -> Option<Tick> {
     if c.frame_hold.is_some() || m < c.source_in || m >= c.source_out() {
         return None;
     }

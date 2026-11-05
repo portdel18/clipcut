@@ -79,6 +79,13 @@ else's video), **Split at scene changes** under Speed looks at every frame of th
 wherever a new shot starts, with its sound, in one undo step. A bar shows how far it has got, and
 Stop leaves the clip as it was.
 
+**Markers with notes.** Press `M` (or the flag on the toolbar), while the video plays or stops, to
+mark the moment at the playhead. Write a name and notes and pick a colour in the **Markers** tab, which
+lists them all; click one to go there. On the ruler, click a flag to open it or drag it to move it; ↑/↓
+stop at markers too. A marker over the main track stays on its footage when you cut, delete or move
+clips. **Copy as YouTube chapters** turns the named markers into lines for the video's description,
+and says what YouTube would refuse (the first at 0:00, three or more, 10 seconds or longer each).
+
 **Speed, reverse, freeze.** Speed keeps the voice's pitch (switch it off under Speed for the tape
 effect); **Reverse** plays the clip backwards; **Freeze** (the toolbar, or `F`) puts a 3-second still of
 the frame at the playhead into the video and pushes the rest along (trim the still to change its
