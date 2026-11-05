@@ -161,6 +161,8 @@ select:disabled { opacity: .5; }
 .graphics-view iframe { width: 100%; height: 100%; border: 0; background: #141312; }
 .clip .gr-tag { position: absolute; right: 6px; top: 4px; padding: 1px 6px; border-radius: 4px; background: var(--accent); color: var(--accent-ink); font-size: 10px; font-weight: 700; pointer-events: none; }
 .clip.narrow .gr-tag { display: none; }
+.clip .ramp-tag { background: var(--panel-2); color: var(--accent); border: 1px solid var(--accent); }
+.clip.overlay .gr-tag.ramp-tag, .clip.main .gr-tag.ramp-tag { right: auto; left: 6px; top: 4px; }
 
 /* Transitions tab, and transitions on the main track */
 #tr-target { margin: 0 0 12px; }
@@ -222,6 +224,10 @@ select:disabled { opacity: .5; }
 .seg button { height: 26px; padding: 0 9px; border-radius: 6px; border: 1px solid var(--line); background: var(--panel-2); color: var(--muted); cursor: pointer; font-size: 12px; }
 .seg button:hover { color: var(--text); }
 .seg button[aria-pressed="true"] { border-color: var(--accent); color: var(--accent); }
+.ramp { margin-top: 10px; display: grid; gap: 8px; }
+.ramp-head { display: flex; justify-content: space-between; font-size: 12px; color: var(--muted); }
+.ramp-len { font-family: var(--mono); color: var(--faint); }
+#ramp-graph { width: 100%; height: 110px; border-radius: 6px; background: var(--well); border: 1px solid var(--line); touch-action: none; }
 .check { display: flex; align-items: center; gap: 8px; color: var(--muted); }
 .loud-row { margin: 4px 0 12px; color: var(--text); }
 .loud-row .hint { color: var(--muted); font-size: 12px; margin-left: 6px; }

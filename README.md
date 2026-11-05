@@ -78,6 +78,13 @@ effect); **Reverse** plays the clip backwards; **Freeze** (the toolbar, or `F`) 
 the frame at the playhead into the video and pushes the rest along (trim the still to change its
 length). The sound pauses during the freeze, so speech stays with its picture.
 
+**Speed curves.** Under Speed, a **speed curve** makes a clip speed up and slow down along its
+footage: **Moment** (fast, slow motion on the middle, fast again), **Burst**, **Speed up**, **Slow
+down**, **Montage**, **Jump**, or **Custom**. Drag a point on the graph up to play faster there, down
+to play slower; double-click to add a point or take one away. The clip keeps the same footage, so its
+length changes and the main track moves along. The sound speeds up and slows down with the picture,
+its pitch with it. Picking one speed for the clip, or **None**, takes the curve off.
+
 **Stills.** The camera button under the player takes the frame at the playhead (of the selected
 clip, or the main track's), and the one on a video in the Media panel takes any frame of that file:
 a dialog shows it, the slider and arrows pick another frame, then **Open in Thumbnails** makes it

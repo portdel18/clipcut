@@ -30,6 +30,7 @@ mod media_check;
 mod mixer;
 mod preview;
 mod props;
+mod ramps;
 mod replace;
 mod returns;
 mod scenes;

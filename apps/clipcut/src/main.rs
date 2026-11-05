@@ -545,6 +545,7 @@ fn main() {
             editing::channel_levels,
             editing::freeze,
             editing::set_reverse,
+            editing::set_ramp,
             editing::set_keep_pitch,
             editing::set_key,
             editing::set_fill,

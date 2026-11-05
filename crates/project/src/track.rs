@@ -190,7 +190,7 @@ impl TrackItem {
     pub fn range(&self) -> TimeRange {
         TimeRange::new(self.start, self.duration)
     }
-    /// Media time displayed at timeline time `t` (ignores time remapping keyframes).
+    /// Media time displayed at timeline time `t` (a speed ramp included: [`crate::ramp`]).
     pub fn source_time_at(&self, t: Tick) -> Tick {
         if let Some(h) = self.frame_hold {
             return h;
@@ -209,6 +209,9 @@ impl TrackItem {
     /// Media time at timeline time `t` ignoring any frame hold.
     pub fn moving_source_time_at(&self, t: Tick) -> Tick {
         let rel = t - self.start;
+        if let Some(m) = self.ramp_media_at(rel) {
+            return m;
+        }
         let scaled = Tick((rel.0 as f64 * self.speed.abs()).round() as i64);
         if self.reverse {
             self.source_in + Tick((self.duration.0 as f64 * self.speed.abs()).round() as i64) - scaled - Tick(1)
@@ -218,6 +221,9 @@ impl TrackItem {
     }
     /// Media time consumed by the item (the source out point).
     pub fn source_out(&self) -> Tick {
+        if let Some(m) = self.ramp_media_at(self.duration) {
+            return m;
+        }
         self.source_in + Tick((self.duration.0 as f64 * self.speed.abs()).round() as i64)
     }
     pub fn effect(&self, id: &str) -> Option<&EffectInstance> {

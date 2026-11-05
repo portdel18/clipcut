@@ -468,6 +468,48 @@ fn stretched(item: &TrackItem, src: SourceAudio, ident: u64, o0: i64, n: usize, 
     Some(out)
 }
 
+/// A speed-ramped clip's audio for timeline samples `[a0, a0 + n)`: each sample read from where
+/// the ramp has the media then, so the sound speeds up and slows down with the picture (its pitch
+/// with it, as tape would).
+fn ramped(item: &TrackItem, src: SourceAudio, a0: i64, n: usize, sr: u32) -> Option<AudioBuffer> {
+    /// Output samples between exact positions (linear between them).
+    const EVERY: usize = 64;
+    let rate = sr as f64 / filmcraft_time::TICKS_PER_SECOND as f64;
+    let at = |i: usize| item.source_time_at(Tick::from_units(a0 + i as i64, sr as i64)).0 as f64 * rate;
+    let marks: Vec<f64> = (0..=n.div_ceil(EVERY)).map(|k| at((k * EVERY).min(n))).collect();
+    let pos: Vec<f64> = (0..n)
+        .map(|i| {
+            let (k, f) = (i / EVERY, (i % EVERY) as f64 / EVERY as f64);
+            let (p0, p1) = (marks.get(k).copied().unwrap_or(0.0), marks.get(k + 1).copied().unwrap_or(0.0));
+            p0 + (p1 - p0) * f
+        })
+        .collect();
+    let lo = pos.iter().copied().fold(f64::INFINITY, f64::min).floor();
+    let hi = pos.iter().copied().fold(f64::NEG_INFINITY, f64::max).ceil();
+    if !(lo.is_finite() && hi.is_finite()) {
+        return None;
+    }
+    // at most the fastest a ramp plays, and a little over
+    let most = (n as f64 * filmcraft_project::ramp::RAMP_MAX / 100.0 * item.speed.abs().max(1.0)).ceil() + 4.0;
+    let span = ((hi - lo) + 2.0).min(most).max(1.0) as usize;
+    let s0 = lo as i64;
+    // silence before the media's start
+    let skip = usize::try_from(s0.saturating_neg().max(0)).unwrap_or(usize::MAX).min(span);
+    let raw = src(s0.max(0), span - skip)?;
+    let mut b = AudioBuffer::silence(sr, raw.channel_count(), n);
+    for (c, ch) in raw.channels.iter().enumerate() {
+        let get = |k: i64| usize::try_from(k - skip as i64).ok().and_then(|k| ch.get(k)).copied().unwrap_or(0.0);
+        for (i, p) in pos.iter().enumerate() {
+            let x = p - lo;
+            let k = x.floor() as i64;
+            let fr = (x - k as f64) as f32;
+            let (a, bb) = (get(k), get(k + 1));
+            b.channels[c][i] = a + (bb - a) * fr;
+        }
+    }
+    Some(b)
+}
+
 /// The clip's audio (after speed/reverse) for timeline samples `[x0, x0 + len)` as `w` channels
 /// (2: stereo, mono sources on both sides, 5.1 sources folded down; 6: 5.1), with silence outside
 /// the clip.
@@ -487,6 +529,8 @@ fn raw_channels(item: &TrackItem, src: SourceAudio, ident: u64, x0: i64, len: us
     let remixed = crate::remix::read(item, &|m0, len| src(m0, len), a0 - item_s0, n, sr);
     let buf = if remixed.is_some() {
         remixed
+    } else if item.ramp().is_some() {
+        ramped(item, src, a0, n, sr)
     } else if (speed - 1.0).abs() < 1e-9 && !item.reverse {
         src(src_start_ticks.to_units_floor(sr as i64), n)
     } else if item.maintain_pitch && !item.reverse {
