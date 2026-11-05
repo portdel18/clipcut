@@ -195,6 +195,9 @@ impl Studio {
                         i.markers.retain(|m| m.name != PITCH_OFF);
                         if !on {
                             i.markers.push(filmcraft_project::Marker {
+                                url: String::new(),
+                                author: String::new(),
+                                custom_color: None,
                                 id: filmcraft_project::MarkerId(ctx.alloc()),
                                 start: i.source_in,
                                 duration: Tick::ZERO,
