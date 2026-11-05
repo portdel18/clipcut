@@ -340,10 +340,10 @@ impl Studio {
             Ok(v) => {
                 let h = &mut self.session.history;
                 if h.undo.len() > before
-                    && let Some(first) = h.undo.get(mark).map(|e| e.1.clone())
+                    && let Some((first, command)) = h.undo.get(mark).map(|e| (e.1.clone(), e.2.clone()))
                 {
                     h.undo.truncate(mark);
-                    h.undo.push((label.to_string(), first));
+                    h.undo.push((label.to_string(), first, command));
                     if h.undo.len() > limit {
                         h.undo.remove(0);
                     }

@@ -75,6 +75,9 @@ impl Studio {
                 i.markers.retain(|m| m.name != CUT);
                 if let Some(o) = original {
                     i.markers.push(Marker {
+                        url: String::new(),
+                        author: String::new(),
+                        custom_color: None,
                         id: MarkerId(ctx.alloc()),
                         start: i.source_in,
                         duration: Tick::ZERO,

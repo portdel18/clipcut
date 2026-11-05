@@ -187,8 +187,7 @@ fn map<R>(device: &wgpu::Device, buf: &wgpu::Buffer, f: impl FnOnce(&[u8]) -> R)
     slice.map_async(wgpu::MapMode::Read, move |r| {
         let _ = tx.send(r);
     });
-    crate::wait_mapped(device)?;
-    rx.recv().ok()?.ok()?;
+    crate::wait_mapped(device, &rx)?;
     crate::export_renderer::timing::add_map_wait(t.elapsed());
     let t = std::time::Instant::now();
     let data = slice.get_mapped_range().ok()?;
