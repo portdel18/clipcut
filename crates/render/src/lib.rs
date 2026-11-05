@@ -548,6 +548,13 @@ pub(crate) fn item_layer_ex(
 /// The layer of a plain media frame (see [`item_layer_ex`]): only the part with alpha when the frame
 /// has an alpha plane, the whole picture otherwise (opaque when it has no alpha at all).
 fn plain_layer(frame: &VideoFrame, n: usize, opacity: f32, blend: Blend) -> Layer {
+    // Draft playback: shrink in Y'CbCr and convert each drawn pixel once (see `colorman::decode`)
+    if n > 1
+        && filmcraft_media::cancel::draft()
+        && let Some(small) = frame.box_decimated(n)
+    {
+        return plain_layer(&small, 1, opacity, blend);
+    }
     match frame.alpha_region(n) {
         Some(r) => {
             let (r, px) = frame.to_linear_f32_region(n, None, r);
