@@ -23,7 +23,16 @@ pub struct ExportChoice {
     pub ext: &'static str,
     /// Roughly how big the file will be, bytes.
     pub bytes: u64,
+    /// Whether "Even out the loudness" is offered (all but the master), and
+    /// [`ExportChoice::loudness_on`] whether it starts on.
+    pub loudness: bool,
+    pub loudness_on: bool,
 }
+
+/// The loudness "Even out the loudness" sets the whole video to (integrated, ITU-R BS.1770):
+/// what TikTok, Instagram, YouTube and Spotify play at, so the video is neither turned down nor
+/// left quieter than the ones around it. The engine's limiter keeps the peaks 2 dB under full scale.
+pub const LOUDNESS_LUFS: f64 = -14.0;
 
 /// Bits a second of sound in an MP4 (AAC), and of 48 kHz 16-bit stereo WAV.
 const AAC_KBPS: f64 = 320.0;
@@ -77,7 +86,21 @@ impl Studio {
         let bytes = |kbps: f64| ((kbps + AAC_KBPS) * 1000.0 / 8.0 * secs) as u64;
         let video = |id, name, (cw, ch): (u32, u32), kbps: f64, note: Option<String>| {
             let b = bytes(kbps);
-            ExportChoice { id, name, detail: format!("{cw} × {ch}, {rate} fps, {}", size_text(b)), note, width: cw, height: ch, ext: "mp4", bytes: b }
+            // the choices for a platform start with the loudness evened out; the project's own
+            // export starts as it is mixed
+            let loudness_on = id != "project";
+            ExportChoice {
+                id,
+                name,
+                detail: format!("{cw} × {ch}, {rate} fps, {}", size_text(b)),
+                note,
+                width: cw,
+                height: ch,
+                ext: "mp4",
+                bytes: b,
+                loudness: true,
+                loudness_on,
+            }
         };
         // the engine's own default: 0.2 bits a pixel
         let own = f64::from(w) * f64::from(h) * fps * 0.2 / 1000.0;
@@ -101,6 +124,9 @@ impl Studio {
                 height: h,
                 ext: "mov",
                 bytes: bytes(prores),
+                // a master keeps the mix as it is, for mastering again
+                loudness: false,
+                loudness_on: false,
             },
             ExportChoice {
                 id: "sound",
@@ -111,6 +137,8 @@ impl Studio {
                 height: 0,
                 ext: "wav",
                 bytes: wav,
+                loudness: true,
+                loudness_on: false,
             },
         ])
     }
@@ -118,12 +146,14 @@ impl Studio {
     /// Exports the whole video to `path` the way export choice `choice` says (one of
     /// [`Studio::export_choices`]). Returns the job id.
     pub fn export_as(&mut self, path: &str, choice: &str) -> Result<u64> {
-        self.export_as_with(path, choice, true)
+        self.export_as_with(path, choice, true, None)
     }
 
     /// [`Studio::export_as`], with the graphics card's encoder allowed (`hardware`) or not (the
-    /// software encoder only: the retry after a hardware encoder failed partway).
-    pub fn export_as_with(&mut self, path: &str, choice: &str, hardware: bool) -> Result<u64> {
+    /// software encoder only: the retry after a hardware encoder failed partway), and the loudness
+    /// evened out to [`LOUDNESS_LUFS`] or not (`None`: as the choice starts,
+    /// [`ExportChoice::loudness_on`]; never for a choice that doesn't offer it).
+    pub fn export_as_with(&mut self, path: &str, choice: &str, hardware: bool, loudness: Option<bool>) -> Result<u64> {
         let c = self.export_choices()?.into_iter().find(|c| c.id == choice).ok_or_else(|| Error::Invalid(format!("there is no export called “{choice}”")))?;
         let fps = self.info()?.fps;
         // the GPU composites and encodes where the machine has one that can (a real adapter;
@@ -147,6 +177,9 @@ impl Studio {
                 };
                 p["bitrateKbps"] = json!(kbps);
             }
+        }
+        if c.loudness && loudness.unwrap_or(c.loudness_on) {
+            p["loudnessLufs"] = json!(LOUDNESS_LUFS);
         }
         if !path.to_ascii_lowercase().ends_with(&format!(".{}", c.ext)) {
             return Err(Error::Invalid(format!("save it as a .{} file", c.ext)));

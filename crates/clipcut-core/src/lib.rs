@@ -56,7 +56,7 @@ pub use captions::{CaptionStyleView, CaptionView, CaptionsView, ModelView, Trans
 pub use channels::{ChannelLevels, ChannelsView};
 pub use colour::{ADJUST, ColourView, looks};
 pub use ducking::DUCK_DB;
-pub use exporting::ExportChoice;
+pub use exporting::{ExportChoice, LOUDNESS_LUFS};
 pub use graphics::{GRAPHIC_FILE, GRAPHIC_SOUND, read_graphic};
 pub use key::KeyView;
 pub use keyframes::{ANIMATABLE, KeyTrack};
@@ -123,6 +123,9 @@ pub struct JobStatus {
     /// Set when the job failed or was cancelled.
     pub error: Option<String>,
     pub status: String,
+    /// What evening out the loudness found and did: the video's loudness before (LUFS) and the
+    /// change made to reach the target (dB). `None` when the export didn't even it out.
+    pub loudness: Option<(f64, f64)>,
 }
 
 /// Mixes the open sequence's sound for playback, on any thread: it holds a snapshot of the project,
@@ -367,6 +370,13 @@ impl Studio {
             finished: v.get("finished").and_then(Value::as_bool).unwrap_or(false),
             error,
             status: v.get("status").and_then(Value::as_str).unwrap_or_default().to_string(),
+            loudness: j
+                .progress
+                .loudness
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .filter(|r| r.measured_lufs.is_finite() && r.gain_db.is_finite())
+                .map(|r| (r.measured_lufs, r.gain_db)),
         })
     }
 

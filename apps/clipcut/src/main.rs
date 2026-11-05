@@ -225,8 +225,8 @@ fn export_choices(app: tauri::State<'_, App>) -> Result<Vec<clipcut_core::Export
 }
 
 #[tauri::command]
-fn export_as(path: String, choice: String, hardware: Option<bool>, app: tauri::State<'_, App>) -> Result<u64, String> {
-    lock(&app.studio).export_as_with(&path, &choice, hardware.unwrap_or(true)).map_err(|e| e.to_string())
+fn export_as(path: String, choice: String, hardware: Option<bool>, loudness: Option<bool>, app: tauri::State<'_, App>) -> Result<u64, String> {
+    lock(&app.studio).export_as_with(&path, &choice, hardware.unwrap_or(true), loudness).map_err(|e| e.to_string())
 }
 
 /// Pictures the graphics card's encoder has encoded in this run (read before and after an export:
@@ -408,7 +408,7 @@ fn export_test(input: &str, output: &str, report: &str, mode: &str) -> i32 {
         let frames0 = filmcraft_export::hw_encode_stats().frames;
         let gpu0 = filmcraft_export::gpu_render_stats();
         let started = std::time::Instant::now();
-        let job = s.export_as_with(output, "social", mode == "hardware").map_err(|e| format!("export: {e}"))?;
+        let job = s.export_as_with(output, "social", mode == "hardware", None).map_err(|e| format!("export: {e}"))?;
         loop {
             let st = s.job(job).ok_or("export: the job disappeared")?;
             if st.finished {
