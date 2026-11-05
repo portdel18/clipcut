@@ -54,6 +54,10 @@ fn the_feed_renders_a_snapshot_on_other_threads() {
     let paused = s.frame(1.0, 320).unwrap();
     let (a, b) = (mean(&f), mean(&paused));
     assert!((0..3).all(|k| (a[k] - b[k]).abs() < 1.0), "{a:?} {b:?}");
+    // the feed takes the engine's straight-to-bytes path for one opaque picture: the same bytes
+    // the float picture over black gives, opaque
+    assert_eq!(f.rgba, paused.rgba, "the fast path changes no pixel");
+    assert!(f.rgba.iter().skip(3).step_by(4).all(|a| *a == 255));
 
     // frames render on other threads, from the project as it was
     s.set_props(&[s.timeline().clips[0].id], &serde_json::json!({"opacity": 0.0}), None).unwrap();

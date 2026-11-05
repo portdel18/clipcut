@@ -49,12 +49,18 @@ impl FrameFeed {
         let n = n.clamp(0, (self.frames - 1).max(0));
         let t = self.rate.tick_of(n);
         let opts = filmcraft_render::RenderOptions { scale: self.scale, captions: true, ..Default::default() };
-        let img = filmcraft_media::cancel::with_draft(draft && self.scale <= 0.5, || {
-            filmcraft_render::render_sequence(&self.project, self.sequence, t, opts, self.provider.as_ref())
+        // as the engine's monitor draws it: a frame that is one opaque 8-bit picture as it is goes
+        // straight to bytes, without the float picture in between
+        let (w, h, mut rgba) = filmcraft_media::cancel::with_draft(draft && self.scale <= 0.5, || {
+            filmcraft_render::render_sequence_rgba8(&self.project, self.sequence, t, opts, self.provider.as_ref())
         });
-        let w = u32::try_from(img.w).map_err(engine)?;
-        let h = u32::try_from(img.h).map_err(engine)?;
-        Ok(Frame { w, h, rgba: img.over_black_rgba8() })
+        // over black, opaque (the bytes keep the picture's alpha for monitors that show it)
+        for a in rgba.iter_mut().skip(3).step_by(4) {
+            *a = 255;
+        }
+        let w = u32::try_from(w).map_err(engine)?;
+        let h = u32::try_from(h).map_err(engine)?;
+        Ok(Frame { w, h, rgba })
     }
 
     /// The frame showing at `seconds`.
