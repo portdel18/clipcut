@@ -17,7 +17,8 @@
 //! BT.2020 working space) come back exactly.
 //!
 //! **Tone mapping** is the ITU-R BT.2390 EETF (Hermite knee in the PQ domain) applied to
-//! max(R,G,B) and used as a ratio on RGB, so hue and saturation are preserved. **Gamut
+//! max(R,G,B) and used as a ratio on RGB, so hue is preserved; for HDR video, bright colours also
+//! lose [`HIGHLIGHT_DESAT`] of the saturation per-channel mapping would take from them. **Gamut
 //! compression** pulls out-of-gamut colours (negative components after the matrix) towards the
 //! achromatic axis with a per-channel distance compression after the ACES Reference Gamut
 //! Compression (threshold 0.8, limit 1.25, power 1.2); colours inside 80 % of the gamut boundary
@@ -136,7 +137,15 @@ pub struct ToneMap {
     /// max(R,G,B) → scale factor, sampled on √(max / peak): fine in the shadows like the PQ axis
     /// it replaced, but found with a square root per pixel instead of the PQ curve's two powers.
     table: DecodeTable,
+    /// How much of per-channel mapping's loss of saturation the colours get (0: none, the
+    /// saturation is kept; 1: all of it).
+    desat: f32,
 }
+
+/// The share of per-channel tone mapping's highlight desaturation HDR video (PQ, HLG) gets on its
+/// way to SDR: ratio mapping alone leaves bright colours looking more saturated than they do on an
+/// HDR display, per-channel mapping alone washes them out. The shader's `managed` uses the same.
+pub const HIGHLIGHT_DESAT: f32 = 0.5;
 
 impl ToneMap {
     pub fn new(src_peak_nits: f64, dst_peak_nits: f64) -> Self {
@@ -146,21 +155,46 @@ impl ToneMap {
             let nits = v * v * peak * REFERENCE_WHITE_NITS;
             if nits <= 1e-6 { 1.0 } else { bt2390_eetf(nits, s, d) / nits }
         });
-        ToneMap { src_peak_nits, dst_peak_nits, peak: peak as f32, table }
+        ToneMap { src_peak_nits, dst_peak_nits, peak: peak as f32, table, desat: 0.0 }
     }
+
+    /// The tone map for HDR video (PQ, HLG): bright colours lose [`HIGHLIGHT_DESAT`] of the
+    /// saturation per-channel mapping would take from them.
+    pub fn for_hdr_video(src_peak_nits: f64, dst_peak_nits: f64) -> Self {
+        ToneMap { desat: HIGHLIGHT_DESAT, ..Self::new(src_peak_nits, dst_peak_nits) }
+    }
+    /// The scale factor for a value `v` > 0: the EETF's output over its input.
+    #[inline]
+    fn ratio(&self, v: f32) -> f32 {
+        if v >= self.peak {
+            // above the source peak: clip to the target peak
+            (self.dst_peak_nits / REFERENCE_WHITE_NITS) as f32 / v
+        } else {
+            self.table.lookup((v / self.peak).sqrt())
+        }
+    }
+
+    /// Tone maps `c`: its brightness by max(R,G,B) with the hue kept. With `desat`, bright colours
+    /// also lose that share of the saturation mapping each channel on its own would take (as they
+    /// do in film and in per-channel conversions), so highlights don't come out more saturated
+    /// than they look on an HDR display.
     #[inline]
     pub fn apply(&self, c: [f32; 3]) -> [f32; 3] {
         let m = c[0].max(c[1]).max(c[2]);
         if m <= 0.0 {
             return c;
         }
-        let k = if m >= self.peak {
-            // above the source peak: clip to the target peak
-            (self.dst_peak_nits / REFERENCE_WHITE_NITS) as f32 / m
-        } else {
-            self.table.lookup((m / self.peak).sqrt())
-        };
-        [c[0] * k, c[1] * k, c[2] * k]
+        let k = self.ratio(m);
+        let top = m * k;
+        let mn = c[0].min(c[1]).min(c[2]);
+        // the saturation (max − min) / max per-channel mapping gives, over the source's; the
+        // hue (where the middle channel sits between them) is kept
+        if self.desat <= 0.0 || mn <= 0.0 || mn >= m || top <= 0.0 {
+            return c.map(|v| v * k);
+        }
+        let per_channel = ((1.0 - mn * self.ratio(mn) / top) / (1.0 - mn / m)).clamp(0.0, 1.0);
+        let s = 1.0 - self.desat * (1.0 - per_channel);
+        c.map(|v| top - (top - v * k) * s)
     }
 }
 
@@ -224,7 +258,10 @@ impl InputTransform {
             Curve::Log(c) => (c.peak_linear() * REFERENCE_WHITE_NITS).clamp(REFERENCE_WHITE_NITS, LOG_PEAK_NITS),
             _ => REFERENCE_WHITE_NITS,
         };
-        let tone = (src.is_hdr() && !pipe.working.is_hdr() && pipe.auto_tone_map).then(|| ToneMap::new(peak, REFERENCE_WHITE_NITS));
+        let tone = (src.is_hdr() && !pipe.working.is_hdr() && pipe.auto_tone_map).then(|| match curve {
+            Curve::Pq | Curve::Hlg => ToneMap::for_hdr_video(peak, REFERENCE_WHITE_NITS),
+            _ => ToneMap::new(peak, REFERENCE_WHITE_NITS),
+        });
         let wider = !identity_matrix && !gamut_within(src.gamut(), wg);
         // camera gamuts (log media) get the soft compression; display gamuts keep their in-gamut
         // colours exactly (BT.709 content in a BT.2020 file comes back unchanged)
@@ -375,7 +412,7 @@ impl OutputTransform {
     pub fn new(pipe: &ColorPipeline, target: ColorSpace) -> Self {
         let wg = pipe.working_gamut();
         let tg = target.gamut();
-        let tone = (pipe.working.is_hdr() && !target.is_hdr()).then(|| ToneMap::new(HDR_PEAK_NITS, REFERENCE_WHITE_NITS));
+        let tone = (pipe.working.is_hdr() && !target.is_hdr()).then(|| ToneMap::for_hdr_video(HDR_PEAK_NITS, REFERENCE_WHITE_NITS));
         let l = tg.luma();
         let compress = (!gamut_within(wg, tg)).then(|| [l[0] as f32, l[1] as f32, l[2] as f32]);
         OutputTransform { target, matrix: to_f32(&gamut_matrix(wg, tg)), identity_matrix: wg == tg, tone, compress }
@@ -521,10 +558,33 @@ mod tests {
 
     #[test]
     fn tone_map_preserves_hue_and_maps_peak() {
-        let tm = ToneMap::new(1000.0, 203.0);
+        // ratio only (log media): hue and saturation kept
+        let plain = ToneMap::new(1000.0, 203.0);
+        let o = plain.apply([4.0, 2.0, 1.0]);
+        assert!((o[0] / o[1] - 2.0).abs() < 1e-4 && (o[1] / o[2] - 2.0).abs() < 1e-4, "{o:?}");
+        let tm = ToneMap::for_hdr_video(1000.0, 203.0);
         let c = [4.0f32, 2.0, 1.0];
         let o = tm.apply(c);
-        assert!((o[0] / o[1] - 2.0).abs() < 1e-4 && (o[1] / o[2] - 2.0).abs() < 1e-4);
+        // hue kept: the middle channel sits where it did between the others
+        assert!(((o[0] - o[1]) / (o[1] - o[2]) - 2.0).abs() < 1e-3, "{o:?}");
+        // brightness by max(R,G,B); saturation between the source's and per-channel mapping's
+        let per = |v: f32| v * tm.ratio(v);
+        let (sat, per_sat) = ((o[0] - o[2]) / o[0], 1.0 - per(1.0) / per(4.0));
+        assert!((o[0] - per(4.0)).abs() < 1e-5, "{o:?}");
+        assert!((sat - (1.0 - HIGHLIGHT_DESAT * (1.0 - per_sat / 0.75)) * 0.75).abs() < 1e-4, "{sat} {per_sat}");
+        assert!(per_sat < sat && sat < 0.75 - 0.02, "{sat} {per_sat}");
+        // composite.wgsl writes it out as 0.5: change both together
+        assert_eq!(HIGHLIGHT_DESAT, 0.5);
+        // below the knee nothing changes, saturated or not
+        for c in [[0.3f32, 0.2, 0.1], [0.4, 0.05, 0.02]] {
+            let o = tm.apply(c);
+            assert!(o.iter().zip(c).all(|(a, b)| (a - b).abs() < 1e-4), "{c:?} {o:?}");
+        }
+        // pure primaries (min 0) and greys keep their saturation
+        let r = tm.apply([3.0, 0.0, 0.0]);
+        assert!(r[1] == 0.0 && r[2] == 0.0 && r[0] > 0.9, "{r:?}");
+        let g = tm.apply([2.0; 3]);
+        assert!((g[0] - g[2]).abs() < 1e-6);
         let peak = tm.apply([1000.0 / 203.0; 3]);
         assert!((peak[0] - 1.0).abs() < 0.01, "{peak:?}");
         let dark = tm.apply([0.05; 3]);
@@ -592,7 +652,8 @@ mod tests {
         assert!((red[0] - 0.6274).abs() < 1e-3 && (red[1] - 0.0691).abs() < 1e-3 && (red[2] - 0.0164).abs() < 1e-3);
         let d = OutputTransform::display(&pipe);
         let back = d.apply(red);
-        assert!((back[0] - 0.8).abs() < 0.2 && back[1].abs() < 1e-4 && back[2].abs() < 1e-4, "{back:?}");
+        // (above the knee it loses a trace of saturation, as tone-mapped highlights do)
+        assert!((back[0] - 0.8).abs() < 0.2 && back[1].abs() < 2e-3 && back[2].abs() < 2e-3, "{back:?}");
         // a BT.2020-only green is desaturated into 709 keeping its luminance
         let g = d.apply([0.0, 0.5, 0.0]);
         assert!(g.iter().all(|v| *v >= 0.0) && g[1] > g[0] && g[1] > g[2], "{g:?}");

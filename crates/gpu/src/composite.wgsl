@@ -122,6 +122,14 @@ fn eetf(nits: f32, s: f32, d: f32) -> f32 {
     return pq1(e2 * smax) * 10000.0;
 }
 
+// The tone map's scale for a value v > 0 in working units (`ToneMap::ratio`).
+fn tone_ratio(v: f32, white: f32) -> f32 {
+    let nits = v * white;
+    if nits >= u.q3.w { return u.q4.w / white / v; }
+    if nits > 1e-6 { return eetf(nits, u.q3.w, u.q4.w) / nits; }
+    return 1.0;
+}
+
 // Signal → working linear: `InputTransform::convert` (curve, HLG OOTF, gamut matrix, tone
 // mapping, desaturation into the working gamut). The CPU's decode tables clamp the signal to 0..1.
 fn managed(rgb: vec3<f32>) -> vec3<f32> {
@@ -142,16 +150,20 @@ fn managed(rgb: vec3<f32>) -> vec3<f32> {
         c = vec3(dot(u.q2.xyz, c), dot(u.q3.xyz, c), dot(u.q4.xyz, c));
     }
     if u.q2.w > 0.5 {
+        // `ToneMap::apply` (`for_hdr_video`): brightness by max(R,G,B) with the hue kept, and half
+        // the saturation mapping each channel on its own would take
         let m = max(max(c.r, c.g), c.b);
         if m > 0.0 {
-            let nits = m * white;
-            var k = 1.0;
-            if nits >= u.q3.w {
-                k = u.q4.w / white / m;
-            } else if nits > 1e-6 {
-                k = eetf(nits, u.q3.w, u.q4.w) / nits;
+            let k = tone_ratio(m, white);
+            let top = m * k;
+            let mn = min(min(c.r, c.g), c.b);
+            var s = 1.0;
+            if mn > 0.0 && mn < m && top > 0.0 {
+                // HIGHLIGHT_DESAT (0.5) of it: the shader only takes PQ and HLG (`gpu_params`)
+                let per = clamp((1.0 - mn * tone_ratio(mn, white) / top) / (1.0 - mn / m), 0.0, 1.0);
+                s = 1.0 - 0.5 * (1.0 - per);
             }
-            c = c * k;
+            c = top - (top - c * k) * s;
         }
     }
     if u.q5.w > 0.5 {
