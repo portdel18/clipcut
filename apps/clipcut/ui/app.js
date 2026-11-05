@@ -4400,7 +4400,17 @@ function pickExport(choices) {
   try { want = localStorage.getItem('clipcut.export') || want; } catch (_) {}
   if (!choices.some(c => c.id === want)) want = choices[0].id;
   box.innerHTML = '';
-  const note = () => { const c = choices.find(x => x.id === want); $('#export-note').textContent = (c && c.note) || ''; };
+  // "Even out the loudness": as each choice starts (on for the platforms), or as the person last
+  // left it for that choice
+  const loudKey = id => `clipcut.loudness.${id}`;
+  const loudFor = c => { try { const v = localStorage.getItem(loudKey(c.id)); if (v === 'on' || v === 'off') return v === 'on'; } catch (_) {} return !!c.loudnessOn; };
+  const note = () => {
+    const c = choices.find(x => x.id === want);
+    $('#export-note').textContent = (c && c.note) || '';
+    $('#export-loud-row').hidden = !(c && c.loudness);
+    if (c) $('#export-loud').checked = c.loudness && loudFor(c);
+  };
+  $('#export-loud').onchange = e => { try { localStorage.setItem(loudKey(want), e.target.checked ? 'on' : 'off'); } catch (_) {} };
   for (const c of choices) {
     const b = document.createElement('button');
     b.className = 'choice';
@@ -4416,7 +4426,12 @@ function pickExport(choices) {
   }
   note();
   return new Promise(done => {
-    $('#export-go').onclick = () => { try { localStorage.setItem('clipcut.export', want); } catch (_) {} dlg.close(); done(choices.find(c => c.id === want)); };
+    $('#export-go').onclick = () => {
+      try { localStorage.setItem('clipcut.export', want); } catch (_) {}
+      dlg.close();
+      const c = choices.find(x => x.id === want);
+      done(c && { ...c, evenLoudness: c.loudness && $('#export-loud').checked });
+    };
     $('#export-pick-cancel').onclick = () => { dlg.close(); done(null); };
     dlg.oncancel = () => done(null);
     dlg.showModal();
@@ -4466,6 +4481,14 @@ function exportDetail(a, b) {
   const st = Object.entries(names).map(([k, n]) => [n, ((b.stages || {})[k] || 0) - ((a.stages || {})[k] || 0)]).filter(([, ms]) => ms >= 500).sort((x, y) => y[1] - x[1]);
   return `${drawn}, ${enc}.` + (st.length ? ` Time: ${st.map(([n, ms]) => `${n} ${fmtSecs(ms / 1000)}`).join(', ')}.` : '');
 }
+/** What evening out the loudness did, in a sentence (empty when it didn't run). */
+function loudnessDetail(l) {
+  if (!Array.isArray(l) || !l.every(Number.isFinite)) return '';
+  const [lufs, gain] = l;
+  const fmt = v => `${v < 0 ? '−' : '+'}${Math.abs(v).toFixed(1)}`;
+  if (Math.abs(gain) < 0.5) return ` Loudness: ${fmt(lufs)} LUFS, already about right.`;
+  return ` Loudness: the video was ${fmt(lufs)} LUFS; it was made ${gain > 0 ? 'louder' : 'quieter'} by ${Math.abs(gain).toFixed(1)} dB.`;
+}
 /** Why the graphics card's encoder last failed (runExport's 'gpu-failed'). */
 const GPU_FAIL = { reason: '' };
 /** One export job, shown in the Export dialog: 'done', 'failed', 'cancelled', or 'gpu-failed'
@@ -4475,7 +4498,7 @@ async function runExport(path, choice, hardware, dlg) {
   $('#export-detail').textContent = '';
   let job;
   try {
-    job = await invoke('export_as', { path, choice: choice.id, hardware });
+    job = await invoke('export_as', { path, choice: choice.id, hardware, loudness: !!choice.evenLoudness });
   } catch (e) { toast(e, true); dlg.close(); return 'failed'; }
   $('#export-bar').style.width = '0';
   $('#export-meta').textContent = hardware ? 'Starting…' : "Starting again with ClipCut's own encoder…";
@@ -4509,7 +4532,7 @@ async function runExport(path, choice, hardware, dlg) {
       $('#export-title').textContent = 'Export finished';
       $('#export-bar').style.width = '100%';
       $('#export-meta').textContent = `Saved in ${fmtSecs(secs)}${dur() > 0 ? ` (${(dur() / secs).toFixed(1)}× the video's own speed)` : ''}.`;
-      $('#export-detail').textContent = before && after ? exportDetail(before, after) : '';
+      $('#export-detail').textContent = (before && after ? exportDetail(before, after) : '') + loudnessDetail(st.loudness);
       $('#export-meta').className = 'meta ok';
       $('#export-reveal').hidden = false;
       return 'done';

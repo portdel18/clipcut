@@ -134,3 +134,82 @@ fn export_choices_size_the_video_for_where_it_goes() {
     assert!(s.export_as("x.mp4", "vhs").is_err());
     assert!(s.export_as("x.mp4", "sound").is_err(), "sound goes in a .wav");
 }
+
+/// Waits for export job `job` and returns its status.
+fn finish(s: &Studio, job: u64) -> clipcut_core::JobStatus {
+    let t0 = Instant::now();
+    loop {
+        let st = s.job(job).unwrap();
+        if st.finished {
+            return st;
+        }
+        assert!(t0.elapsed() < Duration::from_secs(300), "export stuck at {:.0}%", st.progress * 100.0);
+        std::thread::sleep(Duration::from_millis(50));
+    }
+}
+
+/// The integrated loudness (LUFS) of a WAV file (16-, 24- or 32-bit PCM, or 32-bit float).
+fn lufs(path: &std::path::Path) -> f64 {
+    let b = std::fs::read(path).unwrap();
+    assert_eq!(&b[0..4], b"RIFF");
+    let (mut at, mut fmt, mut data) = (12usize, None, None);
+    while at + 8 <= b.len() {
+        let len = u32::from_le_bytes(b[at + 4..at + 8].try_into().unwrap()) as usize;
+        match &b[at..at + 4] {
+            b"fmt " => fmt = Some(at + 8),
+            b"data" => data = Some((at + 8, len.min(b.len() - at - 8))),
+            _ => {}
+        }
+        at += 8 + len + (len & 1);
+    }
+    let (f, (d, n)) = (fmt.unwrap(), data.unwrap());
+    let tag = u16::from_le_bytes([b[f], b[f + 1]]);
+    let ch = u16::from_le_bytes([b[f + 2], b[f + 3]]) as usize;
+    let sr = u32::from_le_bytes(b[f + 4..f + 8].try_into().unwrap());
+    let bits = u16::from_le_bytes([b[f + 14], b[f + 15]]) as usize;
+    let k = bits / 8;
+    let samples: Vec<f32> = b[d..d + n]
+        .chunks_exact(k)
+        .map(|x| match (tag, bits) {
+            (3, 32) => f32::from_le_bytes(x.try_into().unwrap()),
+            (_, 16) => f32::from(i16::from_le_bytes([x[0], x[1]])) / 32768.0,
+            (_, 24) => (i32::from_le_bytes([0, x[0], x[1], x[2]]) >> 8) as f32 / 8_388_608.0,
+            (_, 32) => i32::from_le_bytes(x.try_into().unwrap()) as f32 / 2_147_483_648.0,
+            other => panic!("WAV format {other:?}"),
+        })
+        .collect();
+    let mut m = filmcraft_audio_dsp::LoudnessMeter::new(f64::from(sr), ch);
+    m.process_interleaved(&samples);
+    m.integrated()
+}
+
+#[test]
+fn exports_for_platforms_even_out_the_loudness() {
+    let Some(v) = picture() else { return };
+    let mut s = Studio::new();
+    s.add_clip(v.to_str().unwrap()).unwrap();
+    let c = s.export_choices().unwrap();
+    let by = |id: &str| c.iter().find(|x| x.id == id).unwrap().clone();
+    // the platforms start with it on, the project as mixed, the master never offers it
+    assert!(by("social").loudness && by("social").loudness_on && by("youtube").loudness_on && by("small").loudness_on);
+    assert!(by("project").loudness && !by("project").loudness_on);
+    assert!(by("sound").loudness && !by("sound").loudness_on);
+    assert!(!by("master").loudness);
+
+    // the tone as mixed, and evened out to −14 LUFS
+    let dir = fixtures_dir("clipcut-core");
+    let (plain, even) = (dir.join(format!("loud-plain-{}.wav", std::process::id())), dir.join(format!("loud-even-{}.wav", std::process::id())));
+    let job = s.export_as_with(plain.to_str().unwrap(), "sound", true, Some(false)).unwrap();
+    let done = finish(&s, job);
+    assert_eq!((done.error.clone(), done.loudness), (None, None), "{done:?}");
+    let job = s.export_as_with(even.to_str().unwrap(), "sound", true, Some(true)).unwrap();
+    let done = finish(&s, job);
+    assert_eq!(done.error, None, "{done:?}");
+    let (measured, gain) = done.loudness.expect("the export says what it measured");
+    let before = lufs(&plain);
+    assert!((measured - before).abs() < 1.0, "it measured {measured:.1} LUFS, the file is {before:.1}");
+    assert!((gain - (clipcut_core::LOUDNESS_LUFS - measured)).abs() < 1.5, "gain {gain:.1} dB from {measured:.1} LUFS");
+    let after = lufs(&even);
+    assert!((after - clipcut_core::LOUDNESS_LUFS).abs() < 1.0, "{after:.1} LUFS after evening out (was {before:.1})");
+    let _ = (std::fs::remove_file(&plain), std::fs::remove_file(&even));
+}

@@ -173,7 +173,10 @@ the clip.
 **Export choices.** **Export** asks where the video goes: as the project is, TikTok / Reels / Shorts
 (1080 × 1920), YouTube (1080p or 4K, in the video's shape), a small file to send, a ProRes master,
 or the sound alone, each with its size and roughly how big the file will be. A 16:9 video for
-TikTok gets a note to change Ratio to 9:16 first.
+TikTok gets a note to change Ratio to 9:16 first. **Even out the loudness** (on for TikTok, YouTube
+and the small file) measures the whole video and sets it to −14 LUFS, the level those platforms play
+at, so it isn't turned down or left quieter than the videos around it; the dialog says afterwards
+how loud it was and by how much it changed.
 
 **Mixer.** The **Mixer** tab has a strip for the main track's sound, one for each sound lane and
 one for the Mix (everything, as exported): volume and pan, Mute and Solo, and a level meter that

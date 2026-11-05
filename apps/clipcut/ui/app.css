@@ -223,6 +223,8 @@ select:disabled { opacity: .5; }
 .seg button:hover { color: var(--text); }
 .seg button[aria-pressed="true"] { border-color: var(--accent); color: var(--accent); }
 .check { display: flex; align-items: center; gap: 8px; color: var(--muted); }
+.loud-row { margin: 4px 0 12px; color: var(--text); }
+.loud-row .hint { color: var(--muted); font-size: 12px; margin-left: 6px; }
 .check input { accent-color: var(--accent); }
 
 /* Details */

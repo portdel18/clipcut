@@ -94,7 +94,9 @@ remote `upstream`). Read `README.md` for what it is and the roadmap.
   `hold_animations` / `restore_animations` (as `apply_props` does) so they are rebuilt for it.
 - Beats are clip markers named "Beat" (media time, so they move and trim with the clip), found by
   `filmcraft_audio_dsp::remix::analyze`. Export goes through `export_as` with a choice from
-  `export_choices`; `export(path)` stays for the self-test.
+  `export_choices`; `export(path)` stays for the self-test. "Even out the loudness" (`ExportChoice::
+  loudness` / `loudness_on`, the picker's `#export-loud`, remembered per choice) sends the engine's
+  `loudnessLufs` (`LOUDNESS_LUFS`, −14); `JobStatus::loudness` reads what it measured and did.
 - Titles are the engine's graphics templates (`graphics.template.*`); a clip made from one has a
   template link (`ClipView.title`) and is edited through its controls, never the text keys
   (its first layer may be a shape). The user's own titles live in "Graphics Templates" beside the
