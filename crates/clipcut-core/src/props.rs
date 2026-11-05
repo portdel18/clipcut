@@ -40,6 +40,9 @@ pub struct ClipProps {
     pub opacity: Option<f64>,
     /// Percent: 100 plays at normal speed.
     pub speed: f64,
+    /// A speed curve: points `[place in the clip's footage (0…1), speed (1 = normal)]`, empty for
+    /// none (see `ramps.rs`).
+    pub ramp: Vec<[f64; 2]>,
     /// Plays backwards.
     pub reverse: bool,
     /// A still of one frame (a freeze).
@@ -127,7 +130,13 @@ pub(crate) fn clip_props(s: &filmcraft_engine::Session, q: &Sequence, track: &Tr
 
 /// [`clip_props`] with animated properties as they are at media time `at`.
 pub(crate) fn clip_props_at(s: &filmcraft_engine::Session, q: &Sequence, track: &Track, i: &TrackItem, at: Tick) -> (&'static str, ClipProps) {
-    let mut p = ClipProps { speed: (i.speed.abs() * 100.0 * 100.0).round() / 100.0, reverse: i.reverse, freeze: i.frame_hold.is_some(), ..Default::default() };
+    let mut p = ClipProps {
+        speed: (i.speed.abs() * 100.0 * 100.0).round() / 100.0,
+        ramp: crate::ramps::ramp_of(i),
+        reverse: i.reverse,
+        freeze: i.frame_hold.is_some(),
+        ..Default::default()
+    };
     if track.kind == TrackKind::Audio {
         p.volume_db = Some(float_at(effect(i, "volume"), "level", at).unwrap_or(0.0));
         p.ducking = crate::ducking::ducking_of(i);
@@ -305,6 +314,8 @@ impl Studio {
             if let Some(speed) = num(p, "speed")? {
                 let speed = speed.clamp(10.0, 1000.0);
                 let main = self.on_main(clip);
+                // one speed all along: a speed curve gives way to it
+                self.drop_ramps(&[clip])?;
                 self.session.execute("clip.speedDuration", json!({"clips": [clip], "speed": speed, "ripple": main})).map_err(engine)?;
                 self.fit_pitch(&[clip])?;
                 if main {

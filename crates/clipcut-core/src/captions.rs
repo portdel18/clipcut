@@ -177,9 +177,8 @@ fn lane_sound(q: &Sequence) -> Vec<&TrackItem> {
 
 /// Timeline time at which clip `c` plays media time `m`.
 fn timeline_at(c: &TrackItem, m: Tick) -> Tick {
-    let speed = c.speed.abs().max(1e-6);
-    let d = (m.0 - c.source_in.0) as f64 / speed;
-    Tick(c.start.0.saturating_add(d.round() as i64))
+    // a speed ramp's own timing included
+    Tick(c.start.0.saturating_add(c.time_to_media(m).0))
 }
 
 /// Where the words of `[start, end)` (timeline) are in their media, from the main-track sound

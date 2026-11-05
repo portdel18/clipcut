@@ -14,12 +14,11 @@ const MOST_SECONDS: f64 = 20.0 * 60.0;
 
 /// Clip `i`'s beats as timeline seconds, in order.
 pub(crate) fn beats_of(i: &TrackItem) -> Vec<f64> {
-    let speed = i.speed.abs().max(1e-9);
     let mut v: Vec<f64> = i
         .markers
         .iter()
         .filter(|m| m.name == BEAT)
-        .map(|m| (i.start + Tick(((m.start - i.source_in).0 as f64 / speed).round() as i64)).seconds())
+        .map(|m| (i.start + i.time_to_media(m.start)).seconds())
         .filter(|t| *t >= i.start.seconds() - 1e-9 && *t <= i.end().seconds() + 1e-9)
         .collect();
     v.sort_by(f64::total_cmp);

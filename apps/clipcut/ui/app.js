@@ -2609,6 +2609,7 @@ function makeClipEl(c) {
     el.classList.add('linked');
     el.title = (el.title ? el.title + ' ' : '') + 'Linked: it moves with the main-track clip under its start, and goes if that footage is deleted.';
   }
+  if ((c.props.ramp || []).length && !isCap(c)) { const t = document.createElement('span'); t.className = 'gr-tag ramp-tag'; t.textContent = 'Curve'; el.appendChild(t); }
   if (c.graphic) { const t = document.createElement('span'); t.className = 'gr-tag'; t.textContent = 'Graphic'; el.appendChild(t); el.title = `${name}: made in Graphics. Select it and press Edit in Graphics to change it.`; }
   if (kind === 'caption') el.title = c.text;
   if (kind === 'main') el.querySelector('.snd').classList.toggle('none', !hasSound(c));
@@ -3370,7 +3371,7 @@ function renderProps() {
     return;
   }
   const one = sel.length === 1 ? sel[0] : null;
-  const sig = one ? `${one.id}:${one.kind}:${isCap(one) || isMain(one)}:${!isCap(one) && hasSound(one)}:${keyTimes(one).length > 0}:${pictureClip(one)}:${S.kf && S.kf.clip === one.id ? S.kf.t : ''}:${(chOf(one) || {}).mode || ''}:${!!one.props.key}:${!!one.props.fill}:${voiceSig(one)}:${one.link || ''}:${(soundOf(one) || {}).track || ''}:${!!one.props.freeze}:${one.cutFrom != null}` : `n:${sel.map(c => c.id).join(',')}`;
+  const sig = one ? `${one.id}:${one.kind}:${isCap(one) || isMain(one)}:${!isCap(one) && hasSound(one)}:${keyTimes(one).length > 0}:${pictureClip(one)}:${S.kf && S.kf.clip === one.id ? S.kf.t : ''}:${(chOf(one) || {}).mode || ''}:${!!one.props.key}:${!!one.props.fill}:${voiceSig(one)}:${one.link || ''}:${(soundOf(one) || {}).track || ''}:${!!one.props.freeze}:${one.cutFrom != null}:${!!one.props.reverse}:${(one.props.ramp || []).length > 0}` : `n:${sel.map(c => c.id).join(',')}`;
   $('#props-title').textContent = one ? (one.graphic ? 'Graphic' : one.title ? 'Title' : { text: 'Text', audio: 'Sound', image: 'Picture', caption: 'Caption' }[one.kind] || (isMain(one) ? 'Clip' : 'Overlay')) : sel.length ? `${sel.length} clips` : 'Project';
   if (sig === propsSig) { syncProps(one); return; }
   propsSig = sig;
@@ -3454,8 +3455,9 @@ function renderProps() {
     const presets = [50, 100, 150, 200, 300];
     const seg = buttons(presets.map(p => [`${p / 100}×`, `Play at ${p}%`, () => queueProps(ids, { speed: p })]));
     s.appendChild(seg);
-    controls.push({ el: seg, read: c => c.props.speed, write: (el, v) => { [...el.children].forEach((b, i) => b.setAttribute('aria-pressed', String(Math.abs(presets[i] - v) < 0.5))); } });
+    controls.push({ el: seg, read: c => (c.props.ramp || []).length ? -1 : c.props.speed, write: (el, v) => { [...el.children].forEach((b, i) => b.setAttribute('aria-pressed', String(Math.abs(presets[i] - v) < 0.5))); } });
     s.appendChild(slider('Speed', ids, 'speed', { min: 10, max: 400, step: 5, unit: '%', read: c => c.props.speed, live: false }));
+    if (ids.length === 1 && !one.props.freeze && !one.props.reverse) rampControls(s, one);
     const rev = buttons([['Reverse', 'Play the clip backwards', () => edit('set_reverse', { clips: ids, on: !clipById(one.id).props.reverse })]]);
     rev.firstChild.id = 'reverse-btn';
     controls.push({ el: rev, read: c => c.props.reverse, write: (el, v) => el.firstChild.setAttribute('aria-pressed', String(!!v)) });
@@ -3485,6 +3487,119 @@ function renderProps() {
     }
   }
   syncProps(one);
+}
+/** Speed curves (CapCut's curve speed): `[place in the footage 0…1, speed]` points. */
+const RAMPS = [
+  ['Moment', 'Fast, slow motion on the middle, fast again', [[0, 2], [0.35, 2], [0.5, 0.3], [0.65, 2], [1, 2]]],
+  ['Burst', 'Slow, a fast burst in the middle, slow again', [[0, 0.6], [0.4, 0.6], [0.5, 4], [0.6, 0.6], [1, 0.6]]],
+  ['Speed up', 'Starts slow and keeps getting faster', [[0, 0.5], [1, 3]]],
+  ['Slow down', 'Starts fast and slows into slow motion', [[0, 3], [1, 0.4]]],
+  ['Montage', 'Fast and slow by turns', [[0, 1], [0.2, 3], [0.4, 0.5], [0.6, 3], [0.8, 0.5], [1, 1]]],
+  ['Jump', 'Normal speed with a quick jump forward in the middle', [[0, 1], [0.42, 1], [0.5, 6], [0.58, 1], [1, 1]]],
+];
+const RAMP_LO = 0.1, RAMP_HI = 10;
+/** The Speed section's curve: presets, and a graph whose points drag (up is faster, double-click adds or removes one). */
+function rampControls(s, one) {
+  const wrap = document.createElement('div');
+  wrap.className = 'ramp';
+  const head = document.createElement('div');
+  head.className = 'ramp-head';
+  head.innerHTML = '<span>Speed curve</span><span class="ramp-len"></span>';
+  wrap.appendChild(head);
+  const same = (a, b) => a.length === b.length && a.every((p, i) => Math.abs(p[0] - b[i][0]) < 0.005 && Math.abs(p[1] - b[i][1]) < 0.005);
+  const set = points => { if (wrap.contains(document.activeElement)) document.activeElement.blur(); return edit('set_ramp', { clip: one.id, points }); };
+  const chips = buttons([['None', 'Play at one speed all along', () => set([])], ...RAMPS.map(([n, t, p]) => [n, t, () => set(p)]), ['Custom', 'Start from a flat curve and drag its points', () => set([[0, 1], [0.5, 1], [1, 1]])]]);
+  chips.classList.add('ramp-presets');
+  chips.id = 'ramp-presets';
+  wrap.appendChild(chips);
+  const cv = document.createElement('canvas');
+  cv.id = 'ramp-graph';
+  cv.title = 'Drag a point: up plays faster, down slower. Double-click to add a point, or on one to remove it.';
+  wrap.appendChild(cv);
+  s.appendChild(wrap);
+  let pts = [], drag = -1;
+  // speeds are labelled in a margin on the left
+  const W = () => cv.clientWidth || 280, H = 110, PAD = 8, LEFT = 34;
+  const xOf = at => LEFT + clamp(at, 0, 1) * (W() - LEFT - PAD);
+  const yOf = v => PAD + (1 - (Math.log10(clamp(v, RAMP_LO, RAMP_HI)) + 1) / 2) * (H - 2 * PAD);
+  const atOf = x => clamp((x - LEFT) / (W() - LEFT - PAD), 0, 1);
+  const vOf = y => clamp(10 ** ((1 - (y - PAD) / (H - 2 * PAD)) * 2 - 1), RAMP_LO, RAMP_HI);
+  // the speed between points as the engine eases it (flat at each point)
+  const valueAt = at => {
+    if (!pts.length) return 1;
+    if (at <= pts[0][0]) return pts[0][1];
+    for (let i = 1; i < pts.length; i++) {
+      const [a, b] = [pts[i - 1], pts[i]];
+      if (at <= b[0]) { const u = (at - a[0]) / Math.max(1e-9, b[0] - a[0]); const e = u * u * (3 - 2 * u); return a[1] + (b[1] - a[1]) * e; }
+    }
+    return pts[pts.length - 1][1];
+  };
+  const draw = () => {
+    const dpr = window.devicePixelRatio || 1, w = W();
+    cv.width = Math.round(w * dpr); cv.height = Math.round(H * dpr); cv.style.height = H + 'px';
+    const g = cv.getContext('2d');
+    g.setTransform(dpr, 0, 0, dpr, 0, 0);
+    g.clearRect(0, 0, w, H);
+    const css = getComputedStyle(document.documentElement);
+    const accent = css.getPropertyValue('--accent').trim() || '#f4c443', dim = css.getPropertyValue('--faint').trim() || '#6f6d76';
+    const well = css.getPropertyValue('--panel-2').trim() || '#242328';
+    g.font = `10px ${css.getPropertyValue('--mono').trim() || 'monospace'}`;
+    g.fillStyle = dim; g.strokeStyle = dim; g.textBaseline = 'middle';
+    for (const v of [0.1, 0.5, 1, 2, 5, 10]) {
+      const y = yOf(v);
+      g.globalAlpha = v === 1 ? 0.7 : 0.4;
+      g.setLineDash(v === 1 ? [4, 3] : [1, 4]);
+      g.beginPath(); g.moveTo(LEFT, y); g.lineTo(w - PAD, y); g.stroke();
+      if (v !== 5) g.fillText(`${v}×`, 4, y);
+    }
+    g.setLineDash([]); g.globalAlpha = 1; g.textBaseline = 'alphabetic';
+    if (!pts.length) { g.fillStyle = dim; g.textAlign = 'center'; g.fillText('One speed all along', (LEFT + w - PAD) / 2, yOf(1) - 8); g.textAlign = 'left'; return; }
+    g.strokeStyle = accent; g.lineWidth = 2;
+    g.beginPath();
+    for (let x = LEFT; x <= w - PAD; x += 2) { const y = yOf(valueAt(atOf(x))); x === LEFT ? g.moveTo(x, y) : g.lineTo(x, y); }
+    g.stroke();
+    pts.forEach(([at, v], i) => {
+      g.beginPath(); g.arc(xOf(at), yOf(v), i === drag ? 6 : 5, 0, Math.PI * 2);
+      g.fillStyle = i === drag ? accent : well; g.fill(); g.stroke();
+      if (i === drag) { g.fillStyle = accent; g.fillText(`${v.toFixed(v < 1 ? 2 : 1)}×`, clamp(xOf(at) - 12, LEFT, w - 40), yOf(v) < 22 ? yOf(v) + 18 : yOf(v) - 10); }
+    });
+  };
+  const near = e => {
+    const r = cv.getBoundingClientRect(), x = e.clientX - r.left, y = e.clientY - r.top;
+    return { x, y, i: pts.findIndex(([at, v]) => Math.hypot(xOf(at) - x, yOf(v) - y) < 9) };
+  };
+  cv.addEventListener('pointerdown', e => {
+    const { i } = near(e);
+    if (i < 0) return;
+    drag = i; cv.setPointerCapture(e.pointerId); draw();
+  });
+  cv.addEventListener('pointermove', e => {
+    if (drag < 0) { cv.style.cursor = near(e).i >= 0 ? 'grab' : 'default'; return; }
+    const { x, y } = near(e);
+    const p = pts[drag];
+    // the first and last points stay at the clip's ends; the others keep their order
+    if (drag > 0 && drag < pts.length - 1) p[0] = clamp(atOf(x), pts[drag - 1][0] + 0.02, pts[drag + 1][0] - 0.02);
+    p[1] = Math.round(vOf(y) * 100) / 100;
+    draw();
+  });
+  const drop = () => { if (drag < 0) return; drag = -1; draw(); set(pts.map(p => [...p])); };
+  cv.addEventListener('pointerup', drop);
+  cv.addEventListener('pointercancel', drop);
+  cv.addEventListener('dblclick', e => {
+    if (!pts.length) return;
+    const { x, i } = near(e);
+    if (i > 0 && i < pts.length - 1) pts.splice(i, 1);
+    else if (i < 0) { const at = atOf(x); pts.push([at, Math.round(valueAt(at) * 100) / 100]); pts.sort((a, b) => a[0] - b[0]); }
+    else return;
+    set(pts.map(p => [...p]));
+  });
+  controls.push({ el: wrap, read: c => c, write: (el, c) => {
+    pts = (c.props.ramp || []).map(p => [...p]);
+    drag = -1;
+    [...chips.children].forEach((b, i) => b.setAttribute('aria-pressed', String(i === 0 ? !pts.length : i <= RAMPS.length ? same(pts, RAMPS[i - 1][2]) : false)));
+    head.querySelector('.ramp-len').textContent = pts.length ? `Plays in ${fmtLen(c.end - c.start)}` : '';
+    requestAnimationFrame(draw);
+  } });
 }
 /** Sound on a lane that its picture's clip plays in step with (and has no sound of its own). */
 function pictureInStep(a) {
