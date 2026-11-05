@@ -131,7 +131,10 @@ remote `upstream`). Read `README.md` for what it is and the roadmap.
   drawing converted every 4K sample to RGB while shrinking it; draft drawing now shrinks in Y'CbCr
   first (`box_decimated` in `colorman::decode` and `plain_layer`, as the GPU path does) and
   converts each drawn pixel once. HLG conversion to SDR was measured right (exact BT.2100 bars: within 2 %,
-  export = player); a duller look next to the phone is HDR shown as HDR there.
+  export = player); a duller look next to the phone is HDR shown as HDR there. Next to CapCut it looked too saturated: BT.2390 on max(R,G,B) as a ratio
+  keeps bright colours' full saturation, so HDR video (PQ, HLG; not log) now loses half of what
+  per-channel mapping would take from them (`HIGHLIGHT_DESAT`, also written out in
+  `composite.wgsl`).
 - Graphics follow the video: opening Graphics calls `CS.hosted.setBackdrop` with the frame at the
   playhead (`graphic_backdrop`, which leaves out the graphic being changed), and after a Ratio
   change `offerRemake` re-renders graphics in the old shape through `CS.hosted.add` one by one
