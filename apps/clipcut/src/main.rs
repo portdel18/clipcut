@@ -17,6 +17,7 @@ mod cutout;
 mod editing;
 mod graphics;
 mod playback;
+mod scenes;
 mod updates;
 
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
@@ -638,6 +639,8 @@ fn main() {
             editing::peaks,
             captioning::speech_models,
             captioning::cancel_captions,
+            scenes::split_scenes,
+            scenes::cancel_scenes,
             captioning::replace_words,
             captioning::auto_captions,
             captioning::words,
