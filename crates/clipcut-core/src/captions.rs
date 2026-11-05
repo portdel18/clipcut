@@ -607,12 +607,14 @@ impl Studio {
         let held = self.hold_captions();
         let transitions = self.hold_transitions();
         let lanes = self.hold_lanes();
+        let markers = self.hold_markers();
         self.group_merge(label, merge, |s| {
             let r = f(s)?;
             s.keep_sound_in_step()?;
             if let Some(l) = lanes {
                 s.place_lanes(l)?;
             }
+            s.place_markers(markers)?;
             s.place_transitions(transitions)?;
             if let Some(h) = held {
                 s.place_captions(h)?;

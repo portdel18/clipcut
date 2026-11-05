@@ -135,6 +135,8 @@ pub struct TimelineView {
     pub mix: crate::mixer::MixView,
     /// The transitions on the main track's cuts.
     pub transitions: Vec<crate::transitions::TransitionView>,
+    /// Markers with notes, in time order.
+    pub markers: Vec<crate::markers::MarkerView>,
     pub media: Vec<MediaView>,
     /// The player shows proxies where clips have them.
     pub proxies: bool,
@@ -283,6 +285,7 @@ impl Studio {
             lanes,
             captions: self.captions_view(),
             transitions: self.transitions_view(),
+            markers: self.session.active_sequence().map(crate::markers::markers_of).unwrap_or_default(),
             mix: self.mix_view(),
             media: media.into_iter().map(|(_, m)| m).collect(),
             proxies: s.prefs.media.enable_proxies,

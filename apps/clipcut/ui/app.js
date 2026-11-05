@@ -194,6 +194,7 @@ function apply(tl, { fit = false } = {}) {
   renderCaptionsPanel();
   renderTransitionsPanel();
   renderMixer();
+  renderMarkers();
   filtersSoon();
 }
 
@@ -775,7 +776,7 @@ async function addText(s) {
   if (r) { const ta = $('#props textarea'); if (ta) { ta.focus(); ta.select(); } }
 }
 function showTab(id) {
-  for (const t of ['media', 'audio', 'text', 'transitions', 'filters', 'mixer', 'captions']) {
+  for (const t of ['media', 'audio', 'text', 'transitions', 'filters', 'mixer', 'captions', 'markers']) {
     $(`#tab-${t}`).setAttribute('aria-selected', String(t === id));
     $(`#panel-${t}`).hidden = t !== id;
   }
@@ -785,7 +786,155 @@ function showTab(id) {
   if (id === 'mixer') { MX.sig = ''; renderMixer(); }
   if (id === 'text') renderTitles();
   if (id === 'audio' && !VO.voices) loadVoices();
+  if (id === 'markers') { MK.sig = ''; renderMarkers(); }
 }
+
+/* ---------- markers with notes (they don't change the picture: playback keeps going) ---------- */
+const MK = { sel: null, sig: '', drag: null };
+const MARKER_COLOURS = [['#4d9cff', 'Blue'], ['#46c99a', 'Green'], ['#f4c443', 'Yellow'], ['#ff9f43', 'Orange'], ['#ff6b5e', 'Red'], ['#b48cff', 'Purple']];
+function markerRun(cmd, args) {
+  return serial(async () => {
+    try { return await invoke(cmd, args); } catch (e) { toast(e, true); return null; }
+  });
+}
+const markerById = id => ((S.tl && S.tl.markers) || []).find(m => m.id === id);
+/** A timeline back from a marker edit: while playing, only the markers, Undo and the ruler change. */
+function applyMarkers(tl) {
+  if (!S.playing) { apply(tl); return; }
+  for (const k of ['markers', 'canUndo', 'canRedo', 'undoLabel', 'redoLabel', 'project']) S.tl[k] = tl[k];
+  renderTools();
+  drawRuler();
+  renderMarkers();
+  if (tl.project.dirty) saveSoon();
+}
+async function addMarker() {
+  if (!has()) { toast('Add a video first: markers go on its timeline.'); return; }
+  const r = await markerRun('add_marker', { seconds: S.t, name: '', notes: '', colour: null });
+  if (!r) return;
+  MK.sel = r.marker;
+  applyMarkers(r.timeline);
+  showTab('markers');
+  const name = $(`#mk-list [data-id="${r.marker}"] .mk-name`);
+  if (name) name.focus();
+}
+async function editMarker(id, changes, merge = null) {
+  const tl = await markerRun('edit_marker', { id, changes, merge });
+  if (tl) applyMarkers(tl);
+}
+async function deleteMarker(id) {
+  const tl = await markerRun('delete_marker', { id });
+  if (tl) { if (MK.sel === id) MK.sel = null; applyMarkers(tl); }
+}
+function selectMarker(id, { jump = true } = {}) {
+  MK.sel = id;
+  const m = markerById(id);
+  if (m && jump) { seek(m.time); scrollToTime(m.time); }
+  MK.sig = '';
+  renderMarkers();
+  drawRuler();
+}
+/** The Markers tab: every marker with its time, colour, name and notes; the chosen one opens to edit. */
+function renderMarkers() {
+  const list = $('#mk-list');
+  if (!list || $('#panel-markers').hidden) return;
+  const ms = (S.tl && S.tl.markers) || [];
+  const sig = JSON.stringify([ms, MK.sel]);
+  // typing in a marker's boxes is not interrupted by the timeline coming back
+  if (sig === MK.sig || list.contains(document.activeElement) && document.activeElement.matches('input, textarea')) return;
+  MK.sig = sig;
+  list.innerHTML = '';
+  if (!ms.length) { const li = document.createElement('li'); li.className = 'meta mk-empty'; li.textContent = 'No markers yet.'; list.appendChild(li); }
+  for (const m of ms) {
+    const li = document.createElement('li');
+    li.className = 'mk-item' + (m.id === MK.sel ? ' sel' : '');
+    li.dataset.id = m.id;
+    const head = document.createElement('button');
+    head.className = 'mk-head';
+    head.title = 'Go to this marker';
+    head.innerHTML = '<i class="mk-dot"></i><span class="mk-time"></span><span class="mk-title"></span>';
+    head.querySelector('.mk-dot').style.background = m.colour;
+    head.querySelector('.mk-time').textContent = fmt(m.time).replace(/^00:/, '');
+    head.querySelector('.mk-title').textContent = m.name || (m.notes ? m.notes.split('\n')[0] : 'Marker');
+    head.addEventListener('click', () => selectMarker(m.id === MK.sel ? null : m.id, { jump: m.id !== MK.sel }));
+    li.appendChild(head);
+    if (m.id === MK.sel) {
+      const box = document.createElement('div');
+      box.className = 'mk-edit';
+      const name = document.createElement('input');
+      name.className = 'mk-name'; name.id = 'mk-name'; name.placeholder = 'Name (a chapter, a shot…)'; name.value = m.name; name.maxLength = 200;
+      name.setAttribute('aria-label', 'Marker name');
+      const notes = document.createElement('textarea');
+      notes.className = 'mk-notes'; notes.id = 'mk-notes'; notes.placeholder = 'Notes'; notes.value = m.notes; notes.rows = 3;
+      notes.setAttribute('aria-label', 'Marker notes');
+      let typing = 0;
+      const send = (key, el) => { clearTimeout(typing); typing = setTimeout(() => editMarker(m.id, { [key]: el.value }, `marker:${m.id}:${key}`), 300); };
+      name.addEventListener('input', () => send('name', name));
+      notes.addEventListener('input', () => send('notes', notes));
+      for (const el of [name, notes]) {
+        el.addEventListener('keydown', e => { e.stopPropagation(); if (e.key === 'Escape') el.blur(); });
+        el.addEventListener('blur', () => { MK.sig = ''; setTimeout(renderMarkers, 350); });
+      }
+      const sw = document.createElement('div');
+      sw.className = 'mk-colours';
+      for (const [hex, label] of MARKER_COLOURS) {
+        const b = document.createElement('button');
+        b.className = 'mk-swatch'; b.style.background = hex; b.title = label; b.setAttribute('aria-label', label);
+        b.setAttribute('aria-pressed', String(m.colour === hex));
+        b.addEventListener('click', () => editMarker(m.id, { colour: hex }));
+        sw.appendChild(b);
+      }
+      const del = document.createElement('button');
+      del.className = 'btn mk-delete'; del.textContent = 'Delete marker';
+      del.addEventListener('click', () => deleteMarker(m.id));
+      sw.appendChild(del);
+      box.append(name, notes, sw);
+      li.appendChild(box);
+    }
+    list.appendChild(li);
+  }
+}
+async function copyChapters() {
+  if (!has()) return;
+  let c;
+  try { c = await invoke('chapters'); } catch (e) { toast(e, true); return; }
+  const probs = $('#mk-problems');
+  probs.innerHTML = '';
+  for (const p of c.problems) { const li = document.createElement('li'); li.textContent = p; probs.appendChild(li); }
+  const box = $('#mk-chapters-text');
+  box.value = c.text;
+  box.hidden = !c.text;
+  if (!c.text) return;
+  const done = c.problems.length ? 'Copied. YouTube won’t show them as chapters until the points below are fixed.' : 'The chapters are copied: paste them into the video’s description.';
+  try { await navigator.clipboard.writeText(c.text); toast(done); return; } catch (_) { /* below */ }
+  box.select();
+  try { document.execCommand('copy'); toast(done); } catch (_) { toast('Select the chapters and copy them with Ctrl+C.', true); }
+}
+/** The marker flag under a pointer on the ruler, if any. */
+function markerAt(clientX) {
+  const ms = (S.tl && S.tl.markers) || [];
+  let best = null, gap = 7;
+  for (const m of ms) { const d = Math.abs(timeAt(clientX) - m.time) * S.px; if (d <= gap) { gap = d; best = m; } }
+  return best;
+}
+/** On the ruler: a flag is clicked (open it) or dragged (move it); elsewhere it scrubs. */
+function rulerDown(e) {
+  const m = has() && e.button === 0 ? markerAt(e.clientX) : null;
+  if (!m) { scrubFrom(e, false); return; }
+  e.preventDefault();
+  const x0 = e.clientX;
+  MK.drag = { id: m.id, t: m.time, moved: false };
+  follow(e, ev => {
+    if (Math.abs(ev.clientX - x0) > 3) MK.drag.moved = true;
+    if (MK.drag.moved) { MK.drag.t = Math.max(0, Math.min(dur(), snapTo(timeAt(ev.clientX), ev, cuts()))); drawRuler(); }
+  }, () => {
+    const d = MK.drag;
+    MK.drag = null;
+    if (d.moved) editMarker(d.id, { seconds: d.t });
+    else { showTab('markers'); selectMarker(d.id); }
+    drawRuler();
+  }, { scroll: true });
+}
+
 
 /* ---------- captions: auto captions, their look, cleaning up the speech, the transcript ---------- */
 const CAP = { models: null, presets: null, busy: false };
@@ -2727,6 +2876,16 @@ function drawRuler() {
       g.fillText(lab, x + 4, 4);
     }
   }
+  // marker flags (the one being dragged where the pointer has it)
+  for (const m of (S.tl && S.tl.markers) || []) {
+    const t = MK.drag && MK.drag.id === m.id ? MK.drag.t : m.time;
+    const x = Math.round(PAD + t * S.px - sc.scrollLeft) + 0.5;
+    if (x < -10 || x > w + 10) continue;
+    const big = m.id === MK.sel;
+    g.fillStyle = m.colour;
+    g.fillRect(x - 0.5, 2, big ? 2 : 1.5, h - 2);
+    g.beginPath(); g.moveTo(x, 2); g.lineTo(x + (big ? 10 : 8), 2); g.lineTo(x + (big ? 7 : 5.5), big ? 7 : 6); g.lineTo(x + (big ? 10 : 8), big ? 12 : 10); g.lineTo(x, big ? 12 : 10); g.closePath(); g.fill();
+  }
 }
 
 /* ---------- filmstrips (media pictures, cached by media and time) and waveforms ---------- */
@@ -2941,6 +3100,7 @@ function renderTools() {
   const cut = has() && cutTargets().length > 0;
   for (const id of ['#split-btn', '#delleft-btn', '#delright-btn']) $(id).disabled = !cut;
   $('#still-btn').disabled = !has();
+  $('#marker-btn').disabled = !has();
   $('#freeze-btn').disabled = !has() || !visibleClips().some(c => c.track[0] === 'V' && c.kind === 'video' && !c.props.freeze && c.start <= S.t + 1e-6 && c.end > S.t);
   $('#delete-btn').disabled = S.sel.size === 0 && !transitionAt(S.cut);
   $('#undo-btn').disabled = !S.tl.canUndo;
@@ -4533,6 +4693,7 @@ function events() {
   const add = t => { if (Number.isFinite(t) && t >= 0) set.add(+t.toFixed(6)); };
   for (const c of S.tl.clips) { add(c.start); add(c.end); keyTimes(c).forEach(add); }
   for (const t of S.tl.transitions || []) { add(t.start); add(t.end); }
+  for (const m of S.tl.markers || []) add(m.time);
   return [...set].sort((a, b) => a - b);
 }
 function seekEvent(dir) {
@@ -4707,6 +4868,10 @@ click('#tab-transitions', () => showTab('transitions'));
 click('#tab-graphics', () => openGraphics());
 click('#tab-filters', () => showTab('filters'));
 click('#tab-mixer', () => showTab('mixer'));
+click('#tab-markers', () => showTab('markers'));
+click('#mk-add', () => addMarker());
+click('#mk-chapters', () => copyChapters());
+click('#marker-btn', () => addMarker());
 click('#proxy-make', () => makeProxies(null));
 click('#proxy-check', checkPlayback);
 click('#check-copy', copyCheck);
@@ -4791,7 +4956,12 @@ document.addEventListener('change', e => {
   if (t instanceof HTMLElement && t.matches('select, input[type=range], input[type=checkbox], input[type=radio], input[type=number], input[type=color]') && !t.closest('dialog')) t.blur();
 });
 
-$('#ruler').addEventListener('pointerdown', e => scrubFrom(e, false));
+$('#ruler').addEventListener('pointerdown', rulerDown);
+$('#ruler').addEventListener('pointermove', e => {
+  const m = !S.dragging && markerAt(e.clientX);
+  $('#ruler').style.cursor = m ? 'grab' : '';
+  $('#ruler').title = m ? `${m.name || 'Marker'}${m.notes ? '\n' + m.notes : ''}\nClick to edit, drag to move` : '';
+});
 content().addEventListener('pointerdown', e => {
   if (e.target.closest('.clip, .ruler')) return;
   boxSelect(e);
@@ -5016,13 +5186,14 @@ const ACTIONS = [
   { group: 'Playback', id: 'second-on', label: 'Forward one second', keys: [], fn: () => seekBy(1) },
   { group: 'Playback', id: 'five-back', label: 'Back five seconds', keys: ['Shift+ArrowLeft'], fn: () => seekBy(-5) },
   { group: 'Playback', id: 'five-on', label: 'Forward five seconds', keys: ['Shift+ArrowRight'], fn: () => seekBy(5) },
-  { group: 'Playback', id: 'cut-back', label: 'Go to the previous event (a cut, a clip’s start or end, a keyframe, a transition)', keys: ['ArrowUp'], fn: () => seekEvent(-1) },
-  { group: 'Playback', id: 'cut-on', label: 'Go to the next event (a cut, a clip’s start or end, a keyframe, a transition)', keys: ['ArrowDown'], fn: () => seekEvent(1) },
+  { group: 'Playback', id: 'cut-back', label: 'Go to the previous event (a cut, a clip’s start or end, a keyframe, a transition, a marker)', keys: ['ArrowUp'], fn: () => seekEvent(-1) },
+  { group: 'Playback', id: 'cut-on', label: 'Go to the next event (a cut, a clip’s start or end, a keyframe, a transition, a marker)', keys: ['ArrowDown'], fn: () => seekEvent(1) },
   { group: 'Playback', id: 'start', label: 'Go to the start', keys: ['Home'], fn: () => { seek(0); scrollToTime(0); } },
   { group: 'Playback', id: 'end', label: 'Go to the end', keys: ['End'], fn: () => { seek(Infinity); scrollToTime(dur()); } },
   { group: 'Editing', id: 'split', label: 'Split at the playhead', keys: ['S'], once: true, fn: () => split() },
   { group: 'Editing', id: 'still', label: 'Take a still at the playhead (for Thumbnails or as a PNG)', keys: [], fn: () => stillAtPlayhead() },
   { group: 'Editing', id: 'freeze', label: 'Freeze the frame at the playhead', keys: ['F'], once: true, fn: () => freezeFrame() },
+  { group: 'Editing', id: 'marker', label: 'Add a marker with a note at the playhead', keys: ['M'], once: true, fn: () => addMarker() },
   { group: 'Editing', id: 'delleft', label: 'Delete to the left of the playhead', keys: ['Q'], once: true, fn: () => splitKeep('right') },
   { group: 'Editing', id: 'delright', label: 'Delete to the right of the playhead', keys: ['W'], once: true, fn: () => splitKeep('left') },
   { group: 'Editing', id: 'delete', label: 'Delete the selection (clips, a keyframe, a transition or transcript words)', keys: ['Delete', 'Backspace'], once: true, fn: () => deleteSelection() },

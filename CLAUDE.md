@@ -212,6 +212,13 @@ remote `upstream`). Read `README.md` for what it is and the roadmap.
   `set_ramp` keeps the clip's footage: `clip.speedDuration` gives it the ramp's length (main track
   rippled), then the keyframes go on at speed 1. Any one-speed or Reverse edit calls `drop_ramps`
   first. Code that maps media time to timeline uses `TrackItem::time_to_media`, never `/ speed`.
+- Markers with notes (`markers.rs`, the Markers tab `#panel-markers`, `#marker-btn`, `M`, app
+  `markers.rs`): the engine's sequence markers (`custom_color`, `comment` = notes), edited straight
+  through `edit_sequence`, one undo step each (notes typing merges). `group_follow` holds them
+  (`hold_markers`: the main clip and media moment under each) and puts them back over that footage
+  (`place_markers`, the linkage rules); a marker whose footage is gone stays put. Marker commands
+  don't stop playback, and the interface applies them while playing without redrawing the player
+  (`applyMarkers`). `chapters` makes YouTube chapters from named markers with YouTube's rules.
 - Stills: by default of the whole video (`still_png` / `save_still` with no item: `Studio::still_feed`,
   everything on screen at the video's size from the originals, scrubbed along the timeline); "This
   clip's footage" is `Studio::still_source`'s media frame at the file's own size from

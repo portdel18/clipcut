@@ -16,6 +16,7 @@ mod check;
 mod cutout;
 mod editing;
 mod graphics;
+mod markers;
 mod narration;
 mod playback;
 mod scenes;
@@ -563,6 +564,10 @@ fn main() {
             editing::freeze,
             editing::set_reverse,
             editing::set_ramp,
+            markers::add_marker,
+            markers::edit_marker,
+            markers::delete_marker,
+            markers::chapters,
             editing::set_keep_pitch,
             editing::set_key,
             editing::set_fill,
