@@ -16,6 +16,7 @@ mod check;
 mod cutout;
 mod editing;
 mod graphics;
+mod narration;
 mod playback;
 mod updates;
 
@@ -638,6 +639,11 @@ fn main() {
             editing::peaks,
             captioning::speech_models,
             captioning::cancel_captions,
+            narration::voiceover_voices,
+            narration::download_voices,
+            narration::cancel_voices,
+            narration::preview_voiceover,
+            narration::add_voiceover,
             captioning::replace_words,
             captioning::auto_captions,
             captioning::words,
