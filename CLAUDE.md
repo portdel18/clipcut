@@ -216,7 +216,10 @@ remote `upstream`). Read `README.md` for what it is and the roadmap.
   folder, skipped by the engine's DSP catalogue test), so it is latency-compensated, cached and
   exported like any other. The model isn't `Send`: each effect leases a worker thread from a small
   pool (`lease`), which starts from a clone of the loaded model. 48 kHz, 1 or 2 channels only;
-  anything else passes through. Its latency is a 480-sample frame plus the model's 1440.
+  anything else passes through. Its latency is a 480-sample frame plus the model's 1440. It runs with DeepFilterNet's command-line settings
+  (`runtime`: thresholds −15 / 35 / 35 dB, post-filter 0.02), not the library's defaults, which
+  skipped deep filtering on most speech and made it duller than the noisy input (measured on its
+  repo's real speech and noise).
   The engine reuses a clip's effect chain only for a request that starts where the last one ended
   (`audio_fx::process`); any other request builds the chain again with its warm-up (0.5 s of
   sound through the AI model, 1 s for DeNoise). The player reads a little past each chunk to
