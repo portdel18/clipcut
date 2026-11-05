@@ -466,6 +466,37 @@ impl VideoFrame {
                 let cw = w.div_ceil(1 << sx);
                 let bits = *bits;
                 let amax = ((1u32 << bits) - 1) as f32;
+                // Full size and opaque (10-bit camera video: exports, and drafts already shrunk in
+                // Y'CbCr): a row at a time with the codes normalised by table, the same arithmetic
+                // as the general loop below, so the same pixels.
+                if n == 1 && alpha.is_none() && (8..=16).contains(&bits) {
+                    let ytab: Vec<f32> = (0..1u32 << bits).map(|v| normalize_y(v, bits, info.range)).collect();
+                    let ctab: Vec<f32> = (0..1u32 << bits).map(|v| normalize_c(v, bits, info.range)).collect();
+                    // a code past `bits` (hostile data) is normalised as the general loop does it
+                    let yc = |v: u16| ytab.get(v as usize).copied().unwrap_or_else(|| normalize_y(v as u32, bits, info.range));
+                    let cc = |v: u16| ctab.get(v as usize).copied().unwrap_or_else(|| normalize_c(v as u32, bits, info.range));
+                    out.par_chunks_mut(r.w * 4).enumerate().for_each(|(ry, row)| {
+                        let y = (r.y + ry).min(h - 1);
+                        let cy = y >> sy;
+                        let (Some(yrow), Some(urow), Some(vrow)) =
+                            (planes[0].get(y * w..y * w + w), planes[1].get(cy * cw..cy * cw + cw), planes[2].get(cy * cw..cy * cw + cw))
+                        else {
+                            row.fill(0.0);
+                            return;
+                        };
+                        for (rx, p) in row.as_chunks_mut::<4>().0.iter_mut().enumerate() {
+                            let x = (r.x + rx).min(w - 1);
+                            let cx = x >> sx;
+                            let (Some(&ys), Some(&us), Some(&vs)) = (yrow.get(x), urow.get(cx), vrow.get(cx)) else {
+                                *p = [0.0; 4];
+                                continue;
+                            };
+                            let rgb = ycbcr_to_rgb(yc(ys), cc(us), cc(vs), info.matrix);
+                            *p = [q(rgb[0]), q(rgb[1]), q(rgb[2]), 1.0];
+                        }
+                    });
+                    return;
+                }
                 out.par_chunks_mut(r.w * 4).enumerate().for_each(|(ry, row)| {
                     let oy = r.y + ry;
                     for rx in 0..r.w {
@@ -767,6 +798,36 @@ mod tests {
                 let fast = frame(None);
                 let general = frame(Some(Arc::new(vec![255; w * h])));
                 assert_eq!(fast.to_linear_f32(), general.to_linear_f32(), "{chroma:?} {color:?}");
+                let r = Region { x: 3, y: 2, w: 7, h: 5 };
+                assert_eq!(fast.to_linear_f32_region(1, None, r), general.to_linear_f32_region(1, None, r));
+            }
+        }
+        // 10-bit (HDR phone video) the same way, codes past 10 bits too
+        let mut seed16 = 777u32;
+        let mut noise16 = |n: usize| -> Vec<u16> {
+            (0..n)
+                .map(|_| {
+                    seed16 = seed16.wrapping_mul(1_103_515_245).wrapping_add(12345);
+                    ((seed16 >> 16) & 0x7ff) as u16
+                })
+                .collect()
+        };
+        for chroma in [Chroma::C420, Chroma::C444] {
+            let (sx, sy) = chroma.shifts();
+            let (cw, ch) = (w.div_ceil(1 << sx), h.div_ceil(1 << sy));
+            let planes = [Arc::new(noise16(w * h)), Arc::new(noise16(cw * ch)), Arc::new(noise16(cw * ch))];
+            for color in [ColorInfo::default(), ColorInfo { range: Range::Full, ..ColorInfo::default() }] {
+                let frame = |alpha| VideoFrame {
+                    width: w as u32,
+                    height: h as u32,
+                    data: PixelData::Yuv16 { planes: planes.clone(), chroma, bits: 10, alpha },
+                    color,
+                    par: (1, 1),
+                    pts: Default::default(),
+                };
+                let fast = frame(None);
+                let general = frame(Some(Arc::new(vec![1023; w * h])));
+                assert_eq!(fast.to_linear_f32(), general.to_linear_f32(), "10-bit {chroma:?} {color:?}");
                 let r = Region { x: 3, y: 2, w: 7, h: 5 };
                 assert_eq!(fast.to_linear_f32_region(1, None, r), general.to_linear_f32_region(1, None, r));
             }
