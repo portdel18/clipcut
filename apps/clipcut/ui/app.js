@@ -3486,10 +3486,11 @@ function rampControls(s, one) {
   wrap.appendChild(cv);
   s.appendChild(wrap);
   let pts = [], drag = -1;
-  const W = () => cv.clientWidth || 280, H = 110, PAD = 8;
-  const xOf = at => PAD + clamp(at, 0, 1) * (W() - 2 * PAD);
+  // speeds are labelled in a margin on the left
+  const W = () => cv.clientWidth || 280, H = 110, PAD = 8, LEFT = 34;
+  const xOf = at => LEFT + clamp(at, 0, 1) * (W() - LEFT - PAD);
   const yOf = v => PAD + (1 - (Math.log10(clamp(v, RAMP_LO, RAMP_HI)) + 1) / 2) * (H - 2 * PAD);
-  const atOf = x => clamp((x - PAD) / (W() - 2 * PAD), 0, 1);
+  const atOf = x => clamp((x - LEFT) / (W() - LEFT - PAD), 0, 1);
   const vOf = y => clamp(10 ** ((1 - (y - PAD) / (H - 2 * PAD)) * 2 - 1), RAMP_LO, RAMP_HI);
   // the speed between points as the engine eases it (flat at each point)
   const valueAt = at => {
@@ -3511,23 +3512,24 @@ function rampControls(s, one) {
     const accent = css.getPropertyValue('--accent').trim() || '#f4c443', dim = css.getPropertyValue('--faint').trim() || '#6f6d76';
     const well = css.getPropertyValue('--panel-2').trim() || '#242328';
     g.font = `10px ${css.getPropertyValue('--mono').trim() || 'monospace'}`;
-    g.fillStyle = dim; g.strokeStyle = dim; g.globalAlpha = 0.5;
+    g.fillStyle = dim; g.strokeStyle = dim; g.textBaseline = 'middle';
     for (const v of [0.1, 0.5, 1, 2, 5, 10]) {
       const y = yOf(v);
+      g.globalAlpha = v === 1 ? 0.7 : 0.4;
       g.setLineDash(v === 1 ? [4, 3] : [1, 4]);
-      g.beginPath(); g.moveTo(PAD, y); g.lineTo(w - PAD, y); g.stroke();
-      g.fillText(`${v}×`, w - PAD - 26, y - 2);
+      g.beginPath(); g.moveTo(LEFT, y); g.lineTo(w - PAD, y); g.stroke();
+      if (v !== 5) g.fillText(`${v}×`, 4, y);
     }
-    g.setLineDash([]); g.globalAlpha = 1;
-    if (!pts.length) { g.fillStyle = dim; g.fillText('One speed all along: pick a curve above', PAD + 4, H / 2 + 14); return; }
+    g.setLineDash([]); g.globalAlpha = 1; g.textBaseline = 'alphabetic';
+    if (!pts.length) { g.fillStyle = dim; g.textAlign = 'center'; g.fillText('One speed all along', (LEFT + w - PAD) / 2, yOf(1) - 8); g.textAlign = 'left'; return; }
     g.strokeStyle = accent; g.lineWidth = 2;
     g.beginPath();
-    for (let x = PAD; x <= w - PAD; x += 2) { const y = yOf(valueAt(atOf(x))); x === PAD ? g.moveTo(x, y) : g.lineTo(x, y); }
+    for (let x = LEFT; x <= w - PAD; x += 2) { const y = yOf(valueAt(atOf(x))); x === LEFT ? g.moveTo(x, y) : g.lineTo(x, y); }
     g.stroke();
     pts.forEach(([at, v], i) => {
       g.beginPath(); g.arc(xOf(at), yOf(v), i === drag ? 6 : 5, 0, Math.PI * 2);
       g.fillStyle = i === drag ? accent : well; g.fill(); g.stroke();
-      if (i === drag) { g.fillStyle = accent; g.fillText(`${v.toFixed(v < 1 ? 2 : 1)}×`, clamp(xOf(at) - 12, 2, w - 40), yOf(v) - 10); }
+      if (i === drag) { g.fillStyle = accent; g.fillText(`${v.toFixed(v < 1 ? 2 : 1)}×`, clamp(xOf(at) - 12, LEFT, w - 40), yOf(v) < 22 ? yOf(v) + 18 : yOf(v) - 10); }
     });
   };
   const near = e => {
