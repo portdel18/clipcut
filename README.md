@@ -74,6 +74,11 @@ it keeps the voice and takes out hiss, fans, traffic, wind and chatter. **Standa
 steady noise only and changes the voice least. **Strength** sets how far the noise goes down.
 **Enhance voice** makes speech clearer and more even.
 
+**Split at scene changes.** For a clip that is already edited (a broadcast segment, someone
+else's video), **Split at scene changes** under Speed looks at every frame of the clip and cuts it
+wherever a new shot starts, with its sound, in one undo step. A bar shows how far it has got, and
+Stop leaves the clip as it was.
+
 **Speed, reverse, freeze.** Speed keeps the voice's pitch (switch it off under Speed for the tape
 effect); **Reverse** plays the clip backwards; **Freeze** (the toolbar, or `F`) puts a 3-second still of
 the frame at the playhead into the video and pushes the rest along (trim the still to change its

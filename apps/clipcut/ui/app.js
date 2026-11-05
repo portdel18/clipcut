@@ -3434,6 +3434,12 @@ function renderProps() {
       fr.title = `Hold the frame at the playhead for ${FREEZE_SECONDS} seconds`;
       fr.addEventListener('click', () => freezeFrame());
       rev.appendChild(fr);
+      const sc = document.createElement('button');
+      sc.id = 'scenes-prop';
+      sc.textContent = 'Split at scene changes';
+      sc.title = 'Cut this clip wherever a new shot starts (for footage that is already edited)';
+      sc.addEventListener('click', () => splitScenes(one.id));
+      rev.appendChild(sc);
     }
     s.appendChild(rev);
     if (hasSound(one)) {
@@ -4782,6 +4788,28 @@ click('#vo-listen', listenVoiceover);
 click('#vo-add', addVoiceover);
 click('#vo-download', downloadVoices);
 
+/** Split at scene changes: looks at every frame of `clip` (with progress and Stop), then cuts it
+    wherever a new shot starts, in one undo step. */
+async function splitScenes(clip) {
+  if (S.playing) await pause();
+  const dlg = $('#scene-dlg');
+  $('#scene-bar').style.width = '0';
+  $('#scene-meta').textContent = 'Looking at every frame of the clip…';
+  $('#scene-cancel').onclick = () => { $('#scene-meta').textContent = 'Stopping…'; invoke('cancel_scenes'); };
+  dlg.oncancel = e => { e.preventDefault(); invoke('cancel_scenes'); };
+  dlg.showModal();
+  let r = null;
+  try { r = await serial(() => invoke('split_scenes', { clip })); } catch (e) { dlg.close(); if (!/^stopped/i.test(String(e))) toast(e, true); return; }
+  dlg.close();
+  if (!r) return;
+  apply(r.timeline);
+  toast(r.cuts ? `Cut at ${r.cuts} scene change${r.cuts === 1 ? '' : 's'}.` : 'No scene changes found in this clip: it looks like one shot.');
+}
+listen('scene-progress', e => {
+  const f = Number(e.payload) || 0;
+  $('#scene-bar').style.width = (100 * f).toFixed(1) + '%';
+  if ($('#scene-meta').textContent !== 'Stopping…') $('#scene-meta').textContent = `Looking at every frame of the clip… ${Math.floor(100 * f)}%`;
+});
 /** Freezes the frame at the playhead: of the selected video clip under it, else the main track's. */
 async function freezeFrame() {
   if (!has()) return;

@@ -33,6 +33,7 @@ mod preview;
 mod props;
 mod replace;
 mod returns;
+mod scenes;
 mod scopes;
 mod shuttle;
 mod timeline;
@@ -65,6 +66,7 @@ pub use narration::{NarrationVoice, download_voices, natural_voices_size, next_v
 pub use preview::{FrameFeed, MediaProbe, QUALITIES, preview_scale};
 pub use props::{ClipProps, PEAKS_PER_SECOND, Peaks, TextProps};
 pub use replace::Replaced;
+pub use scenes::SceneScan;
 pub use scopes::SCOPES;
 pub use shuttle::Stretcher;
 pub use timeline::{ClipView, Keep, LaneView, MediaView, ProjectView, TimelineView, heavy};

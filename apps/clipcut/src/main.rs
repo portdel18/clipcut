@@ -18,6 +18,7 @@ mod editing;
 mod graphics;
 mod narration;
 mod playback;
+mod scenes;
 mod updates;
 
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
@@ -644,6 +645,8 @@ fn main() {
             narration::cancel_voices,
             narration::preview_voiceover,
             narration::add_voiceover,
+            scenes::split_scenes,
+            scenes::cancel_scenes,
             captioning::replace_words,
             captioning::auto_captions,
             captioning::words,

@@ -179,6 +179,11 @@ remote `upstream`). Read `README.md` for what it is and the roadmap.
   clip marker "ClipCut pitch" turns it off. Freeze is the engine's
   Insert Frame Hold Segment after a razor of the clip and its sound, then `pack_main`. Remove a
   colour (`key.rs`) is Ultra Key; `pick_colour` renders the frame without keys.
+- Split at scene changes (`scenes.rs`, `#scenes-prop` beside Freeze, app `scenes.rs`): the engine's
+  scene detector (`filmcraft_render::scene`) over the clip's frames, read off the studio lock from a
+  source of its own at 256 px, draft (`SceneScan::run`, `scene-progress` events, `cancel_scenes`);
+  then `split_at_scenes` razors the clip at each change through `group_follow` (one undo step), not
+  the engine's `clip.sceneEditDetection`, whose plain razor skips captions and linkage.
 - Stills: by default of the whole video (`still_png` / `save_still` with no item: `Studio::still_feed`,
   everything on screen at the video's size from the originals, scrubbed along the timeline); "This
   clip's footage" is `Studio::still_source`'s media frame at the file's own size from
