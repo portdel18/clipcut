@@ -4629,8 +4629,19 @@ $('#stage').addEventListener('pointermove', e => {
   $('#stage').classList.toggle('corner', !!c && cornerAt(c, (e.clientX - r.left) * k, (e.clientY - r.top) * k, k));
 });
 $('#stage').addEventListener('wheel', stageWheel, { passive: false });
-// buttons don't keep the focus, so Space and the editing keys always reach the timeline
-document.addEventListener('mousedown', e => { if (e.target.closest('button')) e.preventDefault(); });
+// Buttons don't take focus (no focus ring after a click), but a click on one does take it away from
+// a box, so the keyboard shortcuts work again straight after (J K L once Play was clicked).
+document.addEventListener('mousedown', e => {
+  if (!e.target.closest('button')) return;
+  e.preventDefault();
+  const f = document.activeElement;
+  if (f && f !== document.body && f.matches('input, select, textarea, [contenteditable]') && !f.closest('dialog') && !e.target.closest('dialog')) f.blur();
+});
+// a slider, tick box, choice or number that has changed gives the keys back too
+document.addEventListener('change', e => {
+  const t = e.target;
+  if (t instanceof HTMLElement && t.matches('select, input[type=range], input[type=checkbox], input[type=radio], input[type=number], input[type=color]') && !t.closest('dialog')) t.blur();
+});
 
 $('#ruler').addEventListener('pointerdown', e => scrubFrom(e, false));
 content().addEventListener('pointerdown', e => {
@@ -4996,9 +5007,19 @@ function saveKeys() {
 rebuildKeymap();
 invoke('load_shortcuts').then(useKeyChanges).catch(() => useKeyChanges({}));
 
+/** Whether a key pressed in `el` is someone typing (or choosing) there, so shortcuts leave it alone:
+ * text and number boxes, notes, dropdowns; a slider keeps its own arrow keys. Tick boxes, buttons and
+ * sliders otherwise pass every key on. */
+function typingIn(el, e) {
+  if (!(el instanceof HTMLElement)) return false;
+  if (el.isContentEditable || el.matches('textarea, select')) return true;
+  if (!el.matches('input')) return false;
+  if (el.type === 'range') return /^(Arrow|Page|Home|End)/.test(e.key);
+  return !/^(checkbox|radio|color|button|submit|reset|file)$/.test(el.type);
+}
 document.addEventListener('keydown', e => {
   if (!$('#graphics-view').hidden) { if (e.key === 'Escape') { e.preventDefault(); closeGraphics(); } return; }
-  if (e.target.closest('input, textarea, select') || document.querySelector('dialog[open]') || S.dragging) return;
+  if (typingIn(e.target, e) || document.querySelector('dialog[open]') || S.dragging) return;
   if (KY.picking && e.key === 'Escape') { e.preventDefault(); stopPicking(); return; }
   const combo = comboOf(e);
   const a = combo && KEYMAP.get(combo);
