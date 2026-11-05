@@ -129,7 +129,10 @@ remote `upstream`). Read `README.md` for what it is and the roadmap.
   second report: decode 57 fps (decode 1.2–2.8 ms, copy back 2.3 ms, convert 5–7 ms a picture)
   but playback still choppy. The check also times the whole player now (`check::player`: the
   timeline's frames at the player's size, draft, `render_step`, 3 workers) against the pictures a
-  second it shows. HLG conversion to SDR was measured right (exact BT.2100 bars: within 2 %,
+  second it shows. The 0.4.8 report: decode 80 fps, player 21 of 30 drawn, because the CPU
+  drawing converted every 4K sample to RGB while shrinking it; draft drawing now shrinks in Y'CbCr
+  first (`box_decimated` in `colorman::decode` and `plain_layer`, as the GPU path does) and
+  converts each drawn pixel once. HLG conversion to SDR was measured right (exact BT.2100 bars: within 2 %,
   export = player); a duller look next to the phone is HDR shown as HDR there.
 - Graphics follow the video: opening Graphics calls `CS.hosted.setBackdrop` with the frame at the
   playhead (`graphic_backdrop`, which leaves out the graphic being changed), and after a Ratio
@@ -212,7 +215,10 @@ remote `upstream`). Read `README.md` for what it is and the roadmap.
   folder, skipped by the engine's DSP catalogue test), so it is latency-compensated, cached and
   exported like any other. The model isn't `Send`: each effect leases a worker thread from a small
   pool (`lease`), which starts from a clone of the loaded model. 48 kHz, 1 or 2 channels only;
-  anything else passes through. Its latency is a 480-sample frame plus the model's 1440.
+  anything else passes through. Its latency is a 480-sample frame plus the model's 1440. It runs with DeepFilterNet's command-line settings
+  (`runtime`: thresholds −15 / 35 / 35 dB, post-filter 0.02), not the library's defaults, which
+  skipped deep filtering on most speech and made it duller than the noisy input (measured on its
+  repo's real speech and noise).
   The engine reuses a clip's effect chain only for a request that starts where the last one ended
   (`audio_fx::process`); any other request builds the chain again with its warm-up (0.5 s of
   sound through the AI model, 1 s for DeNoise). The player reads a little past each chunk to

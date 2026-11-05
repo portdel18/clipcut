@@ -297,6 +297,9 @@ fn build(i: &mut TrackItem, a: &TextAnimations, canvas: (u32, u32), fps: f64, al
     meta.intro = li;
     meta.outro = if lo > Tick::ZERO { lo + frame } else { Tick::ZERO };
     i.markers.push(Marker {
+        url: String::new(),
+        author: String::new(),
+        custom_color: None,
         id: MarkerId(alloc()),
         start,
         duration: Tick::ZERO,

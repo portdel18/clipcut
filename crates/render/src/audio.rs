@@ -81,28 +81,34 @@ pub fn track_input_live(
     sources: &dyn SourceProvider,
     ovs: &HashMap<(TrackId, String), Override>,
 ) -> AudioBuffer {
-    track_input_at(project, track, start, frames, sr, sources, ovs, 0)
+    track_input_at(project, track, Window { start, frames, sr }, sources, ovs, 0)
+}
+
+/// A run of `frames` samples starting at sample `start`, counted at `sr` samples per second.
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct Window {
+    pub start: i64,
+    pub frames: usize,
+    pub sr: u32,
 }
 
 /// [`track_input_live`] for a track `depth` nested sequences down from the one being mixed.
-#[allow(clippy::too_many_arguments)]
 pub(crate) fn track_input_at(
     project: &Project,
     track: &Track,
-    start: i64,
-    frames: usize,
-    sr: u32,
+    win: Window,
     sources: &dyn SourceProvider,
     ovs: &HashMap<(TrackId, String), Override>,
     depth: u32,
 ) -> AudioBuffer {
+    let Window { start, frames, sr } = win;
     let w = crate::mixer::width_of(track.channels);
     let live =
         ClipLive { vol: ovs.get(&(track.id, CLIP_LANE_VOLUME.to_string())).copied(), pan: ovs.get(&(track.id, CLIP_LANE_PAN.to_string())).copied(), depth };
     let range = TimeRange::from_bounds(Tick::from_units(start, sr as i64), Tick::from_units(start + frames as i64, sr as i64));
     let mut tbuf = AudioBuffer::silence(sr, w, frames);
     for item in track.items.iter().filter(|i| i.enabled && i.range().overlaps(&range)) {
-        mix_item(project, item, start, frames, sr, sources, &mut tbuf, 1.0, &live);
+        mix_item(project, item, win, sources, &mut tbuf, 1.0, &live);
     }
     // audio transitions: attenuate the covered region of each side
     for tr in &track.transitions {
@@ -127,10 +133,10 @@ pub(crate) fn track_input_at(
         let mut a = AudioBuffer::silence(sr, w, n);
         let mut b = AudioBuffer::silence(sr, w, n);
         if let Some(f) = &from {
-            mix_item(project, f, s0, n, sr, sources, &mut a, 1.0, &live);
+            mix_item(project, f, Window { start: s0, frames: n, sr }, sources, &mut a, 1.0, &live);
         }
         if let Some(tt) = &to {
-            mix_item(project, tt, s0, n, sr, sources, &mut b, 1.0, &live);
+            mix_item(project, tt, Window { start: s0, frames: n, sr }, sources, &mut b, 1.0, &live);
         }
         let dur = (tr.end() - tr.start).to_units_floor(sr as i64).max(1) as f32;
         let base = (s0 - tr.start.to_units_floor(sr as i64)) as f32;
@@ -182,18 +188,8 @@ pub fn pan_gains(pan: f32) -> (f32, f32) {
     ((a.cos() * k).min(1.0), (a.sin() * k).min(1.0))
 }
 
-#[allow(clippy::too_many_arguments)]
-fn mix_item(
-    project: &Project,
-    item: &TrackItem,
-    start: i64,
-    frames: usize,
-    sr: u32,
-    sources: &dyn SourceProvider,
-    out: &mut AudioBuffer,
-    extra: f32,
-    live: &ClipLive,
-) {
+fn mix_item(project: &Project, item: &TrackItem, win: Window, sources: &dyn SourceProvider, out: &mut AudioBuffer, extra: f32, live: &ClipLive) {
+    let Window { start, frames, sr } = win;
     let item_s0 = item.start.to_units_floor(sr as i64);
     let item_s1 = item.end().to_units_floor(sr as i64);
     let a0 = start.max(item_s0);
@@ -222,14 +218,14 @@ fn mix_item(
         };
         // The nested sequence is the clip's source: speed, reverse and clip effects apply to its
         // mix exactly as they do to a media clip's sound.
-        let read = |m0: i64, len: usize| Some(nested_mix(project, &q, m0, len, sr, sources, w, live.depth));
-        effected(item, &read, a0, n, sr, w)
+        let read = |m0: i64, len: usize| Some(nested_mix(project, &q, Window { start: m0, frames: len, sr }, sources, w, live.depth));
+        effected(item, &read, 0, a0, n, sr, w)
     } else {
         let Some(src) = sources.source(item.item) else { return };
         if !src.info().has_audio() {
             return;
         }
-        effected(item, &|m0, len| src.audio_stream(item.audio_stream, m0, len, sr).ok(), a0, n, sr, w)
+        effected(item, &|m0, len| src.audio_stream(item.audio_stream, m0, len, sr).ok(), source_ident(src.info()), a0, n, sr, w)
     };
     // gains: clip gain × Volume (keyframed, per 64-sample block) × channel volume × panner
     let clip_gain = db_to_gain(item.gain_db);
@@ -284,8 +280,8 @@ fn mix_item(
 /// `sr` (the rate of the sequence the nest is in), as `w` channels. The nested sequence is mixed at
 /// its own sample rate and converted when the two differ; time before its start is silent.
 /// `depth` is the nesting depth of the sequence the nest is in.
-#[allow(clippy::too_many_arguments)]
-fn nested_mix(project: &Project, nested: &Sequence, m0: i64, len: usize, sr: u32, sources: &dyn SourceProvider, w: usize, depth: u32) -> AudioBuffer {
+fn nested_mix(project: &Project, nested: &Sequence, win: Window, sources: &dyn SourceProvider, w: usize, depth: u32) -> AudioBuffer {
+    let Window { start: m0, frames: len, sr } = win;
     // a damaged project can claim any rate: keep the buffer below sized by a real one
     let own = nested.settings.sample_rate.clamp(1_000, 768_000);
     let sr = sr.max(1);
@@ -328,8 +324,8 @@ type SourceAudio<'a> = &'a dyn Fn(i64, usize) -> Option<AudioBuffer>;
 
 /// The clip's audio after speed/reverse and clip effects (before clip gain, Volume and Panner) for
 /// timeline samples `[a0, a0 + n)`, `w` channels.
-fn effected(item: &TrackItem, src: SourceAudio, a0: i64, n: usize, sr: u32, w: usize) -> Vec<Vec<f32>> {
-    let read = |x0: i64, len: usize| raw_channels(item, src, x0, len, sr, w);
+fn effected(item: &TrackItem, src: SourceAudio, ident: u64, a0: i64, n: usize, sr: u32, w: usize) -> Vec<Vec<f32>> {
+    let read = |x0: i64, len: usize| raw_channels(item, src, ident, x0, len, sr, w);
     if crate::audio_fx::has_effects(item) { crate::audio_fx::process(item, a0, n, sr, &read) } else { read(a0, n) }
 }
 
@@ -349,7 +345,7 @@ pub fn clip_signal(item: &TrackItem, start: i64, frames: usize, sr: u32, sources
         let n = (a1 - a0) as usize;
         let off = (a0 - start) as usize;
         let g = db_to_gain(item.gain_db);
-        let buf = effected(item, &|m0, len| src.audio_stream(item.audio_stream, m0, len, sr).ok(), a0, n, sr, 2);
+        let buf = effected(item, &|m0, len| src.audio_stream(item.audio_stream, m0, len, sr).ok(), source_ident(src.info()), a0, n, sr, 2);
         for (dst, b) in out.iter_mut().zip(&buf) {
             for (d, x) in dst[off..off + n].iter_mut().zip(b) {
                 *d = x * g;
@@ -389,10 +385,20 @@ fn stretch_chains() -> &'static std::sync::Mutex<std::collections::VecDeque<Stre
     C.get_or_init(Default::default)
 }
 
+/// Which media a clip's sound comes from, for [`stretched`]'s chains: item and clip ids repeat
+/// between projects (and between tests running side by side), so a chain found by them alone could
+/// carry on from another file's sound.
+fn source_ident(info: &filmcraft_media::MediaInfo) -> u64 {
+    use std::hash::{Hash, Hasher};
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    (&info.name, info.duration.0, info.file_size, &info.container).hash(&mut h);
+    h.finish()
+}
+
 /// Maintain Audio Pitch: clip-relative output samples `[o0, o0 + n)` of `item` time-stretched to
 /// its speed ([`filmcraft_audio_dsp::stretch::Wsola`]). A reader carrying on from where it (or
 /// another) left off continues that chain of frame shifts, so blocks join as one stream would.
-fn stretched(item: &TrackItem, src: SourceAudio, o0: i64, n: usize, sr: u32) -> Option<AudioBuffer> {
+fn stretched(item: &TrackItem, src: SourceAudio, ident: u64, o0: i64, n: usize, sr: u32) -> Option<AudioBuffer> {
     use filmcraft_audio_dsp::stretch::{WARM_UP, Wsola};
     use std::hash::{Hash, Hasher};
     let w = Wsola::new(sr);
@@ -401,7 +407,7 @@ fn stretched(item: &TrackItem, src: SourceAudio, o0: i64, n: usize, sr: u32) -> 
     let base = item.source_time_at(item.start).to_units_floor(sr as i64);
     let key = {
         let mut h = std::collections::hash_map::DefaultHasher::new();
-        (item.id.0, item.item.0, speed.to_bits(), item.source_in.0, item.start.0, sr, item.audio_stream).hash(&mut h);
+        (ident, item.id.0, item.item.0, speed.to_bits(), item.source_in.0, item.start.0, sr, item.audio_stream).hash(&mut h);
         h.finish()
     };
     let (k0, k1) = w.frames_for(o0, n);
@@ -465,7 +471,7 @@ fn stretched(item: &TrackItem, src: SourceAudio, o0: i64, n: usize, sr: u32) -> 
 /// The clip's audio (after speed/reverse) for timeline samples `[x0, x0 + len)` as `w` channels
 /// (2: stereo, mono sources on both sides, 5.1 sources folded down; 6: 5.1), with silence outside
 /// the clip.
-fn raw_channels(item: &TrackItem, src: SourceAudio, x0: i64, len: usize, sr: u32, w: usize) -> Vec<Vec<f32>> {
+fn raw_channels(item: &TrackItem, src: SourceAudio, ident: u64, x0: i64, len: usize, sr: u32, w: usize) -> Vec<Vec<f32>> {
     let mut out = vec![vec![0.0f32; len]; w];
     let item_s0 = item.start.to_units_floor(sr as i64);
     let item_s1 = item.end().to_units_floor(sr as i64);
@@ -484,7 +490,7 @@ fn raw_channels(item: &TrackItem, src: SourceAudio, x0: i64, len: usize, sr: u32
     } else if (speed - 1.0).abs() < 1e-9 && !item.reverse {
         src(src_start_ticks.to_units_floor(sr as i64), n)
     } else if item.maintain_pitch && !item.reverse {
-        stretched(item, src, a0 - item_s0, n, sr)
+        stretched(item, src, ident, a0 - item_s0, n, sr)
     } else {
         // varispeed: read a longer span and resample linearly
         let span = ((n as f64) * speed).ceil() as usize + 2;

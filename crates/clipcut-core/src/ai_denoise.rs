@@ -42,6 +42,15 @@ fn limit_db(amount: f32) -> f32 {
 }
 
 /// Adds AI noise reduction to the engine's audio effects (once).
+/// DeepFilterNet's settings as its own command line has them, not the library's defaults: frames
+/// count as noise only below −15 dB local SNR (−10 lost quiet words), and the fine second stage
+/// (deep filtering) runs up to 35 dB (20 skipped it on most speech, leaving coarse band gains
+/// that dulled the voice), with its post-filter on. On real speech in real noise the voice came
+/// out 6–13 dB closer to the clean recording and kept its level.
+fn runtime(channels: usize) -> RuntimeParams {
+    RuntimeParams::default_with_ch(channels).with_thresholds(-15.0, 35.0, 35.0).with_post_filter(0.02)
+}
+
 pub(crate) fn register() {
     static ONCE: Once = Once::new();
     ONCE.call_once(|| {
@@ -80,7 +89,7 @@ impl Worker {
         std::thread::Builder::new()
             .name("ClipCut AI noise reduction".into())
             .spawn(move || {
-                let load = || catch_unwind(|| DfTract::new(DfParams::default(), &RuntimeParams::default_with_ch(channels)).ok()).ok().flatten();
+                let load = || catch_unwind(|| DfTract::new(DfParams::default(), &runtime(channels)).ok()).ok().flatten();
                 let Some(pristine) = load() else {
                     let _ = ready_tx.send(None);
                     return;
@@ -378,6 +387,13 @@ mod tests {
         assert!(p1 < p0 - 20.0, "between words: {p0:.1} dB → {p1:.1} dB");
         assert!(w1 > w0 - 10.0, "the words: {w0:.1} dB → {w1:.1} dB");
         assert!(w1 > p1 + 25.0, "the words stand far above what is left: {w1:.1} vs {p1:.1} dB");
+    }
+
+    #[test]
+    fn runs_with_deepfilternets_own_settings() {
+        let r = runtime(2);
+        assert_eq!((r.n_ch, r.min_db_thresh, r.max_db_erb_thresh, r.max_db_df_thresh), (2, -15.0, 35.0, 35.0));
+        assert!(r.post_filter && r.post_filter_beta == 0.02 && r.atten_lim_db == 100.0);
     }
 
     #[test]

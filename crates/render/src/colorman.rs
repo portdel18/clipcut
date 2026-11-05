@@ -68,6 +68,14 @@ pub fn gpu_input(project: &Project, item: ItemId, pipe: &ColorPipeline, cs: Colo
 
 /// Decode a frame of `item` (box-decimated by `n`) into the working space of `pipe`.
 pub fn decode(project: &Project, item: ItemId, frame: &VideoFrame, n: usize, pipe: &ColorPipeline) -> Image {
+    // Draft playback: shrink in Y'CbCr first and convert each drawn pixel once, not every sample
+    // of its n×n box (the mean is of codes, not light, as the GPU's draft path takes it)
+    if n > 1
+        && filmcraft_media::cancel::draft()
+        && let Some(small) = frame.box_decimated(n)
+    {
+        return decode(project, item, &small, 1, pipe);
+    }
     let cs = source_space(project, item, frame);
     if !needs_management(pipe, cs, frame) {
         let (w, h, px) = frame.to_linear_f32_decimated(n);
@@ -91,14 +99,16 @@ pub fn decode(project: &Project, item: ItemId, frame: &VideoFrame, n: usize, pip
 
 /// Working space → monitor (SDR BT.709) for a non-plain pipeline; no-op otherwise.
 pub fn to_display(img: &mut Image, pipe: &ColorPipeline) {
-    if pipe.is_plain() {
+    if display_is_identity(pipe) {
         return;
     }
     let o = display_transform(pipe);
-    if o.is_identity() {
-        return;
-    }
     img.map_rgb(|c, _, _| o.apply(c));
+}
+
+/// Whether [`to_display`] leaves every picture as it is.
+pub fn display_is_identity(pipe: &ColorPipeline) -> bool {
+    pipe.is_plain() || display_transform(pipe).is_identity()
 }
 
 pub fn display_transform(pipe: &ColorPipeline) -> Arc<OutputTransform> {
@@ -116,6 +126,36 @@ mod tests {
         let mut f = VideoFrame::rgba8(2, 2, [rgb[0], rgb[1], rgb[2], 255].repeat(4));
         f.color = color;
         f
+    }
+
+    #[test]
+    fn draft_shrinks_hdr_before_converting_it() {
+        use filmcraft_frame::{Chroma, PixelData};
+        use std::sync::Arc;
+        // a smooth 10-bit HLG ramp, 64x32: the draft picture is the same size and close to the full one
+        let (w, h) = (64usize, 32usize);
+        let hlg = ColorInfo { transfer: Transfer::Hlg, primaries: Primaries::Bt2020, matrix: filmcraft_color::Matrix::Bt2020Ncl, ..ColorInfo::default() };
+        let luma: Vec<u16> = (0..w * h).map(|i| 300 + ((i % w) * 300 / w) as u16).collect();
+        let cb: Vec<u16> = (0..w * h / 4).map(|i| 462 + ((i % (w / 2)) * 100 / (w / 2)) as u16).collect();
+        let cr = vec![560u16; w * h / 4];
+        let f = VideoFrame {
+            width: w as u32,
+            height: h as u32,
+            data: PixelData::Yuv16 { planes: [Arc::new(luma), Arc::new(cb), Arc::new(cr)], chroma: Chroma::C420, bits: 10, alpha: None },
+            color: hlg,
+            par: (1, 1),
+            pts: Default::default(),
+        };
+        let p = Project::new("t");
+        let id = ItemId(1);
+        let full = decode(&p, id, &f, 4, &ColorPipeline::REC709);
+        let draft = filmcraft_media::cancel::with_draft(true, || decode(&p, id, &f, 4, &ColorPipeline::REC709));
+        assert_eq!((draft.w, draft.h), (full.w, full.h));
+        assert_eq!((draft.w, draft.h), (16, 8));
+        // as shown (display-encoded): the mean of codes and the mean of light are close on a smooth picture
+        let shown = |v: f32| filmcraft_color::linear_to_srgb(v.clamp(0.0, 1.0));
+        let worst = full.px.iter().zip(&draft.px).map(|(a, b)| (shown(*a) - shown(*b)).abs()).fold(0.0f32, f32::max);
+        assert!(worst < 0.02, "draft differs by {worst}");
     }
 
     #[test]
@@ -145,7 +185,7 @@ mod tests {
                 proxy: None,
                 identity: None,
             };
-            let id = p.add_item("hdr", Label::Iris, ItemKind::Media(clip), None);
+            let id = p.add_item("hdr", Label::Iris, ItemKind::Media(Box::new(clip)), None);
             (p, id)
         };
         let out = |hdr: Option<HdrMetadata>, nits: f32| {
