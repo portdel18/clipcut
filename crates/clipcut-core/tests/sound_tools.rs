@@ -325,6 +325,45 @@ fn a_faster_voice_stays_clean() {
 }
 
 #[test]
+fn another_project_s_sound_never_joins_a_stretched_clip() {
+    // two projects, each one clip with the same ids at 200 %: a voice and a tone. The stretched
+    // sound carries on from the last block read, so reading the tone in between must not change
+    // the voice (the chains were found by ids alone, and the voice smeared)
+    let voice = "aevalsrc=(0.3*sin(2*PI*150*t)+0.2*sin(2*PI*300*t))*(0.6+0.4*sin(2*PI*3*t))";
+    let (Some(v), Some(t)) = (clip("ch-voice-b", voice, voice), clip("ch-tone-b", "sine=frequency=440", "sine=frequency=440")) else { return };
+    let open = |path: &std::path::Path| {
+        let mut s = Studio::new();
+        s.add_clip(path.to_str().unwrap()).unwrap();
+        let id = main(&s.timeline())[0];
+        s.set_props(&[id], &serde_json::json!({"speed": 200.0}), None).unwrap();
+        s
+    };
+    let (sv, st) = (open(&v), open(&t));
+    assert_eq!(main(&sv.timeline()), main(&st.timeline()), "the same ids in both");
+    let (fv, ft) = (sv.audio_feed().unwrap(), st.audio_feed().unwrap());
+    // the tone first at each block, from the start: the voice must not carry on from it
+    let at = 7_200;
+    let left: Vec<f64> = (0..24)
+        .flat_map(|b| {
+            ft.mix(at + b * 1024, 1024);
+            fv.mix(at + b * 1024, 1024)
+        })
+        .step_by(2)
+        .map(f64::from)
+        .collect();
+    // as periodic at the voice's own period (150 Hz) as a clean stretch keeps it
+    let p = 320;
+    let (mut xy, mut xx, mut yy) = (0.0, 1e-12, 1e-12);
+    for i in 0..left.len() - p {
+        xy += left[i] * left[i + p];
+        xx += left[i] * left[i];
+        yy += left[i + p] * left[i + p];
+    }
+    let r = xy / (xx * yy).sqrt();
+    assert!(r > 0.97, "the voice smeared (periodicity {r:.4}) when another project's clip was read first");
+}
+
+#[test]
 fn shuttle_sound_plays_faster_at_the_same_pitch() {
     // a rising tone: 200 Hz at the start, 300 Hz higher every second
     let Some(path) = clip("ch-chirp", "aevalsrc=0.5*sin(2*PI*(200*t+150*t*t))", "aevalsrc=0.5*sin(2*PI*(200*t+150*t*t))") else { return };

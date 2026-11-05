@@ -130,5 +130,16 @@ impl Studio {
 }
 
 fn beat(at: Tick, id: u64) -> Marker {
-    Marker { id: MarkerId(id), start: at, duration: Tick::ZERO, name: BEAT.into(), comment: String::new(), kind: MarkerKind::Comment, color: Label::Mango }
+    Marker {
+        url: String::new(),
+        author: String::new(),
+        custom_color: None,
+        id: MarkerId(id),
+        start: at,
+        duration: Tick::ZERO,
+        name: BEAT.into(),
+        comment: String::new(),
+        kind: MarkerKind::Comment,
+        color: Label::Mango,
+    }
 }
