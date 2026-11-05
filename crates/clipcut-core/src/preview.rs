@@ -140,6 +140,9 @@ pub struct MediaProbe {
     /// Where the first clip showing it is on the timeline (start, end in seconds), to time the
     /// player there.
     pub on_timeline: Option<(f64, f64)>,
+    /// Three moments of that clip (a fifth, half and four fifths of the way through): timeline
+    /// seconds and the media seconds showing there, for the Colour check.
+    pub moments: Vec<(f64, f64)>,
 }
 
 impl Studio {
@@ -164,15 +167,23 @@ impl Studio {
                 let path = self.session.media.follow(&path).unwrap_or(path);
                 // a fresh copy of the file, not the player's: its cache would hide the decoding
                 let source = self.session.media.open_file(&path, &*self.session.services).ok()?;
-                let on_timeline = self.session.active_sequence().and_then(|q| {
-                    q.video_tracks
-                        .iter()
-                        .flat_map(|t| t.items.iter())
-                        .filter(|c| c.item == id && c.enabled)
-                        .min_by_key(|c| c.start)
-                        .map(|c| (c.start.seconds(), c.end().seconds()))
+                let first = self.session.active_sequence().and_then(|q| {
+                    let c = q.video_tracks.iter().flat_map(|t| t.items.iter()).filter(|c| c.item == id && c.enabled).min_by_key(|c| c.start)?;
+                    Some((c.clone(), q.settings.frame_rate))
                 });
-                Some(MediaProbe { name, path, info, source, on_timeline })
+                let on_timeline = first.as_ref().map(|(c, _)| (c.start.seconds(), c.end().seconds()));
+                let moments = first
+                    .map(|(c, rate)| {
+                        [0.2, 0.5, 0.8]
+                            .iter()
+                            .map(|f| {
+                                let t = rate.snap(c.start + Tick((c.duration.0 as f64 * f) as i64));
+                                (t.seconds(), c.source_time_at(t).seconds())
+                            })
+                            .collect()
+                    })
+                    .unwrap_or_default();
+                Some(MediaProbe { name, path, info, source, on_timeline, moments })
             })
             .take(max)
             .collect()

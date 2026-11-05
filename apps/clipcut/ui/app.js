@@ -651,6 +651,7 @@ async function makeProxies(items, auto = false) {
 async function checkPlayback() {
   const dlg = $('#check-dlg');
   const body = $('#check-body');
+  $('#check-title').textContent = 'Playback check';
   body.innerHTML = '<p class="meta">Testing each video on this computer: a few seconds each…</p>';
   $('#check-copy').disabled = true;
   $('#check-text').value = '';
@@ -672,6 +673,37 @@ async function checkPlayback() {
     body.appendChild(ul);
   }
   if (!r.videos.length) body.innerHTML = '<p class="meta">There are no videos in this project to check.</p>';
+  $('#check-text').value = r.text;
+  $('#check-copy').disabled = false;
+}
+/* Check colour: each video's saturation as recorded, as a standard SDR conversion shows it and
+   as the player shows it (colour_check.rs), with the report to copy. */
+async function checkColour() {
+  const dlg = $('#check-dlg');
+  const body = $('#check-body');
+  $('#check-title').textContent = 'Colour check';
+  body.innerHTML = '<p class="meta">Measuring each video at three moments…</p>';
+  $('#check-copy').disabled = true;
+  $('#check-text').value = '';
+  if (!dlg.open) dlg.showModal();
+  if (S.playing) await pause();
+  let r = null;
+  try { r = await invoke('colour_check', { maxWidth: previewWidth() }); } catch (e) { body.innerHTML = ''; const p = document.createElement('p'); p.className = 'meta'; p.textContent = String(e); body.appendChild(p); }
+  if (!r) return;
+  body.innerHTML = '';
+  for (const v of r.videos) {
+    const h = document.createElement('h3');
+    h.textContent = v.name;
+    body.appendChild(h);
+    const ul = document.createElement('ul');
+    for (const f of v.findings) { const li = document.createElement('li'); li.textContent = f; ul.appendChild(li); }
+    body.appendChild(ul);
+  }
+  if (!r.videos.length) body.innerHTML = '<p class="meta">There are no videos in this project to check.</p>';
+  const pre = document.createElement('pre');
+  pre.className = 'check-pre';
+  pre.textContent = r.text;
+  body.appendChild(pre);
   $('#check-text').value = r.text;
   $('#check-copy').disabled = false;
 }
@@ -4563,6 +4595,7 @@ click('#tab-mixer', () => showTab('mixer'));
 click('#proxy-make', () => makeProxies(null));
 click('#proxy-check', checkPlayback);
 click('#check-copy', copyCheck);
+click('#colour-check', checkColour);
 click('#check-close', () => $('#check-dlg').close());
 $('#proxy-auto').addEventListener('change', e => setAutoProxies(e.target.checked));
 $('#proxy-use').addEventListener('change', e => edit('set_proxies', { on: e.target.checked }));

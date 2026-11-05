@@ -444,6 +444,7 @@ mod tests {
         s.add_clip(&path).unwrap();
         let feed = s.frame_feed(960, "auto").ok();
         eprintln!("{}", run(&s.media_probes(8), None, "test", feed.as_ref()).text);
+        eprintln!("{}", clipcut_core::colour_check(&s.media_probes(8), feed.as_ref(), "test").text);
     }
 
     #[test]

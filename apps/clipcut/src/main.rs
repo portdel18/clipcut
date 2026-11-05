@@ -131,6 +131,22 @@ fn decoder_caps() -> Option<String> {
     }
 }
 
+/// Check colour: how saturated each video is as recorded, as a standard SDR conversion shows it
+/// and as the player shows it (`clipcut_core::colour_check`).
+#[tauri::command]
+async fn colour_check(max_width: Option<u32>, handle: tauri::AppHandle, app: tauri::State<'_, App>) -> Result<clipcut_core::ColourReport, String> {
+    let (probes, feed) = {
+        let s = lock(&app.studio);
+        (s.media_probes(8), s.frame_feed(max_width.unwrap_or(960).clamp(16, 7680), "auto").ok())
+    };
+    let version = handle.package_info().version.to_string();
+    blocking(move || {
+        std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| clipcut_core::colour_check(&probes, feed.as_ref(), &version)))
+            .map_err(|_| "the colour check failed; please try again".to_string())
+    })
+    .await
+}
+
 /// Check playback: which decoder each video gets and why, its decoding speed and its drive's,
 /// measured here (a few seconds a video, at most 8 videos).
 #[tauri::command]
@@ -579,6 +595,7 @@ fn main() {
             editing::make_proxies,
             hevc_hardware,
             playback_check,
+            colour_check,
             pause_job,
             editing::poll_jobs,
             editing::set_proxies,
