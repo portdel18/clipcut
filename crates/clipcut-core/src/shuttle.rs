@@ -88,7 +88,7 @@ impl Stretcher {
         if want > end {
             let n = usize::try_from(want - end).unwrap_or(0).min(1 << 20);
             let mix = feed.mix(end, n);
-            for p in mix.chunks_exact(2) {
+            for p in mix.as_chunks::<2>().0 {
                 self.left.push(p[0]);
                 self.right.push(p[1]);
                 self.mono.push(p[0] + p[1]);

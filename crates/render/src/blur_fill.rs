@@ -35,7 +35,7 @@ pub(crate) fn background(layer: &Image, w: usize, h: usize, e: &EffectInstance, 
     crate::effects::box_blur(&mut small, &rx, &ry, true);
     if darken > 0.0 {
         let keep = 1.0 - darken;
-        for p in small.px.chunks_exact_mut(4) {
+        for p in small.px.as_chunks_mut::<4>().0 {
             p[0] *= keep;
             p[1] *= keep;
             p[2] *= keep;
