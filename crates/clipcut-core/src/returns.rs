@@ -112,6 +112,9 @@ fn write(i: &mut TrackItem, r: &Returns, alloc: Option<&mut dyn FnMut() -> u64>)
             }
         }
         (None, Some(alloc)) => i.markers.push(Marker {
+            url: String::new(),
+            author: String::new(),
+            custom_color: None,
             id: MarkerId(alloc()),
             start: i.source_in,
             duration: Tick::ZERO,

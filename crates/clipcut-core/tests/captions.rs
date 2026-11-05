@@ -321,6 +321,8 @@ fn in_step(s: &Studio, picture: u64, sound: u64) {
 }
 
 #[test]
+// one scenario, step by step: splitting it would hide the order the steps depend on
+#[allow(clippy::cognitive_complexity)]
 fn extracted_sound_stays_linked_and_in_the_transcript() {
     let Some(mut s) = captioned() else { return };
     let before = caps(&s);
