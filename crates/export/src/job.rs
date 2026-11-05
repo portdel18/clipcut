@@ -463,6 +463,9 @@ impl Exporter {
 
     /// Render, encode and mux the next batch (or finish the file).
     pub fn step(&mut self, sources: &dyn SourceProvider, progress: &Progress) -> Result<Step> {
+        while cfg!(not(target_arch = "wasm32")) && progress.paused.load(Ordering::Relaxed) && !progress.cancel.load(Ordering::Relaxed) {
+            std::thread::sleep(std::time::Duration::from_millis(40));
+        }
         if progress.cancel.load(Ordering::Relaxed) {
             self.ahead = None;
             return Err(ExportError::Cancelled);

@@ -102,6 +102,9 @@ pub struct Progress {
     pub done: AtomicU64,
     pub total: AtomicU64,
     pub cancel: AtomicBool,
+    /// Holds the job between frames while set (a background job yielding to playback); cancel
+    /// still ends it.
+    pub paused: AtomicBool,
     pub finished: AtomicBool,
     pub status: Mutex<String>,
     pub error: Mutex<Option<String>>,

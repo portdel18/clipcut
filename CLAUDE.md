@@ -102,8 +102,33 @@ remote `upstream`). Read `README.md` for what it is and the roadmap.
 - The player's frames come from `FrameFeed` (`clipcut-core/src/preview.rs`: a project snapshot
   that renders on any thread at a scale snapped to 1, ½, ¼, ⅛ by `preview_scale`). While playing,
   `apps/clipcut/src/ahead.rs` renders ahead on 2–3 workers and `frame` serves from it without the
-  studio lock. Proxies are the engine's (`media.createProxies`); `Studio::poll` attaches finished
-  ones, and the Media panel calls it when the job ends.
+  studio lock. It draws about 30 pictures a second at any speed and frame rate (`render_step`: a
+  60 fps video shows every other frame while playing; the sound has every sample). Proxies are the
+  engine's (`media.createProxies`, beside the project, or in the data folder while it is unsaved,
+  never beside media on a slow drive); `Studio::poll` attaches finished ones, and the Media panel
+  calls it when the job ends. Heavy videos (`MediaView.heavy`, `heavy()`: 4K, or more than 1080p
+  at 30 fps) get one by themselves, one at a time (`autoProxies`, off with
+  `clipcut.autoProxies`), each used when made. Phone 4K 60 decoded on the processor runs at 5–12
+  fps (HEVC 10-bit the slowest); on Windows HEVC reaches the GPU only with Microsoft's HEVC Video
+  Extensions (`hevc_hardware`, the Media panel says so). A proxy being made waits while the
+  player plays or the check runs (`pause_job` → the engine's `Progress::paused`, held between
+  frames in `Exporter::step`) and renders on the GPU when there is one (`proxies.rs`).
+  **Check playback** (Media panel, `check.rs`, `playback_check`) measures on the user's computer
+  which decoder each video gets (`hw_stats` frames by hardware; the engine's "declined" log lines,
+  kept by `check::keep_log`), its decode fps and its drive's speed, with a report to copy: ask the
+  user for it before guessing at playback problems on their hardware. The first report (Intel Arc
+  140V, S26 4K 60 HEVC 10-bit HLG) showed the GPU decoding but only 21 fps: the full 4K P010
+  readback and its conversion on the CPU were the bottleneck. In draft mode (playback at ½ or
+  less; not exports or proxies) the Media Foundation decoder reads pictures 1400 px or more on their short side
+  back at half size each way (`biplanar::to_frame_halved`, marked draft so exports and stills
+  never get them; `HybridDecoder::set_draft` reaches the hardware decoder; `GopCache::finish`
+  scales a clean-aperture crop for them, `region_within`), and logs its decode / copy back /
+  convert time per picture every 240 pictures, which the report's decoder notes show. The
+  second report: decode 57 fps (decode 1.2–2.8 ms, copy back 2.3 ms, convert 5–7 ms a picture)
+  but playback still choppy. The check also times the whole player now (`check::player`: the
+  timeline's frames at the player's size, draft, `render_step`, 3 workers) against the pictures a
+  second it shows. HLG conversion to SDR was measured right (exact BT.2100 bars: within 2 %,
+  export = player); a duller look next to the phone is HDR shown as HDR there.
 - Graphics follow the video: opening Graphics calls `CS.hosted.setBackdrop` with the frame at the
   playhead (`graphic_backdrop`, which leaves out the graphic being changed), and after a Ratio
   change `offerRemake` re-renders graphics in the old shape through `CS.hosted.add` one by one
@@ -186,6 +211,12 @@ remote `upstream`). Read `README.md` for what it is and the roadmap.
   exported like any other. The model isn't `Send`: each effect leases a worker thread from a small
   pool (`lease`), which starts from a clone of the loaded model. 48 kHz, 1 or 2 channels only;
   anything else passes through. Its latency is a 480-sample frame plus the model's 1440.
+  The engine reuses a clip's effect chain only for a request that starts where the last one ended
+  (`audio_fx::process`); any other request builds the chain again with its warm-up (0.5 s of
+  sound through the AI model, 1 s for DeNoise). The player reads a little past each chunk to
+  interpolate, so `playback.rs` keeps that overlap itself (`Held`) and asks the mix only for new
+  samples: overlapping reads once made AI noise reduction mix at 0.2× real time and slowed the
+  whole player.
 - Waveforms are drawn as loud as they will play (clip and lane volume, `playGain`); past full
   scale their bars get red edges (`--sound-loud`), and the Sound panel says by how much, with
   Lower to fit (`loudHint`, `overBy`).

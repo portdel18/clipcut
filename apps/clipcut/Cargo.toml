@@ -18,6 +18,9 @@ tauri-build = { version = "2", features = [] }
 
 [dependencies]
 clipcut-core = { workspace = true }
+filmcraft-codecs = { workspace = true }
+filmcraft-media = { workspace = true }
+log = { workspace = true }
 filmcraft-export = { workspace = true }
 filmcraft-gpu = { workspace = true }
 filmcraft-platform = { workspace = true }

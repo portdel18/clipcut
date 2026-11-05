@@ -123,3 +123,55 @@ fn proxies_are_made_attached_and_used_for_the_player_only() {
     assert!(s.make_proxies(&[999_999]).is_err(), "nothing to make");
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+#[test]
+fn big_videos_are_flagged_and_proxies_of_unsaved_projects_stay_on_this_computer() {
+    // 4K and up, or more than 1080p at 30 fps a second (phones' 4K 60, 1080p 60)
+    use clipcut_core::heavy;
+    assert!(heavy(3840, 2160, 60.0) && heavy(3840, 2160, 30.0) && heavy(3840, 2160, 24.0) && heavy(4096, 2160, 25.0));
+    assert!(heavy(2160, 3840, 30.0), "upright phone video too");
+    assert!(heavy(1920, 1080, 60.0) && heavy(1920, 1080, 59.94) && heavy(2560, 1440, 30.0));
+    assert!(!heavy(1920, 1080, 30.0) && !heavy(1920, 1080, 29.97) && !heavy(1280, 720, 60.0) && !heavy(640, 360, 30.0));
+    assert!(!heavy(1920, 1080, f64::NAN) && !heavy(0, 0, 60.0) && heavy(u32::MAX, u32::MAX, f64::INFINITY));
+
+    let Some(v) = picture() else { return };
+    let dir = fixtures_dir("clipcut-core").join(format!("proxies-data-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let mut s = Studio::new();
+    s.set_data_dir(&dir);
+    s.add_clip(v.to_str().unwrap()).unwrap();
+    let m = s.timeline().media[0].clone();
+    assert_eq!((m.kind, m.fps, m.codec.as_str(), m.heavy), ("video", 30.0, "h264", false));
+    // never saved: in ClipCut's own folder, not next to the media (a slow or removable drive)
+    let job = s.make_proxies(&[]).unwrap();
+    let t0 = Instant::now();
+    while !s.job(job).unwrap().finished {
+        assert!(t0.elapsed() < Duration::from_secs(120), "proxies stuck");
+        std::thread::sleep(Duration::from_millis(50));
+    }
+    assert_eq!(s.job(job).unwrap().error, None);
+    assert!(s.poll() && s.timeline().media[0].proxy);
+    assert_eq!(std::fs::read_dir(dir.join("Proxies")).unwrap().count(), 1, "in the data folder");
+    assert!(!v.parent().unwrap().join("Proxies").join(format!("{}_Proxy.mov", v.file_stem().unwrap().to_string_lossy())).exists());
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn hevc_video_is_named_hevc() {
+    let Some(ff) = ffmpeg_or_skip("clipcut-core hevc") else { return };
+    let out = fixtures_dir("clipcut-core").join("hevc-small.mp4");
+    let ok = generate(&out, |tmp| {
+        Command::new(&ff)
+            .args(["-v", "error", "-y", "-f", "lavfi", "-i", "testsrc2=size=320x180:rate=60:duration=0.5"])
+            .args(["-c:v", "libx265", "-x265-params", "log-level=error", "-tag:v", "hvc1", "-pix_fmt", "yuv420p"])
+            .arg(tmp)
+            .status()
+            .is_ok_and(|s| s.success())
+    });
+    let Some(path) = ok else { return };
+    let mut s = Studio::new();
+    s.import(path.to_str().unwrap()).unwrap();
+    let m = s.timeline().media[0].clone();
+    assert_eq!((m.codec.as_str(), m.fps, m.heavy), ("hevc", 60.0, false));
+}

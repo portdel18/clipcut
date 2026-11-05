@@ -853,3 +853,17 @@ fn release_idle_empties_idle_caches_and_leaves_one_in_use_alone() {
     assert_eq!(pool.bytes.load(Ordering::Relaxed), 0);
     assert_eq!(pool.decoders.load(Ordering::Relaxed), 0);
 }
+
+#[test]
+fn a_crop_fits_a_draft_picture_read_back_at_half_size() {
+    use super::region_within;
+    use filmcraft_frame::Region;
+    let r = Region { x: 8, y: 4, w: 3824, h: 2152 };
+    assert_eq!(region_within(r, 3840, 2160), r, "a full-size picture keeps it");
+    assert_eq!(region_within(r, 1920, 1080), Region { x: 4, y: 2, w: 1912, h: 1076 });
+    assert_eq!(region_within(r, 960, 540), Region { x: 2, y: 1, w: 956, h: 538 });
+    // hostile numbers don't overflow or loop
+    let wild = Region { x: usize::MAX, y: usize::MAX, w: usize::MAX, h: usize::MAX };
+    let _ = region_within(wild, 1, 1);
+    let _ = region_within(r, 0, 0);
+}

@@ -60,12 +60,12 @@ pub use graphics::{GRAPHIC_FILE, GRAPHIC_SOUND, read_graphic};
 pub use key::KeyView;
 pub use keyframes::{ANIMATABLE, KeyTrack};
 pub use mixer::{Level, Meters, MixView};
-pub use preview::{FrameFeed, QUALITIES, preview_scale};
+pub use preview::{FrameFeed, MediaProbe, QUALITIES, preview_scale};
 pub use props::{ClipProps, PEAKS_PER_SECOND, Peaks, TextProps};
 pub use replace::Replaced;
 pub use scopes::SCOPES;
 pub use shuttle::Stretcher;
-pub use timeline::{ClipView, Keep, LaneView, MediaView, ProjectView, TimelineView};
+pub use timeline::{ClipView, Keep, LaneView, MediaView, ProjectView, TimelineView, heavy};
 pub use timing::FREEZE_SECONDS;
 pub use titles::{MY_TITLES, TitleView};
 pub use transitions::{DEFAULT_SECONDS as TRANSITION_SECONDS, TRANSITIONS, TransitionPresetView, TransitionView, transition_presets, transition_previews};
@@ -346,6 +346,14 @@ impl Studio {
     }
 
     /// An export job's progress, or `None` for an unknown id.
+    /// Holds background job `id` (a proxy being made) between frames while `on`, so it doesn't
+    /// compete with playback; false lets it carry on. False when there is no such job.
+    pub fn pause_job(&self, id: u64, on: bool) -> bool {
+        let Some(j) = self.session.jobs.iter().find(|j| j.id == id) else { return false };
+        j.progress.paused.store(on, std::sync::atomic::Ordering::Relaxed);
+        true
+    }
+
     pub fn job(&self, id: u64) -> Option<JobStatus> {
         let j = self.session.jobs.iter().find(|j| j.id == id)?;
         let v = j.to_json();

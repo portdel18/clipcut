@@ -143,7 +143,16 @@ pub struct MfDecoder {
     fed: u64,
     name: &'static str,
     timings: Timings,
+    /// Draft mode ([`VideoDecoder::set_draft`]: playback at half size or less): big
+    /// pictures are read back at half size each way ([`biplanar::to_frame_halved`]).
+    draft: bool,
 }
+
+/// Pictures at least this tall (the shorter side) are read back at half size in draft mode: a
+/// 4K picture is 12 to 25 MB to copy and convert, which is the slow part of playing it.
+const HALVE_FROM: u32 = 1400;
+/// Every how many pictures the decoder logs where its time went (Check playback shows it).
+const LOG_EVERY: u64 = 240;
 
 impl MfDecoder {
     /// A decoder for the stream, or why Media Foundation does not take it (unsupported format, no
@@ -177,6 +186,7 @@ impl MfDecoder {
             fail_after: None,
             fed: 0,
             timings: Timings::default(),
+            draft: false,
         })
     }
 
@@ -230,18 +240,32 @@ impl MfDecoder {
                         self.check_size()?;
                     }
                     let geometry = self.geometry;
+                    let halve = self.draft && geometry.crop.2.min(geometry.crop.3) >= HALVE_FROM;
                     let (t0, mut convert) = (Instant::now(), Duration::ZERO);
                     let frame = self.readback.read(&self.gpu, &sample, self.format, |b| {
                         let c0 = Instant::now();
-                        let f = biplanar::to_frame(b, &geometry);
+                        let f = if halve { biplanar::to_frame_halved(b, &geometry) } else { biplanar::to_frame(b, &geometry) };
                         convert = c0.elapsed();
                         f
                     })?;
                     self.timings.frames += 1;
                     self.timings.convert += convert;
                     self.timings.readback += t0.elapsed().saturating_sub(convert);
+                    if self.timings.frames.is_multiple_of(LOG_EVERY) {
+                        let per = |d: Duration| d.as_secs_f64() * 1000.0 / self.timings.frames as f64;
+                        log::info!(
+                            "hardware decoding: {} pictures of {}x{}{}: decode {:.1} ms, copy back {:.1} ms, convert {:.1} ms a picture",
+                            self.timings.frames,
+                            geometry.crop.2,
+                            geometry.crop.3,
+                            if halve { " read at half size" } else { "" },
+                            per(self.timings.decode),
+                            per(self.timings.readback),
+                            per(self.timings.convert),
+                        );
+                    }
                     let pts = self.take_pts(t);
-                    out.push(DecodedFrame { pts, frame, draft: false });
+                    out.push(DecodedFrame { pts, frame, draft: halve });
                 }
             }
         }
@@ -354,6 +378,10 @@ impl VideoDecoder for MfDecoder {
 
     fn name(&self) -> &str {
         self.name
+    }
+
+    fn set_draft(&mut self, on: bool) {
+        self.draft = on;
     }
 
     fn is_random_access(&self, sample: &[u8]) -> Option<bool> {

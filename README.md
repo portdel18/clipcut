@@ -189,8 +189,12 @@ length, linked sound, captions and transitions following.
 whichever fills it, and renders ahead while the video plays. The quality menu under the player
 (Auto, Full, ½, ¼) trades sharpness for smoothness on a slow computer. For big or 4K footage,
 **Make proxies** in the Media panel makes small ProRes copies in the background (in the project's
-folder) and plays from them; **Use for playback** turns them on or off. Exports always use the
-originals.
+folder, or ClipCut's own folder until the project is saved) and plays from them; **Use for
+playback** turns them on or off. 4K and 60 fps videos (a phone's 4K 60) get theirs by themselves
+when you add them, one at a time, each used as soon as it is made. Exports always use the
+originals. A 60 fps video plays at 30 pictures a second in the player, so it keeps up. On Windows,
+phone video in HEVC (H.265) plays on the graphics card only with Microsoft's HEVC Video Extensions
+(Microsoft Store); the Media panel says when they are missing.
 
 **Platform overlays.** The player's **Overlay** menu shows what TikTok, Instagram Reels or YouTube
 Shorts cover on a 9:16 video (the same drawing as Clip Studio's), or the safe zones on any shape.
