@@ -662,6 +662,7 @@ async function checkPlayback() {
   let r = null;
   try { r = await invoke('playback_check', { maxWidth: previewWidth() }); } catch (e) { body.innerHTML = ''; const p = document.createElement('p'); p.className = 'meta'; p.textContent = String(e); body.appendChild(p); }
   PX.checking = false;
+  pumpThumbs();
   if (!r) return;
   body.innerHTML = '';
   for (const v of r.videos) {
@@ -3050,8 +3051,8 @@ async function pumpThumbs() {
         for (const k of Thumbs.cache.keys()) { Thumbs.cache.delete(k); if (--n <= 0) break; }
       }
       drawStripsSoon();
-      // the player comes first: the rest wait until it stops
-      if (S.playing) break;
+      // the player comes first: the rest wait until it stops (or the playback check is done)
+      if (S.playing || PX.checking) break;
     }
   } finally {
     Thumbs.running = false;

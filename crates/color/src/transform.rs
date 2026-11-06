@@ -144,8 +144,10 @@ pub struct ToneMap {
 
 /// The share of per-channel tone mapping's highlight desaturation HDR video (PQ, HLG) gets on its
 /// way to SDR: ratio mapping alone leaves bright colours looking more saturated than they do on an
-/// HDR display, per-channel mapping alone washes them out. The shader's `managed` uses the same.
-pub const HIGHLIGHT_DESAT: f32 = 0.5;
+/// HDR display. All of it: at half, phone HLG footage came out 13 % more saturated than the ITU
+/// conversion to SDR (ClipCut's colour check on the user's footage; bright test footage ×1.36,
+/// ×1.03 at 1.0, mid-tones ×1.00 either way). The shader's `managed` uses the same.
+pub const HIGHLIGHT_DESAT: f32 = 1.0;
 
 impl ToneMap {
     pub fn new(src_peak_nits: f64, dst_peak_nits: f64) -> Self {
@@ -567,14 +569,14 @@ mod tests {
         let o = tm.apply(c);
         // hue kept: the middle channel sits where it did between the others
         assert!(((o[0] - o[1]) / (o[1] - o[2]) - 2.0).abs() < 1e-3, "{o:?}");
-        // brightness by max(R,G,B); saturation between the source's and per-channel mapping's
+        // brightness by max(R,G,B); the saturation per-channel mapping gives (HIGHLIGHT_DESAT)
         let per = |v: f32| v * tm.ratio(v);
         let (sat, per_sat) = ((o[0] - o[2]) / o[0], 1.0 - per(1.0) / per(4.0));
         assert!((o[0] - per(4.0)).abs() < 1e-5, "{o:?}");
         assert!((sat - (1.0 - HIGHLIGHT_DESAT * (1.0 - per_sat / 0.75)) * 0.75).abs() < 1e-4, "{sat} {per_sat}");
-        assert!(per_sat < sat && sat < 0.75 - 0.02, "{sat} {per_sat}");
-        // composite.wgsl writes it out as 0.5: change both together
-        assert_eq!(HIGHLIGHT_DESAT, 0.5);
+        assert!((sat - per_sat).abs() < 1e-4 && sat < 0.75 - 0.02, "{sat} {per_sat}");
+        // composite.wgsl writes it out as 1.0: change both together
+        assert_eq!(HIGHLIGHT_DESAT, 1.0);
         // below the knee nothing changes, saturated or not
         for c in [[0.3f32, 0.2, 0.1], [0.4, 0.05, 0.02]] {
             let o = tm.apply(c);

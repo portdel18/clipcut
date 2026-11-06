@@ -159,9 +159,9 @@ fn managed(rgb: vec3<f32>) -> vec3<f32> {
             let mn = min(min(c.r, c.g), c.b);
             var s = 1.0;
             if mn > 0.0 && mn < m && top > 0.0 {
-                // HIGHLIGHT_DESAT (0.5) of it: the shader only takes PQ and HLG (`gpu_params`)
+                // HIGHLIGHT_DESAT (1.0) of it: the shader only takes PQ and HLG (`gpu_params`)
                 let per = clamp((1.0 - mn * tone_ratio(mn, white) / top) / (1.0 - mn / m), 0.0, 1.0);
-                s = 1.0 - 0.5 * (1.0 - per);
+                s = 1.0 - 1.0 * (1.0 - per);
             }
             c = top - (top - c * k) * s;
         }

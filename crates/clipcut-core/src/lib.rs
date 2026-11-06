@@ -185,7 +185,56 @@ impl AudioFeed {
 /// thread: like [`AudioFeed`] it holds a snapshot of the project, so it doesn't keep the session busy.
 pub struct Thumbs {
     project: Arc<Project>,
-    provider: PoolProvider,
+    provider: ThumbProvider,
+}
+
+/// Each video file's own source for the filmstrips and the Media panel ([`Studio::thumbs`]),
+/// opened once and kept for the session, with the path it was opened from.
+type ThumbSources = Arc<std::sync::Mutex<std::collections::HashMap<ItemId, (String, Option<filmcraft_media::SharedSource>)>>>;
+/// Most files kept open for thumbnails (the pool trims an idle one's decoder and frames anyway).
+const MOST_THUMB_SOURCES: usize = 32;
+
+/// The pool's sources, except that a video without a proxy is read through a source of its own:
+/// a thumbnail is a jump to another moment of the file, and on the source the player reads it
+/// moved the player's decoder there (and its full-size pictures pushed the player's out of the
+/// cache), so the next picture the player wanted meant going back to a keyframe. The 0.4.10
+/// report: 17 such jumps in two seconds, nothing from the cache, a third of the speed.
+struct ThumbProvider {
+    inner: PoolProvider,
+    /// `None` for stills, which share the pool's sources.
+    own: Option<ThumbSources>,
+}
+
+impl filmcraft_render::SourceProvider for ThumbProvider {
+    fn source(&self, item: ItemId) -> Option<filmcraft_media::SharedSource> {
+        if let Some(own) = &self.own
+            && let Some((media, m, _)) = self.inner.project.resolve_media(item)
+            && let filmcraft_project::MediaRef::File { path } = &m.media
+            && m.info.kind == filmcraft_media::MediaKind::Movie
+            && m.info.video.is_some()
+            // a proxy (intra-only: every picture stands alone) costs the player nothing
+            && !(self.inner.pool.use_proxies() && m.proxy.is_some())
+        {
+            let mut own = own.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+            if let Some((p, src)) = own.get(&media)
+                && p == path
+            {
+                if let Some(src) = src {
+                    return Some(src.clone());
+                }
+            } else {
+                if own.len() >= MOST_THUMB_SOURCES {
+                    own.clear();
+                }
+                let src = self.inner.pool.own_source(&self.inner.project, media, &*self.inner.services);
+                own.insert(media, (path.clone(), src.clone()));
+                if let Some(src) = src {
+                    return Some(src);
+                }
+            }
+        }
+        self.inner.source(item)
+    }
 }
 
 impl Thumbs {
@@ -221,6 +270,8 @@ pub struct Studio {
     clipboard: clipboard::Copied,
     /// Lane clips follow the main-track clip they start on (`linkage.rs`).
     linkage: bool,
+    /// The thumbnails' own sources ([`ThumbProvider`]).
+    thumb_sources: ThumbSources,
 }
 
 impl Default for Studio {
@@ -237,7 +288,7 @@ impl Studio {
         // a clip of another size fits the frame when it's added (CapCut-style), through its Scale,
         // so it stays sharp when zoomed in; the engine's own default leaves it at its pixel size
         session.prefs.media.default_media_scaling = "setToFrameSize".into();
-        Self { session, merge: None, graphics: Default::default(), clipboard: Default::default(), linkage: true }
+        Self { session, merge: None, graphics: Default::default(), clipboard: Default::default(), linkage: true, thumb_sources: Default::default() }
     }
 
     /// The engine session, for operations this façade doesn't cover yet.
@@ -308,14 +359,20 @@ impl Studio {
 
     /// A frame renderer for media thumbnails over the project as it is now.
     pub fn thumbs(&self) -> Thumbs {
-        Thumbs { project: self.session.project.clone(), provider: self.session.media.provider(self.session.project.clone(), self.session.services.clone()) }
+        Thumbs {
+            project: self.session.project.clone(),
+            provider: ThumbProvider {
+                inner: self.session.media.provider(self.session.project.clone(), self.session.services.clone()),
+                own: Some(self.thumb_sources.clone()),
+            },
+        }
     }
 
     /// [`Studio::thumbs`] from the original files, never their proxies: stills at full quality.
     pub fn stills(&self) -> Thumbs {
         Thumbs {
             project: self.session.project.clone(),
-            provider: self.session.media.full_res_provider(self.session.project.clone(), self.session.services.clone()),
+            provider: ThumbProvider { inner: self.session.media.full_res_provider(self.session.project.clone(), self.session.services.clone()), own: None },
         }
     }
 
