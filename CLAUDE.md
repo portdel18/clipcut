@@ -134,9 +134,18 @@ remote `upstream`). Read `README.md` for what it is and the roadmap.
   first (`box_decimated` in `colorman::decode` and `plain_layer`, as the GPU path does) and
   converts each drawn pixel once. HLG conversion to SDR was measured right (exact BT.2100 bars: within 2 %,
   export = player); a duller look next to the phone is HDR shown as HDR there. Next to CapCut it looked too saturated: BT.2390 on max(R,G,B) as a ratio
-  keeps bright colours' full saturation, so HDR video (PQ, HLG; not log) now loses half of what
-  per-channel mapping would take from them (`HIGHLIGHT_DESAT`, also written out in
-  `composite.wgsl`).
+  keeps bright colours' full saturation, so HDR video (PQ, HLG; not log) loses what per-channel
+  mapping would take from them (`HIGHLIGHT_DESAT`, also written out in `composite.wgsl`). At half
+  (0.4.9) the 0.4.10 colour check still had the player 13 % more saturated than the ITU
+  conversion on the user's footage (bright test footage ×1.36); at 1.0, ×1.03 (mid-tones ×1.00
+  either way).
+- The 0.4.10 playback report: one worker in order 12.5–20 pictures a second but the player's three
+  together 3.7–8, with 17 jumps back to a keyframe and no cache hits in two seconds. Timeline
+  thumbnails (and the Media panel's) read the same source as the player, so each one moved the
+  player's decoder and pushed its pictures out of the cache. `Studio::thumbs` now reads every
+  video without a proxy through a source of its own (`ThumbProvider`, kept in
+  `Studio::thumb_sources`); `tests/thumbs.rs` (4K: 47 pictures decoded for 3 when shared, 9 now).
+  Check playback also stops the thumbnails while it measures (`PX.checking` in `pumpThumbs`).
 - The 0.4.9 report: decode 63 fps but the player drew 2.7 of 30 (0.4.8: 21), not reproduced here
   (no Media Foundation; drawing on the CPU is as before, ~100 ms a 1080×1920 HLG picture on 4
   cores). Since then the check's player line also gives one worker in order, the drawing alone,
