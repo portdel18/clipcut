@@ -32,6 +32,8 @@ struct Dec {
     /// (pts, decoded as a draft picture)
     held: VecDeque<(i64, bool)>,
     draft: bool,
+    /// playback's rhythm: other pictures are left out, as the hardware decoder leaves them
+    keep: Option<Keep>,
     /// made for background work (few threads, like the H.264 decoder's)
     limited: bool,
     resets: Arc<AtomicUsize>,
@@ -51,7 +53,10 @@ impl VideoDecoder for Dec {
         self.held.push_back((pts, self.draft && sample[0] % 2 == 1));
         let mut out = Vec::new();
         while self.held.len() > self.delay {
-            out.push(picture(self.held.pop_front().expect("held")));
+            let p = self.held.pop_front().expect("held");
+            if self.keep.is_none_or(|k| k.wants(p.0)) {
+                out.push(picture(p));
+            }
         }
         Ok(out)
     }
@@ -64,6 +69,9 @@ impl VideoDecoder for Dec {
     }
     fn set_draft(&mut self, on: bool) {
         self.draft = on;
+    }
+    fn set_keep(&mut self, keep: Option<Keep>) {
+        self.keep = keep;
     }
     fn name(&self) -> &str {
         "test"
@@ -103,6 +111,7 @@ impl VideoSamples for Samples {
             intra: self.intra,
             held: VecDeque::new(),
             draft: false,
+            keep: None,
             limited: filmcraft_media::cancel::background(),
             resets: self.resets.clone(),
             decodes: self.decodes.clone(),
@@ -866,4 +875,49 @@ fn a_crop_fits_a_draft_picture_read_back_at_half_size() {
     let wild = Region { x: usize::MAX, y: usize::MAX, w: usize::MAX, h: usize::MAX };
     let _ = region_within(wild, 1, 1);
     let _ = region_within(r, 0, 0);
+}
+
+#[test]
+fn playback_every_other_frame_leaves_the_others_out_and_any_frame_still_comes() {
+    // 60 fps shown at 30: draft playback asks for every other frame
+    let s = samples(240, 120, 3, false);
+    let c = GopCache::new(None);
+    let draft = |t: i64| filmcraft_media::cancel::with_draft(true, || c.frame(&s, t)).expect("frame");
+    for k in (20..60).step_by(2) {
+        assert_eq!(index_of(&draft(k * 1000)), k as usize);
+    }
+    {
+        // once its rhythm is clear (three requests), the frames between were never handed back
+        let st = c.shared.state.lock().unwrap();
+        let odd: Vec<i64> = st.frames.keys().filter(|p| (30_000..58_000).contains(*p) && (*p / 1000) % 2 == 1).copied().collect();
+        assert!(odd.is_empty(), "frames playback skips were kept: {odd:?}");
+        assert!(st.frames.contains_key(&58_000));
+    }
+    let seeks = s.resets.load(Ordering::Relaxed);
+    // carrying on in step costs no jump back
+    for k in (60..80).step_by(2) {
+        assert_eq!(index_of(&draft(k * 1000)), k as usize);
+    }
+    assert_eq!(s.resets.load(Ordering::Relaxed), seeks, "playback in step jumped back");
+    // a frame out of step (scrubbing, a pause) still comes, right, in draft or exactly
+    assert_eq!(index_of(&draft(81_000)), 81);
+    assert_eq!(index_of(&c.frame(&s, 83_000).expect("frame")), 83);
+    assert_eq!(index_of(&draft(90_000)), 90);
+    // speeds that share no rhythm leave nothing out
+    let c2 = GopCache::new(None);
+    for k in [10i64, 11, 13, 14, 16, 17] {
+        let f = filmcraft_media::cancel::with_draft(true, || c2.frame(&s, k * 1000)).expect("frame");
+        assert_eq!(index_of(&f), k as usize);
+    }
+    assert!(c2.shared.state.lock().unwrap().frames.contains_key(&12_000), "1.5x playback left a frame out");
+}
+
+#[test]
+fn keep_counts_uneven_timestamps_to_the_nearest_frame() {
+    let k = Keep { at: 1_000_000, frame: 1500, every: 2 };
+    for (pts, wanted) in [(1_000_000, true), (1_001_480, false), (1_003_020, true), (998_510, false), (997_000, true)] {
+        assert_eq!(k.wants(pts), wanted, "{pts}");
+    }
+    assert!(Keep { at: 0, frame: 0, every: 2 }.wants(123), "no frame duration: everything");
+    assert!(Keep { at: 0, frame: 1000, every: 1 }.wants(1000));
 }

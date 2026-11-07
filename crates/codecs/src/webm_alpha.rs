@@ -196,6 +196,10 @@ impl VideoDecoder for AlphaDecoder {
         self.color.set_draft(on);
         self.alpha.set_draft(on);
     }
+    fn set_keep(&mut self, keep: Option<crate::video::Keep>) {
+        self.color.set_keep(keep);
+        self.alpha.set_keep(keep);
+    }
     fn thread_limited(&self) -> bool {
         self.color.thread_limited()
     }

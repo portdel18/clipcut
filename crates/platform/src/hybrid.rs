@@ -13,7 +13,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use filmcraft_codecs::hw::StreamInfo;
-use filmcraft_codecs::{CodecError, DecodedFrame, Result, VideoDecoder};
+use filmcraft_codecs::{CodecError, DecodedFrame, Keep, Result, VideoDecoder};
 use filmcraft_isobmff::SampleEntry;
 
 /// Replay log bounds: samples and bytes since the last restart point.
@@ -32,6 +32,8 @@ pub struct HybridDecoder {
     entry: SampleEntry,
     info: StreamInfo,
     draft: bool,
+    /// Which pictures playback will ask for ([`VideoDecoder::set_keep`]).
+    keep: Option<Keep>,
     /// Samples (and pts) since the last restart point; `None` once the bound was passed.
     log: Option<Vec<(Vec<u8>, i64)>>,
     log_bytes: usize,
@@ -54,6 +56,7 @@ impl HybridDecoder {
             entry,
             info,
             draft: false,
+            keep: None,
             log: Some(Vec::new()),
             log_bytes: 0,
             last_irap: 0,
@@ -158,6 +161,7 @@ impl HybridDecoder {
         drop(hw);
         let mut sw = filmcraft_codecs::software_video_decoder(&self.entry).map_err(|e| CodecError::Decode(format!("{err}; no software decoder: {e}")))?;
         sw.set_draft(self.draft);
+        sw.set_keep(self.keep);
         self.sw = Some(sw);
         let Some(log) = self.log.take() else {
             // Too far from a restart point to replay: the next seek restarts in software.
@@ -264,6 +268,17 @@ impl VideoDecoder for HybridDecoder {
         }
         if let Some(sw) = self.sw.as_mut() {
             sw.set_draft(on);
+        }
+    }
+
+    fn set_keep(&mut self, keep: Option<Keep>) {
+        self.keep = keep;
+        // the hardware decoder then doesn't read back the pictures playback won't show
+        if let Some(hw) = self.hw.as_mut() {
+            hw.set_keep(keep);
+        }
+        if let Some(sw) = self.sw.as_mut() {
+            sw.set_keep(keep);
         }
     }
 }

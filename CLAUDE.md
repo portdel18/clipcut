@@ -146,6 +146,12 @@ remote `upstream`). Read `README.md` for what it is and the roadmap.
   video without a proxy through a source of its own (`ThumbProvider`, kept in
   `Studio::thumb_sources`); `tests/thumbs.rs` (4K: 47 pictures decoded for 3 when shared, 9 now).
   Check playback also stops the thumbnails while it measures (`PX.checking` in `pumpThumbs`).
+  The 0.4.11 report: 20–22 of 30 drawn on 4K 60, every frame decoded, read back and converted
+  (~7 ms each) though only every other one is shown. `GopCache` now tells the decoder playback's
+  rhythm (`keep_for`: the step between recent draft requests, in frames; `VideoDecoder::set_keep`,
+  `Keep::wants`) and Media Foundation decodes the others without reading them back (`left_out`,
+  "not read back" in the decoder notes). An exact request for a sample fed in draft mode starts
+  again (`draft_to`), so a paused frame is the one asked for.
 - The 0.4.9 report: decode 63 fps but the player drew 2.7 of 30 (0.4.8: 21), not reproduced here
   (no Media Foundation; drawing on the CPU is as before, ~100 ms a 1080×1920 HLG picture on 4
   cores). Since then the check's player line also gives one worker in order, the drawing alone,

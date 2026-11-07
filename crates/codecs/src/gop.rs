@@ -4,7 +4,7 @@
 //! from the preceding sync sample, and cache every decoded frame (keyed by pts). Playback requests
 //! for the next frames therefore hit the cache or continue the running decoder without re-seeking.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, VecDeque};
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError, TryLockError, Weak};
 use std::time::Duration;
@@ -15,7 +15,7 @@ use filmcraft_color::ColorInfo;
 use filmcraft_frame::{Region, VideoFrame};
 
 use crate::CodecError;
-use crate::video::VideoDecoder;
+use crate::video::{Keep, VideoDecoder};
 
 /// Crop region `r`, in the stream's full-size pixels, for a draft picture a decoder delivered
 /// smaller than that (a hardware decoder reads 4K back at half size for playback): divided by the
@@ -220,6 +220,52 @@ struct State {
     /// used the decoder since it was made: it is given up as soon as another background request
     /// is done, whatever the caches' recency.
     background: bool,
+    /// The pts of the latest draft requests (playback), to tell which pictures it will ask for
+    /// ([`keep_for`]); cleared by any other request.
+    requests: VecDeque<i64>,
+    /// Samples before this one were fed to the running decoder in draft mode: their pictures come
+    /// out draft (or left out), so an exact request for one doesn't carry on from it.
+    draft_to: usize,
+}
+
+/// Draft requests [`keep_for`] looks back over.
+const KEEP_REQUESTS: usize = 8;
+/// The most frames apart playback's pictures may be for the others to be left out (8× at 60
+/// fps shown at 30 is 16; beyond, skipping is a seek away anyway).
+const KEEP_MOST: i64 = 16;
+
+/// Which pictures draft playback will ask for, from its latest requests (`requests`, the
+/// newest last): when they all fall on every n-th frame (n ≥ 2: a 60 fps video shown at 30
+/// pictures a second asks for every other frame), the others need not be read back. Frames are
+/// counted in the local frame duration around sample `i` (the median gap between presentation
+/// times nearby), to the nearest, so uneven phone timestamps count right. `None` until there
+/// are three requests, or when they don't share a rhythm (a speed curve, 50 % speed).
+fn keep_for(requests: &VecDeque<i64>, s: &dyn VideoSamples, i: usize) -> Option<Keep> {
+    let &want = requests.back()?;
+    if requests.len() < 3 {
+        return None;
+    }
+    let n = s.count();
+    let (lo, hi) = (i.saturating_sub(16), (i + 17).min(n));
+    let mut pts: Vec<i64> = (lo..hi).map(|k| s.pts(k)).collect();
+    pts.sort_unstable();
+    let mut gaps: Vec<i64> = pts.windows(2).map(|w| w[1] - w[0]).filter(|g| *g > 0).collect();
+    if gaps.is_empty() {
+        return None;
+    }
+    gaps.sort_unstable();
+    let frame = gaps[gaps.len() / 2];
+    let frames_from_want = |p: i64| {
+        let (d, f) = (i128::from(p) - i128::from(want), i128::from(frame));
+        (2 * d + f).div_euclid(2 * f).unsigned_abs()
+    };
+    let every = requests.iter().fold(0u128, |g, &p| gcd(g, frames_from_want(p)));
+    let every = i64::try_from(every).ok().filter(|e| (2..=KEEP_MOST).contains(e))?;
+    Some(Keep { at: want, frame, every })
+}
+
+fn gcd(a: u128, b: u128) -> u128 {
+    if b == 0 { a } else { gcd(b, a % b) }
 }
 
 impl State {
@@ -598,6 +644,8 @@ impl GopCache {
                 out_max: i64::MIN,
                 frames: BTreeMap::new(),
                 drafts: Default::default(),
+                requests: VecDeque::new(),
+                draft_to: 0,
                 bytes: 0,
                 last_used: Instant::now(),
                 pin: i64::MIN,
@@ -747,6 +795,14 @@ impl GopCache {
         let _decoding = DecodingGuard::enter(me);
         st.last_used = Instant::now();
         st.pin = want_pts;
+        if draft {
+            st.requests.push_back(want_pts);
+            if st.requests.len() > KEEP_REQUESTS {
+                st.requests.pop_front();
+            }
+        } else {
+            st.requests.clear();
+        }
         let background = filmcraft_media::cancel::background();
         if let Some(f) = st.cached(want_pts, draft).cloned() {
             HITS.fetch_add(1, Ordering::Relaxed);
@@ -806,7 +862,10 @@ impl GopCache {
         // Decoding on through a short stretch into the next GOP is cheaper than a restart, and
         // playback wants those frames anyway.
         let near = st.next <= key && key - st.next <= CONTINUE_THROUGH;
-        let continuing = running && (st.next > key || near) && (i >= st.next || (st.start <= i && want_pts > st.out_max));
+        // An exact request for a sample already fed in draft mode starts again: its picture comes
+        // out draft (or not at all), so carrying on would hand back the nearest exact one before it
+        // (a paused frame one off from where playback stopped).
+        let continuing = running && (st.next > key || near) && (i >= st.next || (st.start <= i && want_pts > st.out_max && (draft || i >= st.draft_to)));
         if !continuing {
             SEEKS.fetch_add(1, Ordering::Relaxed);
             // The container's sync flags may be wrong for the codec (an MP4 without `stss` marks
@@ -824,6 +883,7 @@ impl GopCache {
             st.next = key;
             st.start = key;
             st.out_max = i64::MIN;
+            st.draft_to = 0;
         }
         let limit = (i.max(st.next) + 64).min(n);
         let late = late_before.unwrap_or(i64::MIN).min(want_pts);
@@ -831,6 +891,8 @@ impl GopCache {
             return Err(CodecError::Decode("no video decoder".into()));
         };
         decoder.set_draft(draft);
+        // the pictures playback won't ask for need not be read back
+        decoder.set_keep(if draft { keep_for(&st.requests, s, i) } else { None });
         while st.next < limit {
             if filmcraft_media::cancel::cancelled() {
                 // The decoder state stays consistent (`next`, `out_max`): a later request continues.
@@ -848,6 +910,9 @@ impl GopCache {
             };
             let out = timed(|| decoder.decode(&data, s.pts(k)))?;
             st.next += 1;
+            if draft {
+                st.draft_to = st.next;
+            }
             DECODED.fetch_add(1, Ordering::Relaxed);
             self.store_output(st, out);
             if st.cached(want_pts, draft).is_some() {

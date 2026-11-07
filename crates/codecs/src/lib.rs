@@ -48,7 +48,7 @@ pub use mp4::Mp4Source;
 pub use mpeg::MpegSource;
 pub use mxf::MxfSource;
 pub use ogg::OggSource;
-pub use video::{DecodedFrame, VideoDecoder, VideoDecoderFactory};
+pub use video::{DecodedFrame, Keep, VideoDecoder, VideoDecoderFactory};
 pub use y4m::Y4mSource;
 
 #[derive(Debug, thiserror::Error)]
