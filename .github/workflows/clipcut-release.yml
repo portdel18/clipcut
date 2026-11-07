@@ -76,7 +76,7 @@ jobs:
       - name: Cache cargo builds
         uses: Swatinem/rust-cache@v2
         with:
-          shared-key: clipcut-windows
+          shared-key: clipcut-windows-2
           save-if: false
 
       - name: ffmpeg (self-test clip only; never shipped)

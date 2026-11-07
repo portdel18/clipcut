@@ -14,13 +14,16 @@ permissions:
 
 concurrency:
   group: clipcut-windows-${{ github.ref }}
-  cancel-in-progress: true
+  # a newer push to a PR replaces its run; main's runs always finish, since they save the build
+  # cache every PR starts from (a run that is cancelled saves nothing)
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   windows:
     runs-on: windows-latest
-    # tests, the installer and the end-to-end update take about 2 hours since AI noise reduction
-    # (tract) joined the build, and the build cache is saved after them: room to finish
+    # tests, the installer and the end-to-end update took about 2.5 hours while the tests were
+    # linked with release's LTO (the ci profile has none), and the build cache is saved after
+    # them: room to finish
     timeout-minutes: 240
     env:
       CARGO_TERM_COLOR: always
@@ -37,7 +40,11 @@ jobs:
       - name: Cache cargo builds
         uses: Swatinem/rust-cache@v2
         with:
-          shared-key: clipcut-windows
+          # shared with the release workflow; bumped when what is built changes (the ci profile)
+          shared-key: clipcut-windows-2
+          # only main saves it: PRs read main's, and their own copies (which no other branch can
+          # read) would push it out of the repository's cache space
+          save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - name: ffmpeg (test clips only; never shipped)
         shell: pwsh
@@ -66,10 +73,10 @@ jobs:
         # tests that need ffmpeg fail rather than skip without it
         env:
           FILMCRAFT_REQUIRE_ORACLES: "1"
-        run: cargo test --release -p clipcut-core
+        run: cargo test --profile ci -p clipcut-core
 
       - name: Test the Media Foundation encoder's settings
-        run: cargo test --release -p filmcraft-platform media_foundation::export
+        run: cargo test --profile ci -p filmcraft-platform media_foundation::export
 
       - name: Build ClipCut and its installer
         working-directory: apps/clipcut
