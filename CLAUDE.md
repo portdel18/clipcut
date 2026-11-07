@@ -24,6 +24,10 @@ remote `upstream`). Read `README.md` for what it is and the roadmap.
   `js/core.js`, "Inside ClipCut"); frames go to `src/graphics.rs` as raw request bodies, and
   `clipcut-core/src/graphics.rs` imports them as an image sequence.
 - `.github/workflows/clipcut-windows.yml`: tests, the NSIS installer, the self-test, the artifact.
+  Its tests build with the `ci` profile (release's optimisation without its LTO, which every one
+  of ~25 test programs paid for at link time: 2 of the 2.5 hours); the installer stays release.
+  Only main's runs save the build cache (`save-if`) and they are never cancelled, so each PR
+  starts from main's; bump `shared-key` in both workflows when what is built changes.
   `.github/workflows/clipcut-release.yml` publishes a release (tag `v*` or a version typed in
   Actions): code signing and update signing switch on with the repository's secrets and variables
   (`packaging/clipcut/RELEASING.md`). The updater (`src/updates.rs`) is registered only when
