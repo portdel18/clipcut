@@ -144,7 +144,9 @@ fn decode(p: &MediaProbe) -> Decode {
 
 /// The player at work on a clip, as [`player`] times it.
 struct Played {
-    /// Pictures drawn a second with the player's 3 workers, and with one worker in order.
+    /// The first picture: from wherever the decoder was, usually back to a keyframe, ms.
+    start_ms: f64,
+    /// Pictures drawn a second with the player's 3 workers once started, and with one worker in order.
     pps: f64,
     in_order: f64,
     /// Pictures a second the player shows there.
@@ -156,14 +158,21 @@ struct Played {
     hw: filmcraft_codecs::hw::HwStats,
 }
 
-/// The player at work on `p`'s clip on the timeline (`span`, seconds): up to 2 seconds of its
-/// middle drawn as playback draws it (draft, every `render_step`-th frame, 3 workers), then a
-/// second of it by one worker in order, and one picture drawn again from the decoder's cache.
+/// The player at work on `p`'s clip on the timeline (`span`, seconds): its first picture (playback
+/// starting there), then up to 2 seconds of its middle drawn as playback draws it (draft, every
+/// `render_step`-th frame, 3 workers), then a second of it by one worker in order, and one picture
+/// drawn again from the decoder's cache. The start is timed apart: in 0.4.12 the jump back to a
+/// keyframe (about a second on 4K 60) was most of the 3 workers' time, so they read as slower
+/// than one worker.
 fn player(feed: &FrameFeed, span: (f64, f64)) -> Played {
     let (start, end) = span;
     let t0 = start.max((start + end) / 2.0 - 1.0);
     let step = crate::ahead::render_step(1.0, feed.fps());
     let (first, last) = (feed.frame_at(t0), feed.frame_at(end.min(t0 + 2.0)));
+    let t = Instant::now();
+    let _ = feed.render(first, true);
+    let start_ms = t.elapsed().as_secs_f64() * 1000.0;
+    let first = first + step;
     let (gop0, hw0) = (filmcraft_codecs::gop_stats(), filmcraft_codecs::hw::hw_stats());
     let next = std::sync::atomic::AtomicI64::new(first);
     let drawn = std::sync::atomic::AtomicU32::new(0);
@@ -223,7 +232,7 @@ fn player(feed: &FrameFeed, span: (f64, f64)) -> Played {
         declined: hw1.declined.saturating_sub(hw0.declined),
         fallbacks: hw1.fallbacks.saturating_sub(hw0.fallbacks),
     };
-    Played { pps, in_order, shown: feed.fps() / step as f64, draw_ms, gop, hw }
+    Played { start_ms, pps, in_order, shown: feed.fps() / step as f64, draw_ms, gop, hw }
 }
 
 /// The player's numbers in the report: what drew, what decoded, how.
@@ -231,7 +240,8 @@ fn played_words(p: &Played) -> String {
     let g = &p.gop;
     let per = if g.decoded > 0 { g.decode_ns as f64 / 1e6 / g.decoded as f64 } else { 0.0 };
     format!(
-        "{:.1} pictures a second drawn, {:.0} shown; one worker in order {:.1}; drawing alone {:.0} ms a picture\n  while playing: {} pictures decoded ({:.1} ms each, {} by the graphics card), {} seeks, {} of {} requests from the cache, {} draft, {} evicted, {} new hardware decoders, {} turned down, {} fell back to the processor",
+        "starting {:.0} ms, then {:.1} pictures a second drawn, {:.0} shown; one worker in order {:.1}; drawing alone {:.0} ms a picture\n  while playing: {} pictures decoded ({:.1} ms each, {} by the graphics card), {} seeks, {} of {} requests from the cache, {} draft, {} evicted, {} new hardware decoders, {} turned down, {} fell back to the processor",
+        p.start_ms,
         p.pps,
         p.shown,
         p.in_order,
@@ -331,16 +341,16 @@ pub fn run(probes: &[MediaProbe], caps: Option<&str>, version: &str, feed: Optio
             None => findings.push("Drive: ClipCut couldn't read the file to measure it.".into()),
         }
         // the player as a whole: decoding, the colour conversion (HDR to normal) and drawing
-        match drawn.as_ref().map(|p| (p.pps, p.shown)) {
-            Some((pps, shown)) => {
+        match drawn.as_ref().map(|p| (p.pps, p.shown, p.start_ms)) {
+            Some((pps, shown, start)) => {
                 let keeps_up = pps >= shown * 0.95;
                 if ok && !keeps_up {
                     findings.push(format!(
-                        "Player: draws {pps:.0} pictures a second where it shows {shown:.0}: decoding and the drive keep up, so drawing the picture (and its HDR colour) is what slows it."
+                        "Player: once started ({start:.0} ms for the first picture), draws {pps:.0} pictures a second where it shows {shown:.0}: decoding and the drive keep up, so drawing the picture (and its HDR colour) is what slows it."
                     ));
                 } else {
                     findings.push(format!(
-                        "Player: draws {pps:.0} pictures a second where it shows {shown:.0}{}",
+                        "Player: once started ({start:.0} ms for the first picture), draws {pps:.0} pictures a second where it shows {shown:.0}{}",
                         if keeps_up { ", so it plays smoothly." } else { "." }
                     ));
                 }
@@ -423,8 +433,8 @@ mod tests {
             "{}",
             r.text
         );
-        assert!(v.findings.iter().any(|f| f.starts_with("Player: draws")), "{v:?}");
-        assert!(r.text.contains("pictures a second drawn, 30 shown"), "{}", r.text);
+        assert!(v.findings.iter().any(|f| f.starts_with("Player: once started")), "{v:?}");
+        assert!(r.text.contains("starting ") && r.text.contains("pictures a second drawn, 30 shown"), "{}", r.text);
         // what decoded the player's pictures and how long drawing alone takes
         assert!(
             r.text.contains("one worker in order") && r.text.contains("drawing alone") && r.text.contains("while playing:") && r.text.contains("seeks"),
