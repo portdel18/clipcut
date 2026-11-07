@@ -14,6 +14,30 @@ pub struct DecodedFrame {
     pub draft: bool,
 }
 
+/// The pictures playback will ask for ([`VideoDecoder::set_keep`]): every `every`-th frame,
+/// counted from the picture at `at`, frames being `frame` pts units apart. A video played at 30
+/// pictures a second shows every other frame of a 60 fps one; the frames in between are only
+/// decoded on the way.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Keep {
+    pub at: i64,
+    pub frame: i64,
+    pub every: i64,
+}
+
+impl Keep {
+    /// Whether the picture at `pts` is one playback will ask for (frames counted to the nearest,
+    /// so uneven phone timestamps count right).
+    pub fn wants(&self, pts: i64) -> bool {
+        if self.frame <= 0 || self.every <= 1 {
+            return true;
+        }
+        let (d, f) = (i128::from(pts) - i128::from(self.at), i128::from(self.frame));
+        let n = (2 * d + f).div_euclid(2 * f);
+        n.rem_euclid(i128::from(self.every)) == 0
+    }
+}
+
 /// A stateful video decoder. Samples are fed in decode order; pictures come out in
 /// presentation order (a decoder with reordering may return zero or several per call).
 pub trait VideoDecoder: Send {
@@ -45,6 +69,12 @@ pub trait VideoDecoder: Send {
     /// shortcuts that only change pictures nothing references, which come out flagged
     /// [`DecodedFrame::draft`]. Decoders without such a mode ignore it.
     fn set_draft(&mut self, _on: bool) {}
+    /// Which pictures playback will ask for ([`Keep`]), or `None` for all. A decoder may leave
+    /// the others out of its output: they are still decoded (later pictures may depend on
+    /// them), but a hardware decoder then doesn't copy them back to memory and convert them,
+    /// which is most of what a picture costs it. Decoders that can't save anything that way
+    /// ignore it. A request for a picture that was left out comes with the hint cleared.
+    fn set_keep(&mut self, _keep: Option<Keep>) {}
     /// Made with fewer worker threads than a decoder for playback gets, because it was made for
     /// background work ([`filmcraft_media::cancel::with_background`]). A request for a monitor
     /// replaces such a decoder.

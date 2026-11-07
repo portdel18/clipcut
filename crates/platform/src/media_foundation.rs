@@ -40,7 +40,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use filmcraft_codecs::hw::{NalCodec, StreamInfo};
-use filmcraft_codecs::{CodecError, DecodedFrame, Result, VideoDecoder};
+use filmcraft_codecs::{CodecError, DecodedFrame, Keep, Result, VideoDecoder};
 
 use self::gpu::{Gpu, Readback, SurfaceFormat};
 use self::mft::{MfApi, Mft, Poll};
@@ -110,6 +110,8 @@ pub struct Timings {
     pub readback: Duration,
     /// CPU: staging memory to planar `Yuv8` / `Yuv16`.
     pub convert: Duration,
+    /// Pictures decoded but not read back: playback won't show them ([`VideoDecoder::set_keep`]).
+    pub left_out: u64,
 }
 
 /// The Media Foundation decoder for one `avcC` / `hvcC` stream.
@@ -146,6 +148,9 @@ pub struct MfDecoder {
     /// Draft mode ([`VideoDecoder::set_draft`]: playback at half size or less): big
     /// pictures are read back at half size each way ([`biplanar::to_frame_halved`]).
     draft: bool,
+    /// The pictures playback will ask for: the others are dropped on the GPU, never read back
+    /// or converted (a 60 fps video shown at 30 pictures a second needs every other one).
+    keep: Option<Keep>,
 }
 
 /// Pictures at least this tall (the shorter side) are read back at half size in draft mode: a
@@ -187,6 +192,7 @@ impl MfDecoder {
             fed: 0,
             timings: Timings::default(),
             draft: false,
+            keep: None,
         })
     }
 
@@ -239,6 +245,13 @@ impl MfDecoder {
                     if !self.size_checked {
                         self.check_size()?;
                     }
+                    let pts = self.take_pts(t);
+                    if self.keep.is_some_and(|k| !k.wants(pts)) {
+                        // decoded (later pictures may refer to it), but nobody will look at it
+                        self.timings.left_out += 1;
+                        drop(sample);
+                        continue;
+                    }
                     let geometry = self.geometry;
                     let halve = self.draft && geometry.crop.2.min(geometry.crop.3) >= HALVE_FROM;
                     let (t0, mut convert) = (Instant::now(), Duration::ZERO);
@@ -254,7 +267,7 @@ impl MfDecoder {
                     if self.timings.frames.is_multiple_of(LOG_EVERY) {
                         let per = |d: Duration| d.as_secs_f64() * 1000.0 / self.timings.frames as f64;
                         log::info!(
-                            "hardware decoding: {} pictures of {}x{}{}: decode {:.1} ms, copy back {:.1} ms, convert {:.1} ms a picture",
+                            "hardware decoding: {} pictures of {}x{}{}: decode {:.1} ms, copy back {:.1} ms, convert {:.1} ms a picture; {} not read back (playback skips them)",
                             self.timings.frames,
                             geometry.crop.2,
                             geometry.crop.3,
@@ -262,9 +275,9 @@ impl MfDecoder {
                             per(self.timings.decode),
                             per(self.timings.readback),
                             per(self.timings.convert),
+                            self.timings.left_out,
                         );
                     }
-                    let pts = self.take_pts(t);
                     out.push(DecodedFrame { pts, frame, draft: halve });
                 }
             }
@@ -382,6 +395,10 @@ impl VideoDecoder for MfDecoder {
 
     fn set_draft(&mut self, on: bool) {
         self.draft = on;
+    }
+
+    fn set_keep(&mut self, keep: Option<Keep>) {
+        self.keep = keep;
     }
 
     fn is_random_access(&self, sample: &[u8]) -> Option<bool> {
