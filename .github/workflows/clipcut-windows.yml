@@ -29,7 +29,7 @@ jobs:
       CARGO_TERM_COLOR: always
       CARGO_INCREMENTAL: "0"
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Rust toolchain
         run: |
@@ -130,7 +130,7 @@ jobs:
           Remove-Item Env:\FILMCRAFT_MF_SOFTWARE_ENCODER -ErrorAction SilentlyContinue
 
       - name: Background model cache (Thumbnails' Remove background)
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: ${{ runner.temp }}/cutout-models
           key: clipcut-cutout-isnet-60920e99
@@ -146,7 +146,7 @@ jobs:
           if ($p.ExitCode -ne 0) { throw "the background model couldn't be downloaded and checked" }
 
       - name: Speech model cache (Whisper tiny, for the captions test)
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: ${{ runner.temp }}/models
           key: clipcut-speech-whisper-tiny-v1
@@ -214,7 +214,7 @@ jobs:
           }
 
       - name: Upload the installer
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: ClipCut-windows-installer
           path: |
@@ -289,7 +289,7 @@ jobs:
 
       - name: Upload the captions test's results
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: ClipCut-captions-test
           path: |
